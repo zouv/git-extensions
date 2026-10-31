@@ -11,8 +11,8 @@
 ## 状态快照
 
 - **最近更新**：2026-10-31
-- **整体状态**：✅ M1–M4 规划开发完成，无进行中开发任务；等待用户统一验收
-- **最后验证状态**：Windows `pnpm build` ✅、`cargo test` ✅ 13/13；Ubuntu 24.04 前端构建 ✅、`cargo test` ✅ 13/13；`cargo fmt --check` ✅；`sh check-docs.sh` ✅（0 警告）
+- **整体状态**：✅ 「提交图一直加载中」已修复（Tauri 事件权限缺失），自动化复测通过
+- **最后验证状态**：Windows `pnpm build` ✅、`cargo test` ✅ 14/14；`VITE_TEST_REPO` 自动化复测 ✅（17,783 提交正常加载）
 
 ---
 

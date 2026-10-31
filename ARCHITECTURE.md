@@ -57,6 +57,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | `src/types.ts` | 前后端共享 TS 类型（与 Rust serde 对应） | 改任何 IPC 字段 |
 | `src/api.ts` | invoke 封装、log-batch 订阅、日期格式化 | 改 IPC 调用方式 |
 | `src/settings.ts` | 行为设置类型、默认值、localStorage 白名单校验 | 新增 / 修改设置项 |
+| `src/vite-env.d.ts` | Vite 客户端类型声明（`import.meta.env`） | 使用 Vite 环境变量时 |
 | `src/App.tsx` | 全局状态、打开仓库、刷新、选择提交、页签、全局快捷键 | 改状态流 / 布局 / 快捷键 |
 | `src/components/RevisionGrid.tsx` | 虚拟化提交列表 + Canvas 分支图绘制 | 改列表 / 图渲染 |
 | `src/components/DiffView.tsx` | 文件列表 + 虚拟化 patch + Worker 异步语法高亮 | 改 diff 展示 |
@@ -75,6 +76,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | `src-tauri/examples/bench.rs` | release 大仓库日志 / 详情 / diff 性能测量 | 改测量指标或核心读路径 |
 | `src/styles.css` | 全部样式（暗色主题，按注释分段） | 改外观 |
 | `src-tauri/tauri.conf.json` | 窗口、标识、构建配置 | 改窗口 / 打包 |
+| `src-tauri/capabilities/default.json` | Tauri 2 权限配置（事件 listen/emit 等） | 新增 IPC / 事件权限 |
 | `package.json` / `src-tauri/Cargo.toml` | 前后端依赖与版本号 | 加依赖、发版 |
 
 ---
@@ -176,4 +178,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 - **按 ref 过滤仍走同一条日志流**：`start_log` 的可选 `revspec` 只改变 revwalk 起点，保留同一套分批、图布局与双端取消逻辑。
 - **设置输入按白名单恢复**：localStorage 可被手工修改，`loadSettings` 只接受布尔值及预定义的轮询间隔 / 日志上限，避免异常值造成高频轮询或超大加载。
 - **性能测量复用正式实现**：`run_log` 暴露给同步调用方，Tauri 命令仍在后台线程执行；`examples/bench.rs` 不复制日志算法，避免基准与产品行为漂移。
+- **日志流线程必须捕获 panic**：`start_log` 用 `catch_unwind` 包裹 `run_log`，发生 panic 时回传 `error` 批次；否则线程静默退出，前端永远收不到 `done` / `error`，界面卡在「加载中」。`app.emit` 失败也要 `eprintln!`，不能 `let _ =` 静默吞掉。
+- **Tauri 2 事件权限必须显式声明**：前端 `listen("log-batch")` 需要 `core:event:allow-listen`，否则权限拒绝导致提交图一直「加载中」；权限配置在 `src-tauri/capabilities/default.json`。
+- **自动化复测入口**：开发模式下设置 `VITE_TEST_REPO=<仓库路径>` 可自动打开仓库；前端关键状态通过 `report_frontend_state` 写入后端日志（`%TEMP%/git-extensions.log`），便于无 GUI 环境验证。
 - **图标资源必须跨平台齐全**：即使 bundle 未显式引用，`generate_context!` 在非 Windows 构建也需要 PNG；`icons/` 同时保留 ICO / PNG / ICNS，并在 bundle 配置中引用。

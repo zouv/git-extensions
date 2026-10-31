@@ -15,6 +15,19 @@ static LOG_GENERATION: AtomicU64 = AtomicU64::new(0);
 const BATCH_SIZE: usize = 300;
 pub const LOG_EVENT: &str = "log-batch";
 
+/// 开发期诊断：同时输出到控制台和临时目录日志文件，避免 GUI 下控制台一闪而过。
+macro_rules! ge_log {
+    ($($arg:tt)*) => {{
+        let msg = format!($($arg)*);
+        eprintln!("[git-extensions] {}", msg);
+        let path = std::env::temp_dir().join("git-extensions.log");
+        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            use std::io::Write;
+            let _ = writeln!(file, "[git-extensions] {}", msg);
+        }
+    }};
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RefLabel {
@@ -172,28 +185,57 @@ pub fn start_log(
 ) {
     LOG_GENERATION.store(request_id, Ordering::SeqCst);
     let max_count = max_count.unwrap_or(100_000) as usize;
+    ge_log!(
+        "start_log request_id={} path={} max_count={} revspec={:?}",
+        request_id,
+        path,
+        max_count,
+        revspec
+    );
     std::thread::spawn(move || {
         let cancelled = || LOG_GENERATION.load(Ordering::SeqCst) != request_id;
         let emit = |batch: LogBatch| {
-            let _ = app.emit(LOG_EVENT, batch);
+            if let Err(e) = app.emit(LOG_EVENT, batch) {
+                ge_log!("emit log-batch failed: {}", e);
+            }
         };
-        let result = run_log(
-            &path,
-            request_id,
-            max_count,
-            revspec.as_deref(),
-            &cancelled,
-            &emit,
-        );
-        if let Err(e) = result {
-            emit(LogBatch {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_log(
+                &path,
                 request_id,
-                revisions: Vec::new(),
-                done: true,
-                error: Some(e.to_string()),
-            });
+                max_count,
+                revspec.as_deref(),
+                &cancelled,
+                &emit,
+            )
+        }));
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                ge_log!("run_log error: {}", e);
+                emit(LogBatch {
+                    request_id,
+                    revisions: Vec::new(),
+                    done: true,
+                    error: Some(e.to_string()),
+                });
+            }
+            Err(_) => {
+                ge_log!("run_log panicked");
+                emit(LogBatch {
+                    request_id,
+                    revisions: Vec::new(),
+                    done: true,
+                    error: Some("日志加载线程发生内部错误".into()),
+                });
+            }
         }
     });
+}
+
+#[tauri::command]
+pub fn report_frontend_state(state: String) {
+    ge_log!("frontend state: {}", state);
 }
 
 /// 同步执行日志遍历；命令在后台线程调用，性能测量工具也可复用同一实现。
@@ -205,25 +247,31 @@ pub fn run_log(
     cancelled: &dyn Fn() -> bool,
     emit: &dyn Fn(LogBatch),
 ) -> GitResult<()> {
+    ge_log!("run_log open repo: {}", path);
     let repo = open(path)?;
     let refs = collect_refs(&repo);
+    ge_log!("collect_refs: {} oids", refs.len());
     let mut walk = repo.revwalk()?;
     walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
+    let mut pushed = 0usize;
     match revspec.filter(|s| !s.trim().is_empty()) {
         // 指定 ref（左侧面板过滤）：只从该 ref 出发
         Some(spec) => {
             let commit = repo.revparse_single(spec)?.peel_to_commit()?;
             walk.push(commit.id())?;
+            pushed = 1;
         }
         // --all：把所有 ref 的 tip 作为起点，revwalk 自己去重
         None => {
             for reference in repo.references()?.flatten() {
                 if let Ok(commit) = reference.peel_to_commit() {
                     let _ = walk.push(commit.id());
+                    pushed += 1;
                 }
             }
         }
     }
+    ge_log!("revwalk pushed {} tips", pushed);
     if repo.is_empty()? {
         emit(LogBatch {
             request_id,
@@ -239,6 +287,12 @@ pub fn run_log(
     let mut count = 0usize;
     for item in walk {
         if cancelled() || count >= max_count {
+            ge_log!(
+                "walk stop cancelled={} count={} max_count={}",
+                cancelled(),
+                count,
+                max_count
+            );
             break;
         }
         let oid = item?;
@@ -260,6 +314,7 @@ pub fn run_log(
         });
         count += 1;
         if batch.len() >= BATCH_SIZE {
+            ge_log!("emit batch size={} done=false", batch.len());
             emit(LogBatch {
                 request_id,
                 revisions: std::mem::take(&mut batch),
@@ -269,6 +324,11 @@ pub fn run_log(
         }
     }
     if !cancelled() {
+        ge_log!(
+            "emit final batch size={} done=true total={}",
+            batch.len(),
+            count
+        );
         emit(LogBatch {
             request_id,
             revisions: std::mem::take(&mut batch),

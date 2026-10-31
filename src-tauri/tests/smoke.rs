@@ -375,3 +375,125 @@ fn blame_and_file_history() {
     assert_eq!(history[0].subject, "c2");
     assert_eq!(history[1].subject, "c1");
 }
+
+#[test]
+fn run_log_collects_all_commits() {
+    let t = TempRepo::new("run-log");
+    let path = t.path();
+    t.write("a.txt", "one\n");
+    git::cli::stage_files(path.clone(), vec!["a.txt".into()]).unwrap();
+    git::cli::commit(path.clone(), "c1".into()).unwrap();
+    t.write("a.txt", "two\n");
+    git::cli::stage_files(path.clone(), vec!["a.txt".into()]).unwrap();
+    git::cli::commit(path.clone(), "c2".into()).unwrap();
+
+    let batches = std::cell::RefCell::new(Vec::new());
+    git::log::run_log(&path, 1, 1000, None, &|| false, &|b| {
+        batches.borrow_mut().push(b)
+    })
+    .unwrap();
+    let batches = batches.into_inner();
+
+    assert_eq!(batches.len(), 1);
+    assert!(batches[0].done);
+    assert!(batches[0].error.is_none());
+    assert_eq!(batches[0].revisions.len(), 2);
+    assert_eq!(batches[0].revisions[0].subject, "c2");
+    assert_eq!(batches[0].revisions[1].subject, "c1");
+}
+
+#[test]
+fn run_log_empty_repo_emits_done() {
+    let t = TempRepo::new("run-log-empty");
+    let path = t.path();
+    let batches = std::cell::RefCell::new(Vec::new());
+    git::log::run_log(&path, 1, 1000, None, &|| false, &|b| {
+        batches.borrow_mut().push(b)
+    })
+    .unwrap();
+    let batches = batches.into_inner();
+    assert_eq!(batches.len(), 1);
+    assert!(batches[0].done);
+    assert!(batches[0].revisions.is_empty());
+}
+
+#[test]
+fn run_log_respects_max_count() {
+    let t = TempRepo::new("run-log-limit");
+    let path = t.path();
+    for i in 0..5 {
+        t.write("a.txt", &format!("{}\n", i));
+        git::cli::stage_files(path.clone(), vec!["a.txt".into()]).unwrap();
+        git::cli::commit(path.clone(), format!("c{}", i)).unwrap();
+    }
+    let batches = std::cell::RefCell::new(Vec::new());
+    git::log::run_log(&path, 1, 2, None, &|| false, &|b| {
+        batches.borrow_mut().push(b)
+    })
+    .unwrap();
+    let batches = batches.into_inner();
+    let total: usize = batches.iter().map(|b| b.revisions.len()).sum();
+    assert_eq!(total, 2);
+    assert!(batches.last().unwrap().done);
+}
+
+#[test]
+fn run_log_revspec_filters_history() {
+    let t = TempRepo::new("run-log-revspec");
+    let path = t.path();
+    t.write("a.txt", "one\n");
+    git::cli::stage_files(path.clone(), vec!["a.txt".into()]).unwrap();
+    git::cli::commit(path.clone(), "c1".into()).unwrap();
+    let main = git::repo::open_repo(path.clone())
+        .unwrap()
+        .head_branch
+        .unwrap();
+    git::cli::create_branch(path.clone(), "feature".into(), None).unwrap();
+    git::cli::checkout_branch(path.clone(), "feature".into()).unwrap();
+    t.write("b.txt", "b\n");
+    git::cli::stage_files(path.clone(), vec!["b.txt".into()]).unwrap();
+    git::cli::commit(path.clone(), "c2".into()).unwrap();
+    git::cli::checkout_branch(path.clone(), main.clone()).unwrap();
+
+    let batches = std::cell::RefCell::new(Vec::new());
+    git::log::run_log(&path, 1, 1000, Some("feature"), &|| false, &|b| {
+        batches.borrow_mut().push(b)
+    })
+    .unwrap();
+    let revisions: Vec<_> = batches
+        .into_inner()
+        .into_iter()
+        .flat_map(|b| b.revisions)
+        .collect();
+    assert_eq!(revisions.len(), 2);
+    assert!(revisions.iter().any(|r| r.subject == "c2"));
+    assert!(revisions.iter().any(|r| r.subject == "c1"));
+}
+
+#[test]
+fn run_log_cancel_stops_without_final_batch() {
+    let t = TempRepo::new("run-log-cancel");
+    let path = t.path();
+    t.write("a.txt", "one\n");
+    git::cli::stage_files(path.clone(), vec!["a.txt".into()]).unwrap();
+    git::cli::commit(path.clone(), "c1".into()).unwrap();
+
+    let batches = std::cell::RefCell::new(Vec::new());
+    git::log::run_log(&path, 1, 1000, None, &|| true, &|b| {
+        batches.borrow_mut().push(b)
+    })
+    .unwrap();
+    assert!(batches.into_inner().is_empty());
+}
+
+#[test]
+fn run_log_invalid_revspec_returns_error() {
+    let t = TempRepo::new("run-log-bad-ref");
+    let path = t.path();
+    t.write("a.txt", "one\n");
+    git::cli::stage_files(path.clone(), vec!["a.txt".into()]).unwrap();
+    git::cli::commit(path.clone(), "c1".into()).unwrap();
+
+    let result = git::log::run_log(&path, 1, 1000, Some("no-such-ref"), &|| false, &|_| {});
+    assert!(result.is_err());
+}

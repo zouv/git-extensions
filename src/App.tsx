@@ -31,6 +31,11 @@ type Tab = "commit" | "diff" | "changes";
 const EMPTY_STATUS: StatusSnapshot = { staged: [], unstaged: [] };
 const LAST_REPO_KEY = "git-extensions.lastRepo";
 
+/** 开发期日志：生产构建完全移除，避免刷屏。 */
+function debug(...args: unknown[]) {
+  if (import.meta.env.DEV) console.log("[git-extensions]", ...args);
+}
+
 export default function App() {
   const [repo, setRepo] = useState<RepoInfo | null>(null);
   const [revisions, setRevisions] = useState<Revision[]>([]);
@@ -65,6 +70,7 @@ export default function App() {
   const statusRef = useRef<StatusSnapshot>(EMPTY_STATUS);
   const busyRef = useRef(false);
   const settingsRef = useRef(settings);
+  const logListenReadyRef = useRef<Promise<unknown> | null>(null);
   repoRef.current = repo;
   statusRef.current = status;
   busyRef.current = busy;
@@ -72,10 +78,17 @@ export default function App() {
 
   useEffect(() => saveSettings(settings), [settings]);
 
+  // 开发期诊断：把前端关键状态写入后端日志，便于自动化复测。
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    void api.reportFrontendState(JSON.stringify({ revisions: revisions.length, logLoading, requestId: requestIdRef.current }));
+  }, [revisions.length, logLoading]);
+
   // 日志流订阅只挂一次；过期批次（切换仓库 / 再次刷新）直接丢弃
   useEffect(() => {
     const unlisten = onLogBatch((batch) => {
-      if (batch.requestId !== requestIdRef.current) return;
+      debug("log-batch", { requestId: batch.requestId, current: requestIdRef.current, count: batch.revisions.length, done: batch.done, error: batch.error });
+      if (Number(batch.requestId) !== requestIdRef.current) return;
       if (batch.error) {
         setMessage(batch.error);
         setLogLoading(false);
@@ -86,9 +99,22 @@ export default function App() {
       }
       if (batch.done) setLogLoading(false);
     });
+    logListenReadyRef.current = unlisten;
     return () => {
       void unlisten.then((fn) => fn());
     };
+  }, []);
+
+  /** 等事件监听注册完成后再启动日志流，避免开发模式 StrictMode 下的竞态丢批次。 */
+  const startLogWhenReady = useCallback((path: string, id: number, maxCount: number, revspec?: string | null) => {
+    debug("startLog", { path, id, maxCount, revspec });
+    void Promise.resolve(logListenReadyRef.current)
+      .then(() => api.startLog(path, id, maxCount, revspec))
+      .catch((e) => {
+        if (import.meta.env.DEV) void api.reportFrontendState(JSON.stringify({ startLogError: String(e) }));
+        setMessage(String(e));
+        setLogLoading(false);
+      });
   }, []);
 
   const refreshAux = useCallback((path: string) => {
@@ -112,20 +138,19 @@ export default function App() {
     setCommitDiff([]);
     setContained(null);
     setSelectedOid(null);
-    void api.startLog(current.path, id, settings.maxLogCount, leftRef).catch((e) => {
-      setMessage(String(e));
-      setLogLoading(false);
-    });
+    startLogWhenReady(current.path, id, settings.maxLogCount, leftRef);
     refreshAux(current.path);
     void api.openRepo(current.path).then(setRepo).catch(() => undefined);
-  }, [refreshAux, leftRef, settings.maxLogCount]);
+  }, [refreshAux, leftRef, settings.maxLogCount, startLogWhenReady]);
 
   const openRepo = useCallback((path: string) => {
+    if (import.meta.env.DEV) void api.reportFrontendState(JSON.stringify({ openRepoStart: path }));
     // 使旧的日志流立即失效，再打开新仓库
     ++requestIdRef.current;
     api
       .openRepo(path)
       .then((info) => {
+        if (import.meta.env.DEV) void api.reportFrontendState(JSON.stringify({ openRepoDone: info.path }));
         setRepo(info);
         localStorage.setItem(LAST_REPO_KEY, info.path);
         setMessage(`已打开 ${info.path}`);
@@ -139,15 +164,26 @@ export default function App() {
         setSelectedOid(null);
         setLeftRef(null);
         setFilter("");
-        void api.startLog(info.path, id, settingsRef.current.maxLogCount);
+        startLogWhenReady(info.path, id, settingsRef.current.maxLogCount);
         refreshAux(info.path);
       })
-      .catch((e) => setMessage(String(e)));
-  }, [refreshAux]);
+      .catch((e) => {
+        if (import.meta.env.DEV) void api.reportFrontendState(JSON.stringify({ openRepoError: String(e) }));
+        setMessage(String(e));
+      });
+  }, [refreshAux, startLogWhenReady]);
 
   useEffect(() => {
     const last = localStorage.getItem(LAST_REPO_KEY);
-    if (last) openRepo(last);
+    if (import.meta.env.DEV) {
+      void api.reportFrontendState(JSON.stringify({ init: true, last, testRepo: import.meta.env.VITE_TEST_REPO }));
+    }
+    if (import.meta.env.DEV && import.meta.env.VITE_TEST_REPO) {
+      // 自动化复测入口：通过 VITE_TEST_REPO 指定仓库，避免手动操作 GUI。
+      openRepo(import.meta.env.VITE_TEST_REPO);
+    } else if (last) {
+      openRepo(last);
+    }
   }, [openRepo]);
 
   // 设置中的日志上限变化后重载，其余设置即时生效。

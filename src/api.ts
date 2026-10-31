@@ -21,6 +21,7 @@ export const api = {
   getBranches: (path: string) => invoke<BranchInfo[]>("get_branches", { path }),
   startLog: (path: string, requestId: number, maxCount?: number, revspec?: string | null) =>
     invoke<void>("start_log", { path, requestId, maxCount, revspec }),
+  reportFrontendState: (state: string) => invoke<void>("report_frontend_state", { state }),
   getCommit: (path: string, oid: string) =>
     invoke<CommitDetail>("get_commit", { path, oid }),
   getCommitDiff: (path: string, oid: string) =>

@@ -9,6 +9,7 @@ pub fn run() {
             git::repo::get_branches,
             git::repo::get_ahead_behind,
             git::log::start_log,
+            git::log::report_frontend_state,
             git::diff::get_commit,
             git::diff::get_commit_diff,
             git::diff::get_worktree_diff,
