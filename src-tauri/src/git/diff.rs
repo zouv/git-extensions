@@ -2,7 +2,7 @@ use git2::{Delta, Diff, DiffOptions};
 use serde::Serialize;
 
 use super::open;
-use crate::error::GitResult;
+use crate::error::{GitError, GitResult};
 
 /// 单文件 patch 超过该大小即截断，避免巨型 diff 撑爆 IPC 与前端渲染。
 const MAX_PATCH_BYTES: usize = 512 * 1024;
@@ -60,7 +60,7 @@ fn collect(diff: &Diff<'_>) -> GitResult<Vec<FileDiff>> {
         if !file.is_binary {
             if let Some(mut patch) = git2::Patch::from_diff(diff, idx)? {
                 let buf = patch.to_buf()?;
-                let text = buf.as_str().unwrap_or_default();
+                let text = String::from_utf8_lossy(&buf);
                 if text.len() > MAX_PATCH_BYTES {
                     let mut end = MAX_PATCH_BYTES;
                     while !text.is_char_boundary(end) {
@@ -76,6 +76,41 @@ fn collect(diff: &Diff<'_>) -> GitResult<Vec<FileDiff>> {
         files.push(file);
     }
     Ok(files)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareDiff {
+    pub base_oid: String,
+    pub target_oid: String,
+    pub files: Vec<FileDiff>,
+}
+
+/// 比较两个 commit-ish 的 tree；base → target 的方向与 patch 一致。
+#[tauri::command]
+pub fn get_compare_diff(path: String, base: String, target: String) -> GitResult<CompareDiff> {
+    let repo = open(&path)?;
+    let base_commit = repo
+        .revparse_single(&base)
+        .map_err(|e| GitError::InvalidInput(format!("bad base revision {base}: {e}")))?
+        .peel_to_commit()?;
+    let target_commit = repo
+        .revparse_single(&target)
+        .map_err(|e| GitError::InvalidInput(format!("bad target revision {target}: {e}")))?
+        .peel_to_commit()?;
+    let base_tree = base_commit.tree()?;
+    let target_tree = target_commit.tree()?;
+    let mut diff = repo.diff_tree_to_tree(
+        Some(&base_tree),
+        Some(&target_tree),
+        Some(&mut DiffOptions::new()),
+    )?;
+    diff.find_similar(Some(&mut git2::DiffFindOptions::new()))?;
+    Ok(CompareDiff {
+        base_oid: base_commit.id().to_string(),
+        target_oid: target_commit.id().to_string(),
+        files: collect(&diff)?,
+    })
 }
 
 #[tauri::command]

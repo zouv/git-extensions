@@ -1,101 +1,65 @@
-import { useEffect, useState } from "react";
 import type { AheadBehind, RepoInfo } from "../types";
+import Icon from "../ui/Icon";
+import type { IconName } from "../ui/Icon";
 
 interface Props {
-  repo: RepoInfo | null;
+  repo: RepoInfo;
   loading: boolean;
   busy: boolean;
   revisionCount: number;
   aheadBehind: AheadBehind | null;
   filter: string;
+  workspace: "history" | "changes";
+  inspectorVisible: boolean;
   onFilter: (value: string) => void;
-  onOpen: (path: string) => void;
-  openRequest: number;
+  onOpen: () => void;
   onRefresh: () => void;
   onToggleLeft: () => void;
+  onToggleInspector: () => void;
   onBranches: () => void;
   onStash: () => void;
   onTags: () => void;
   onSubmodules: () => void;
   onSettings: () => void;
+  onCompare: () => void;
   onRemote: (kind: "fetch" | "pull" | "push") => void;
+}
+
+function ToolButton({ icon, label, title, onClick, disabled = false, primary = false }: { icon: IconName; label?: string; title: string; onClick: () => void; disabled?: boolean; primary?: boolean }) {
+  return <button className={`tool-button${primary ? " primary" : ""}`} title={title} aria-label={label ?? title} disabled={disabled} onClick={onClick}><Icon name={icon} />{label && <span>{label}</span>}</button>;
 }
 
 export default function Toolbar(props: Props) {
   const { repo, loading, busy, revisionCount, aheadBehind, filter } = props;
-  const [showOpen, setShowOpen] = useState(false);
-  const [path, setPath] = useState("");
-
-  useEffect(() => {
-    if (props.openRequest === 0) return;
-    setPath(repo?.path ?? "");
-    setShowOpen(true);
-  }, [props.openRequest]);
-
-  const open = () => {
-    if (!path.trim()) return;
-    props.onOpen(path.trim());
-    setShowOpen(false);
-  };
-
   return (
-    <>
-      <div className="toolbar">
-        <button onClick={() => { setPath(repo?.path ?? ""); setShowOpen(true); }} title="打开仓库 (Ctrl+O)">打开仓库</button>
-        <button disabled={!repo} onClick={props.onToggleLeft} title="显示 / 隐藏左侧引用面板">引用</button>
-        <button disabled={!repo || loading || busy} onClick={props.onRefresh} title="刷新 (F5)">刷新</button>
-        <button disabled={!repo || busy} onClick={props.onBranches}>分支</button>
-        <button disabled={!repo || busy} onClick={props.onStash}>Stash</button>
-        <button disabled={!repo || busy} onClick={props.onTags}>标签</button>
-        <button disabled={!repo || busy} onClick={props.onSubmodules} title="子模块 (Ctrl+Shift+M)">子模块</button>
-        <button onClick={props.onSettings} title="设置与快捷键 (Ctrl+,)">设置</button>
-        <span className="toolbar-separator" />
-        <button disabled={!repo || busy} onClick={() => props.onRemote("fetch")}>Fetch</button>
-        <button disabled={!repo || busy} onClick={() => props.onRemote("pull")}>Pull</button>
-        <button disabled={!repo || busy} onClick={() => props.onRemote("push")}>Push</button>
-        {repo && (
-          <span className="repo-label">
-            <strong>{repo.name}</strong>
-            {repo.headBranch && (
-              <span className="head-branch">
-                [{repo.headBranch}
-                {aheadBehind && (aheadBehind.ahead > 0 || aheadBehind.behind > 0)
-                  ? ` ↑${aheadBehind.ahead} ↓${aheadBehind.behind}`
-                  : ""}]
-              </span>
-            )}
-            <span className="revision-count">{revisionCount} 条提交{loading ? "，加载中…" : busy ? "，操作中…" : ""}</span>
-          </span>
-        )}
-        {!repo && <span className="repo-label muted">尚未打开仓库</span>}
-        <input
-          id="revision-filter"
-          className="filter-input"
-          placeholder="过滤：信息 / 作者 / sha (Ctrl+F)"
-          value={filter}
-          onChange={(e) => props.onFilter(e.target.value)}
-          disabled={!repo}
-        />
+    <div className="toolbar">
+      <div className="toolbar-group">
+        <ToolButton icon="menu" title="显示 / 隐藏导航 (Ctrl+B)" onClick={props.onToggleLeft} />
+        <ToolButton icon="plus" title="打开仓库 (Ctrl+O)" onClick={props.onOpen} />
+        <ToolButton icon="refresh" title="刷新当前仓库 (F5)" disabled={loading || busy} onClick={props.onRefresh} />
       </div>
-      {showOpen && (
-        <div className="modal-backdrop" onClick={() => setShowOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>打开 Git 仓库</h3>
-            <input
-              className="repo-path-input"
-              placeholder="仓库路径，如 D:\Git\project"
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && open()}
-              autoFocus
-            />
-            <div className="modal-footer">
-              <button onClick={() => setShowOpen(false)}>取消</button>
-              <button className="primary" onClick={open}>打开</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+      <div className="toolbar-separator" />
+      <div className="toolbar-group branch-toolbar-group">
+        <button className="branch-switch" disabled={busy} onClick={props.onBranches} title="分支管理 (Ctrl+Shift+B)"><Icon name="branch" /><strong>{repo.headBranch ?? " detached HEAD"}</strong>{aheadBehind && (aheadBehind.ahead > 0 || aheadBehind.behind > 0) && <span>↑{aheadBehind.ahead} ↓{aheadBehind.behind}</span>}<Icon name="chevron-down" size={13} /></button>
+      </div>
+      <div className="toolbar-group remote-actions">
+        <ToolButton icon="fetch" label="Fetch" title="Fetch (Ctrl+Shift+F)" disabled={busy} onClick={() => props.onRemote("fetch")} />
+        <ToolButton icon="pull" label="Pull" title="Pull (Ctrl+Shift+L)" disabled={busy} onClick={() => props.onRemote("pull")} />
+        <ToolButton icon="push" label="Push" title="Push (Ctrl+Shift+P)" disabled={busy} onClick={() => props.onRemote("push")} />
+      </div>
+      <div className="toolbar-spacer" />
+      {props.workspace === "history" && <>
+        <ToolButton icon="compare" title="创建提交 / 分支对比" disabled={busy} onClick={props.onCompare} />
+        <div className="filter-box"><Icon name="search" /><input className="revision-filter" aria-label="过滤提交" placeholder="过滤提交… (Ctrl+F)" value={filter} onChange={(e) => props.onFilter(e.target.value)} />{filter && <button aria-label="清除过滤" onClick={() => props.onFilter("")}><Icon name="close" size={12} /></button>}</div>
+      </>}
+      <span className="revision-count" title="当前提交数量">{revisionCount.toLocaleString()} 条</span>
+      <ToolButton icon="panel" title="显示 / 隐藏检查器" onClick={props.onToggleInspector} primary={props.inspectorVisible} />
+      <ToolButton icon="settings" title="设置与快捷键 (Ctrl+,)" onClick={props.onSettings} />
+      <div className="toolbar-overflow">
+        <ToolButton icon="stash" title="Stash (Ctrl+Shift+S)" disabled={busy} onClick={props.onStash} />
+        <ToolButton icon="tag" title="标签 (Ctrl+Shift+T)" disabled={busy} onClick={props.onTags} />
+        <ToolButton icon="more" title="子模块 (Ctrl+Shift+M)" disabled={busy} onClick={props.onSubmodules} />
+      </div>
+    </div>
   );
 }

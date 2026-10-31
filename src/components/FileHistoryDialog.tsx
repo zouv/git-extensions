@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, formatDate } from "../api";
 import type { FileDiff, FileLogEntry } from "../types";
 import DiffView from "./DiffView";
+import Dialog from "../ui/Dialog";
 
 interface Props {
   repoPath: string;
@@ -55,37 +56,25 @@ export default function FileHistoryDialog({ repoPath, file, highlightEnabled, on
   }, [repoPath, file, selected]);
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
-        <h3>文件历史 · {file}</h3>
-        {loading && <div className="panel-hint">加载中…</div>}
-        {error && <div className="panel-hint">{error}</div>}
-        {!loading && !error && (
-          <>
-            <div className="history-list">
-              {entries.map((e) => (
-                <div
-                  key={e.oid}
-                  className={`history-item${selected === e.oid ? " selected" : ""}`}
-                  onClick={() => setSelected(e.oid)}
-                >
-                  <span className="blame-sha">{e.shortId}</span>
-                  <span className="history-subject" title={e.subject}>{e.subject}</span>
-                  <span className="blame-author">{e.authorName}</span>
-                  <span className="blame-date">{formatDate(e.authorTime)}</span>
-                </div>
-              ))}
-              {entries.length === 0 && <div className="panel-hint">（无历史记录）</div>}
-            </div>
-            <div className="history-diff">
-              {diff ? <DiffView files={[diff]} highlightEnabled={highlightEnabled} /> : <div className="panel-hint">选择提交查看该文件的 diff</div>}
-            </div>
-          </>
-        )}
-        <div className="modal-footer">
-          <button onClick={onClose}>关闭</button>
-        </div>
-      </div>
-    </div>
+    <Dialog title={`文件历史 · ${file}`} onClose={onClose} wide footer={<button onClick={onClose}>关闭</button>}>
+      {loading && <div className="panel-hint">加载中…</div>}
+      {error && <div className="panel-hint">{error}</div>}
+      {!loading && !error && (
+        <>
+          <div className="history-list">
+            {entries.map((entry) => (
+              <div key={entry.oid} className={`history-item${selected === entry.oid ? " selected" : ""}`} onClick={() => setSelected(entry.oid)}>
+                <span className="blame-sha">{entry.shortId}</span>
+                <span className="history-subject" title={entry.subject}>{entry.subject}</span>
+                <span className="blame-author">{entry.authorName}</span>
+                <span className="blame-date">{formatDate(entry.authorTime)}</span>
+              </div>
+            ))}
+            {entries.length === 0 && <div className="panel-hint">（无历史记录）</div>}
+          </div>
+          <div className="history-diff">{diff ? <DiffView files={[diff]} highlightEnabled={highlightEnabled} /> : <div className="panel-hint">选择提交查看该文件的 diff</div>}</div>
+        </>
+      )}
+    </Dialog>
   );
 }

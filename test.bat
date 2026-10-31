@@ -14,7 +14,7 @@ if errorlevel 1 (
     echo [ERROR] Rust toolchain is required. Install via https://rustup.rs
     popd & exit /b 1
 )
-pnpm build
+call pnpm build
 if errorlevel 1 (
     echo [ERROR] Frontend build failed.
     popd & exit /b 1

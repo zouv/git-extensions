@@ -1,5 +1,6 @@
 pub mod error;
 pub mod git;
+pub mod system;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -13,7 +14,10 @@ pub fn run() {
             git::diff::get_commit,
             git::diff::get_commit_diff,
             git::diff::get_worktree_diff,
+            git::diff::get_compare_diff,
             git::status::get_status,
+            git::status::get_operation_state,
+            git::status::get_conflict_file,
             git::cli::stage_files,
             git::cli::unstage_files,
             git::cli::commit,
@@ -36,6 +40,15 @@ pub fn run() {
             git::cli::delete_tag,
             git::cli::submodule_list,
             git::cli::submodule_update,
+            git::cli::discard_files,
+            git::cli::delete_untracked_files,
+            git::cli::save_resolved_file,
+            git::cli::continue_operation,
+            git::cli::abort_operation,
+            git::rebase::prepare_interactive_rebase,
+            git::rebase::start_interactive_rebase,
+            system::open_path,
+            system::reveal_path,
             git::history::blame_file,
             git::history::file_log,
         ])

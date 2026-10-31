@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, formatDate } from "../api";
 import type { BlameLine } from "../types";
+import Dialog from "../ui/Dialog";
 
 const LINE_H = 20;
 
@@ -43,34 +44,24 @@ export default function BlameDialog({ repoPath, file, oid, onClose }: Props) {
   const end = Math.min(lines.length, start + Math.ceil(viewportH / LINE_H) + 10);
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
-        <h3>Blame · {file}</h3>
-        {loading && <div className="panel-hint">加载中…</div>}
-        {error && <div className="panel-hint">{error}</div>}
-        {!loading && !error && (
-          <div
-            className="blame-list"
-            style={{ height: viewportH }}
-            onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
-          >
-            <div className="diff-lines" style={{ height: lines.length * LINE_H }}>
-              {lines.slice(start, end).map((l) => (
-                <div key={l.line} className="blame-row" style={{ top: (l.line - 1) * LINE_H, height: LINE_H }}>
-                  <span className="blame-sha" title={l.oid}>{l.shortId}</span>
-                  <span className="blame-author">{l.author}</span>
-                  <span className="blame-date">{formatDate(l.time).slice(0, 10)}</span>
-                  <span className="blame-lineno">{l.line}</span>
-                  <span className="blame-content">{l.content || " "}</span>
-                </div>
-              ))}
-            </div>
+    <Dialog title={`Blame · ${file}`} onClose={onClose} wide footer={<button onClick={onClose}>关闭</button>}>
+      {loading && <div className="panel-hint">加载中…</div>}
+      {error && <div className="panel-hint">{error}</div>}
+      {!loading && !error && (
+        <div className="blame-list" style={{ height: viewportH }} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
+          <div className="diff-lines" style={{ height: lines.length * LINE_H }}>
+            {lines.slice(start, end).map((line) => (
+              <div key={line.line} className="blame-row" style={{ top: (line.line - 1) * LINE_H, height: LINE_H }}>
+                <span className="blame-sha" title={line.oid}>{line.shortId}</span>
+                <span className="blame-author">{line.author}</span>
+                <span className="blame-date">{formatDate(line.time).slice(0, 10)}</span>
+                <span className="blame-lineno">{line.line}</span>
+                <span className="blame-content">{line.content || " "}</span>
+              </div>
+            ))}
           </div>
-        )}
-        <div className="modal-footer">
-          <button onClick={onClose}>关闭</button>
         </div>
-      </div>
-    </div>
+      )}
+    </Dialog>
   );
 }

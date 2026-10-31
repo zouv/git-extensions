@@ -14,6 +14,11 @@ import type {
   StatusSnapshot,
   SubmoduleInfo,
   TagInfo,
+  CompareResult,
+  OperationState,
+  ConflictFile,
+  RebasePlan,
+  RebaseTodoEntry,
 } from "./types";
 
 export const api = {
@@ -66,7 +71,29 @@ export const api = {
     invoke<BlameLine[]>("blame_file", { path, file, oid }),
   fileLog: (path: string, file: string, maxCount?: number) =>
     invoke<FileLogEntry[]>("file_log", { path, file, maxCount }),
+  getCompareDiff: (path: string, base: string, target: string) =>
+    invoke<CompareResult>("get_compare_diff", { path, base, target }),
+  getOperationState: (path: string) => invoke<OperationState>("get_operation_state", { path }),
+  getConflictFile: (path: string, file: string) => invoke<ConflictFile>("get_conflict_file", { path, file }),
+  saveResolvedFile: (path: string, file: string, content: string, resolveAsDeletion = false) =>
+    invoke<OperationState>("save_resolved_file", { path, file, content, resolveAsDeletion }),
+  continueOperation: (path: string) => invoke<string>("continue_operation", { path }),
+  abortOperation: (path: string) => invoke<string>("abort_operation", { path }),
+  discardFiles: (path: string, paths: string[]) => invoke<string>("discard_files", { path, paths }),
+  deleteUntrackedFiles: (path: string, paths: string[]) => invoke<string>("delete_untracked_files", { path, paths }),
+  openPath: (path: string, file: string) => invoke<void>("open_path", { path, file }),
+  revealPath: (path: string, file?: string) => invoke<void>("reveal_path", { path, file }),
+  prepareInteractiveRebase: (path: string, oid: string) =>
+    invoke<RebasePlan>("prepare_interactive_rebase", { path, oid }),
+  startInteractiveRebase: (path: string, onto: string, originalHead: string, entries: RebaseTodoEntry[]) =>
+    invoke<string>("start_interactive_rebase", { path, onto, originalHead, entries }),
 };
+
+let logRequestId = 0;
+export function nextLogRequestId(): number {
+  logRequestId += 1;
+  return logRequestId;
+}
 
 /** 订阅日志流；回调内按 requestId 过滤过期批次。 */
 export function onLogBatch(handler: (batch: LogBatch) => void) {

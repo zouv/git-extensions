@@ -11,36 +11,41 @@
 ## 状态快照
 
 - **最近更新**：2026-10-31
-- **整体状态**：✅ 「提交图一直加载中」已修复（Tauri 事件权限缺失），自动化复测通过
-- **最后验证状态**：Windows `pnpm build` ✅、`cargo test` ✅ 14/14；`VITE_TEST_REPO` 自动化复测 ✅（17,783 提交正常加载）
+- **整体状态**：✅ M5 实现与 Windows 常规 DPI 验证完成；无进行中开发任务，等待用户 GUI 验收及高 DPI / macOS 补测
+- **最后验证状态**：`pnpm build` ✅；`test.bat` ✅（Rust 33/33）；`cargo fmt --check`、`git diff --check` ✅；真实 WebView 已验证多仓库、分栏、对比、冲突继续和交互式 Rebase；17,783 提交 release 基准三轮完成
+
+---
+
+## 当前任务
+
+- 无进行中开发任务。M5 已完成成果见 ROADMAP 与 CHANGELOG，实施边界见 `docs/04-UI设计方案.md`。
+
+## 阻塞 / 待决策（Blockers）
+
+- 当前环境没有 macOS 实机，也未取得真实 150% / 200% DPI 的显示验证结果；这些项目不能标记为已通过。
 
 ---
 
 ## 待验收（代码已完成，等用户确认）
 
-1. **完整 GUI 工作流**：提交图、diff 高亮、stage/commit、分支 / 标签 / stash、远程操作、blame / 文件历史。
-2. **设置与键盘操作**：设置重启后保持；弹窗、页签、远程快捷键；方向键 / 翻页选择时列表自动滚动；Ctrl/Cmd+Enter 提交。
-3. **性能与 macOS**：同仓库对比 Git Extensions 的首屏、滚动和提交切换；运行 macOS CI 或实机 `sh test.sh`（当前无 macOS 环境，未声称通过）。
-
-## 阻塞 / 待决策（Blockers）
-
-- macOS 实际执行需要 macOS 环境或运行已配置的 CI；其余无阻塞。
+1. **M5 Windows GUI**：仓库页签、历史 / 变更双工作区、分栏与检查器、统一菜单 / 弹窗 / 通知、双端对比、冲突中心和交互式 Rebase。
+2. **既有完整 GUI 工作流**：提交图、diff、stage/commit、分支 / 标签 / Stash、远程、blame / 文件历史。
+3. **平台与显示**：真实 150% / 200% DPI；macOS 实机或 CI `sh test.sh`。
 
 ---
 
 ## 下一步（Next Steps）
 
-1. 用户运行 `dev.bat` 统一 GUI 验收，问题按 ARCH §0.5 定位修复。
-2. 推送项目后运行三平台 CI，或在 macOS 实机执行 `sh test.sh`，补齐最后一项平台验收。
+1. 用户按「待验收」检查实际使用体验；若发现问题，按 ARCH §0.5 定位范围并新建修复任务。
+2. 有对应环境后补高 DPI 与 macOS 验收，再在 ROADMAP 完成 M5 最后一项并归档里程碑。
 
 ---
 
 ## 本任务验证（Verify）
 
-- Windows 一键回归：`test.bat`。
-- Linux / macOS：`sh test.sh`。
-- 大仓库复测：`cd src-tauri && cargo run --release --example bench -- <仓库路径> 3`，结果解释见 `docs/03-性能与平台验证.md`。
-- 自动化测试不替代 GUI 验收；macOS 当前仅完成资源与 CI 配置。
+- 一键回归：`test.bat`；文档：`sh check-docs.sh`。
+- 大仓库复测：`cd src-tauri && cargo run --release --example bench -- <仓库路径> 3`。
+- 新功能使用临时真实仓库验证，自动化不替代 GUI 验收。
 
 ---
 

@@ -1,46 +1,34 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Revision } from "../types";
 import { formatDate } from "../api";
+import ContextMenu from "../ui/ContextMenu";
 
-const ROW_H = 26;
+const ROW_H = 28;
 const LANE_W = 14;
 const NODE_R = 4;
-const PALETTE = [
-  "#e06c75", "#61afef", "#98c379", "#d19a66", "#c678dd",
-  "#56b6c2", "#e5c07b", "#be5046", "#7ec8e3", "#b5ceA8",
-];
+const PALETTE = ["#e06c75", "#65a9f5", "#57bd8a", "#d19a66", "#c678dd", "#56b6c2", "#d5a84e", "#be5046", "#7ec8e3", "#b5cea8"];
 const MAX_GRAPH_W = 320;
+
+export type RevisionAction = "diff" | "cherry-pick" | "revert" | "rebase" | "copy-sha" | "copy-subject" | "compare-head" | "compare-base" | "new-branch" | "new-tag" | "interactive-rebase";
 
 interface Props {
   revisions: Revision[];
-  selectedOid: string | null;
-  onSelect: (oid: string) => void;
-  onContextAction: (action: "cherry-pick" | "revert" | "rebase", rev: Revision) => void;
+  selectedOids: string[];
+  onSelect: (oid: string, additive: boolean) => void;
+  onContextAction: (action: RevisionAction, rev: Revision) => void;
   loading: boolean;
 }
 
-/** 虚拟化提交列表：DOM 只渲染可见行，分支图只画可见区域的 Canvas。 */
-export default function RevisionGrid({ revisions, selectedOid, onSelect, onContextAction, loading }: Props) {
+export default function RevisionGrid({ revisions, selectedOids, onSelect, onContextAction, loading }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(600);
   const [menu, setMenu] = useState<{ x: number; y: number; rev: Revision } | null>(null);
-
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    window.addEventListener("click", close);
-    window.addEventListener("blur", close);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("blur", close);
-    };
-  }, [menu]);
+  const selectedOid = selectedOids[selectedOids.length - 1] ?? null;
 
   const graphWidth = useMemo(() => {
     let lanes = 1;
-    // 只扫已加载行的 lane 数，O(n) 一次，不随滚动重算
     for (const r of revisions) lanes = Math.max(lanes, r.activeLanes.length, r.lane + 1);
     return Math.min(8 + lanes * LANE_W, MAX_GRAPH_W);
   }, [revisions]);
@@ -58,7 +46,6 @@ export default function RevisionGrid({ revisions, selectedOid, onSelect, onConte
   const visibleCount = Math.ceil(viewportH / ROW_H) + 10;
   const endRow = Math.min(revisions.length, startRow + visibleCount);
 
-  // 键盘导航 / 外部选中时，把选中行滚回虚拟列表视口。
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !selectedOid) return;
@@ -66,12 +53,9 @@ export default function RevisionGrid({ revisions, selectedOid, onSelect, onConte
     if (index < 0) return;
     const top = index * ROW_H;
     if (top < el.scrollTop) el.scrollTop = top;
-    else if (top + ROW_H > el.scrollTop + el.clientHeight) {
-      el.scrollTop = top + ROW_H - el.clientHeight;
-    }
+    else if (top + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_H - el.clientHeight;
   }, [revisions, selectedOid]);
 
-  // 画可见区域的分支图
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -88,100 +72,82 @@ export default function RevisionGrid({ revisions, selectedOid, onSelect, onConte
     const x = (lane: number) => 8 + lane * LANE_W + LANE_W / 2;
     const color = (lane: number) => PALETTE[lane % PALETTE.length];
     ctx.lineWidth = 1.6;
-
     for (let i = startRow; i < endRow; i++) {
       const rev = revisions[i];
       const y = (i - startRow) * ROW_H + ROW_H / 2;
-      // 竖线：连到下一行中点
       for (let lane = 0; lane < rev.activeLanes.length; lane++) {
         if (!rev.activeLanes[lane]) continue;
         ctx.strokeStyle = color(lane);
-        ctx.beginPath();
-        ctx.moveTo(x(lane), y);
-        ctx.lineTo(x(lane), y + ROW_H);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x(lane), y); ctx.lineTo(x(lane), y + ROW_H); ctx.stroke();
       }
-      // fork / 非首 parent 的连线
       rev.parentLanes.forEach((pl, idx) => {
         if (pl === rev.lane && idx === 0) return;
         ctx.strokeStyle = color(pl);
-        ctx.beginPath();
-        ctx.moveTo(x(rev.lane), y);
-        ctx.bezierCurveTo(x(rev.lane), y + ROW_H / 2, x(pl), y + ROW_H / 2, x(pl), y + ROW_H);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x(rev.lane), y); ctx.bezierCurveTo(x(rev.lane), y + ROW_H / 2, x(pl), y + ROW_H / 2, x(pl), y + ROW_H); ctx.stroke();
       });
-      // merge：其它 lane 汇入本节点
       for (const ml of rev.mergedLanes) {
         ctx.strokeStyle = color(ml);
-        ctx.beginPath();
-        ctx.moveTo(x(ml), y);
-        ctx.bezierCurveTo(x(ml), y, x(rev.lane), y, x(rev.lane), y);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x(ml), y); ctx.bezierCurveTo(x(ml), y, x(rev.lane), y, x(rev.lane), y); ctx.stroke();
       }
-      // 节点
-      ctx.fillStyle = rev.refs.length > 0 ? "#e5c07b" : color(rev.lane);
-      ctx.beginPath();
-      ctx.arc(x(rev.lane), y, rev.refs.length > 0 ? NODE_R + 1 : NODE_R, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.fillStyle = rev.refs.length > 0 ? "#d5a84e" : color(rev.lane);
+      ctx.beginPath(); ctx.arc(x(rev.lane), y, rev.refs.length > 0 ? NODE_R + 1 : NODE_R, 0, Math.PI * 2); ctx.fill();
     }
   }, [revisions, startRow, endRow, graphWidth]);
 
   return (
-    <div
-      className="revision-grid"
-      ref={scrollRef}
-      onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
-    >
+    <div className="revision-grid" ref={scrollRef} role="listbox" aria-label="提交历史" aria-multiselectable onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
       <div className="revision-content" style={{ height: revisions.length * ROW_H }}>
-        <canvas
-          ref={canvasRef}
-          className="graph-canvas"
-          style={{ top: startRow * ROW_H, width: graphWidth }}
-        />
+        <canvas ref={canvasRef} className="graph-canvas" style={{ top: startRow * ROW_H, width: graphWidth }} />
         {revisions.slice(startRow, endRow).map((rev, i) => {
           const row = startRow + i;
+          const selected = selectedOids.includes(rev.oid);
           return (
             <div
               key={rev.oid}
-              className={`revision-row${rev.oid === selectedOid ? " selected" : ""}`}
+              className={`revision-row${selected ? " selected" : ""}`}
               style={{ top: row * ROW_H, left: graphWidth, height: ROW_H }}
-              onClick={() => onSelect(rev.oid)}
+              role="option"
+              aria-selected={selected}
+              tabIndex={selected ? 0 : -1}
+              onClick={(e) => onSelect(rev.oid, (e.ctrlKey || e.metaKey) && selectedOids.length > 0)}
+              onDoubleClick={() => onContextAction("diff", rev)}
               onContextMenu={(e) => {
                 e.preventDefault();
-                onSelect(rev.oid);
+                if (!selected) onSelect(rev.oid, false);
                 setMenu({ x: e.clientX, y: e.clientY, rev });
               }}
+              onKeyDown={(e) => {
+                if (e.key === "Shift" || e.key !== "F10" || !e.shiftKey) return;
+                e.preventDefault();
+                const rect = e.currentTarget.getBoundingClientRect();
+                setMenu({ x: rect.left + 24, y: rect.bottom, rev });
+              }}
             >
-              <span className="rev-refs">
-                {rev.refs.map((ref, j) => (
-                  <span key={j} className={`ref-badge ref-${ref.kind}`}>
-                    {ref.name}
-                  </span>
-                ))}
-              </span>
+              <span className="rev-refs">{rev.refs.map((ref, j) => <span key={j} className={`ref-badge ref-${ref.kind}`}>{ref.name}</span>)}</span>
               <span className="rev-subject" title={rev.subject}>{rev.subject}</span>
-              <span className="rev-author">{rev.authorName}</span>
+              <span className="rev-author" title={rev.authorName}>{rev.authorName}</span>
               <span className="rev-date">{formatDate(rev.authorTime)}</span>
               <span className="rev-sha">{rev.shortId}</span>
             </div>
           );
         })}
       </div>
-      {revisions.length === 0 && !loading && <div className="empty-hint">暂无提交记录</div>}
-      {loading && <div className="loading-hint">加载中… 已加载 {revisions.length} 条</div>}
-      {menu && (
-        <div className="context-menu" style={{ left: menu.x, top: menu.y }}>
-          <div className="context-item" onClick={() => onContextAction("cherry-pick", menu.rev)}>
-            Cherry-pick 此提交
-          </div>
-          <div className="context-item" onClick={() => onContextAction("revert", menu.rev)}>
-            Revert 此提交
-          </div>
-          <div className="context-item" onClick={() => onContextAction("rebase", menu.rev)}>
-            将当前分支 rebase 到此提交
-          </div>
-        </div>
-      )}
+      {revisions.length === 0 && !loading && <div className="empty-state"><strong>暂无提交记录</strong><span>空仓库或当前过滤条件没有结果。</span></div>}
+      {loading && <div className="loading-hint"><span className="spinner" />正在加载 · 已接收 {revisions.length.toLocaleString()} 条</div>}
+      {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={[
+        { id: "diff", label: "查看差异", onSelect: () => onContextAction("diff", menu.rev) },
+        { id: "copy-sha", label: "复制完整 SHA", icon: "copy", shortcut: "Ctrl+Shift+C", onSelect: () => onContextAction("copy-sha", menu.rev) },
+        { id: "copy-subject", label: "复制提交主题", icon: "copy", onSelect: () => onContextAction("copy-subject", menu.rev) },
+        { id: "compare-base", label: "设为对比基准", icon: "compare", onSelect: () => onContextAction("compare-base", menu.rev) },
+        { id: "compare-head", label: "与当前分支对比", icon: "compare", onSelect: () => onContextAction("compare-head", menu.rev) },
+        { id: "new-branch", label: "在此新建分支…", icon: "branch", onSelect: () => onContextAction("new-branch", menu.rev) },
+        { id: "new-tag", label: "在此新建标签…", icon: "tag", onSelect: () => onContextAction("new-tag", menu.rev) },
+        { id: "sep-history", separator: true },
+        { id: "cherry", label: "Cherry-pick 此提交…", onSelect: () => onContextAction("cherry-pick", menu.rev) },
+        { id: "revert", label: "Revert 此提交…", onSelect: () => onContextAction("revert", menu.rev) },
+        { id: "rebase", label: "将当前分支 Rebase 到此提交…", danger: true, onSelect: () => onContextAction("rebase", menu.rev) },
+        { id: "interactive", label: "从此提交开始交互式 Rebase…", danger: true, onSelect: () => onContextAction("interactive-rebase", menu.rev) },
+      ]} />}
     </div>
   );
 }

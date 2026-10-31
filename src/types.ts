@@ -61,6 +61,7 @@ export interface FileDiff {
 
 export interface StatusEntry {
   path: string;
+  oldPath: string | null;
   status: string;
 }
 
@@ -113,4 +114,52 @@ export interface FileLogEntry {
   authorName: string;
   authorTime: number;
   subject: string;
+}
+
+export interface CompareResult {
+  baseOid: string;
+  targetOid: string;
+  files: FileDiff[];
+}
+
+export type OperationKind = "none" | "merge" | "cherryPick" | "revert" | "rebase";
+
+export interface OperationState {
+  kind: OperationKind;
+  interactive: boolean;
+  current: number | null;
+  total: number | null;
+  onto: string | null;
+  source: string | null;
+  headName: string | null;
+  conflicts: string[];
+}
+
+export interface ConflictFile {
+  path: string;
+  base: string | null;
+  ours: string | null;
+  theirs: string | null;
+  worktree: string | null;
+  oursLabel: string;
+  theirsLabel: string;
+  truncated: boolean;
+  binary: boolean;
+}
+
+export type RebaseAction = "pick" | "reword" | "squash" | "fixup" | "drop";
+
+export interface RebaseTodoEntry {
+  oid: string;
+  shortId: string;
+  subject: string;
+  message: string;
+  action: RebaseAction;
+}
+
+export interface RebasePlan {
+  onto: string;
+  originalHead: string;
+  branch: string;
+  entries: RebaseTodoEntry[];
 }

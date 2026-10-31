@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use git2::{Oid, Repository, Sort};
 use serde::Serialize;
@@ -8,9 +8,12 @@ use tauri::{AppHandle, Emitter};
 use super::open;
 use crate::error::GitResult;
 
-/// 日志请求的代际号：前端发起新请求时旧流自动作废，
-/// 避免旧请求的大数据在切换仓库 / 刷新后继续涌进 UI。
-static LOG_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// 每个仓库独立的日志代际号：同仓库刷新会取消旧流，不同仓库可并行加载。
+static LOG_GENERATIONS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+
+fn log_generations() -> &'static Mutex<HashMap<String, u64>> {
+    LOG_GENERATIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 const BATCH_SIZE: usize = 300;
 pub const LOG_EVENT: &str = "log-batch";
@@ -183,7 +186,11 @@ pub fn start_log(
     max_count: Option<u32>,
     revspec: Option<String>,
 ) {
-    LOG_GENERATION.store(request_id, Ordering::SeqCst);
+    let generation_key = path.clone();
+    log_generations()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(generation_key.clone(), request_id);
     let max_count = max_count.unwrap_or(100_000) as usize;
     ge_log!(
         "start_log request_id={} path={} max_count={} revspec={:?}",
@@ -193,7 +200,14 @@ pub fn start_log(
         revspec
     );
     std::thread::spawn(move || {
-        let cancelled = || LOG_GENERATION.load(Ordering::SeqCst) != request_id;
+        let cancelled = || {
+            log_generations()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&generation_key)
+                .copied()
+                != Some(request_id)
+        };
         let emit = |batch: LogBatch| {
             if let Err(e) = app.emit(LOG_EVENT, batch) {
                 ge_log!("emit log-batch failed: {}", e);
@@ -229,6 +243,10 @@ pub fn start_log(
                     error: Some("日志加载线程发生内部错误".into()),
                 });
             }
+        }
+        let mut generations = log_generations().lock().unwrap_or_else(|e| e.into_inner());
+        if generations.get(&generation_key).copied() == Some(request_id) {
+            generations.remove(&generation_key);
         }
     });
 }

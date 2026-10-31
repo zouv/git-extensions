@@ -6,6 +6,17 @@ export interface AppSettings {
   maxLogCount: number;
 }
 
+export type InspectorPosition = "right" | "bottom";
+
+export interface UILayout {
+  leftWidth: number;
+  inspectorSize: number;
+  inspectorPosition: InspectorPosition;
+  showLeft: boolean;
+  showInspector: boolean;
+  changesWidth: number;
+}
+
 export const DEFAULT_SETTINGS: AppSettings = {
   autoRefresh: true,
   pollIntervalSeconds: 5,
@@ -14,12 +25,26 @@ export const DEFAULT_SETTINGS: AppSettings = {
   maxLogCount: 100_000,
 };
 
+export const DEFAULT_LAYOUT: UILayout = {
+  leftWidth: 224,
+  inspectorSize: 400,
+  inspectorPosition: "right",
+  showLeft: true,
+  showInspector: true,
+  changesWidth: 420,
+};
+
 const SETTINGS_KEY = "git-extensions.settings";
+const LAYOUT_PREFIX = "git-extensions.layout.v2:";
 const POLL_INTERVALS = [3, 5, 10, 30, 60];
 const LOG_LIMITS = [10_000, 50_000, 100_000, 200_000];
 
 function numberOption(value: unknown, allowed: number[], fallback: number): number {
   return typeof value === "number" && allowed.includes(value) ? value : fallback;
+}
+
+function bounded(value: unknown, min: number, max: number, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
 }
 
 /** localStorage 可能被手工修改，只接受白名单中的设置值。 */
@@ -40,4 +65,33 @@ export function loadSettings(): AppSettings {
 
 export function saveSettings(settings: AppSettings) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+export function loadLayout(repoPath: string, settings: AppSettings): UILayout {
+  try {
+    const raw: Partial<UILayout> = JSON.parse(localStorage.getItem(LAYOUT_PREFIX + repoPath) ?? "{}");
+    return {
+      leftWidth: bounded(raw.leftWidth, 160, 360, DEFAULT_LAYOUT.leftWidth),
+      inspectorSize: bounded(raw.inspectorSize, 180, 720, DEFAULT_LAYOUT.inspectorSize),
+      inspectorPosition: raw.inspectorPosition === "bottom" ? "bottom" : "right",
+      showLeft: typeof raw.showLeft === "boolean" ? raw.showLeft : settings.showLeftPanel,
+      showInspector: typeof raw.showInspector === "boolean" ? raw.showInspector : true,
+      changesWidth: bounded(raw.changesWidth, 300, 720, DEFAULT_LAYOUT.changesWidth),
+    };
+  } catch {
+    return { ...DEFAULT_LAYOUT, showLeft: settings.showLeftPanel };
+  }
+}
+
+export function saveLayout(repoPath: string, layout: UILayout) {
+  try {
+    localStorage.setItem(LAYOUT_PREFIX + repoPath, JSON.stringify(layout));
+  } catch {
+    // 隐私模式或存储已满不影响当前会话中的布局调整。
+  }
+}
+
+export function resetLayout(repoPath: string, settings: AppSettings): UILayout {
+  try { localStorage.removeItem(LAYOUT_PREFIX + repoPath); } catch { /* 当前会话仍可重置 */ }
+  return { ...DEFAULT_LAYOUT, showLeft: settings.showLeftPanel };
 }
