@@ -239,7 +239,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 
 ## 6. 运维 / 脚本（启停 / 配置 / 打包）
 
-- Windows 双击脚本（项目根，均为 pnpm/cargo 的薄包装，风格对齐 sc-code）：`setup.bat` 装依赖、`dev.bat` 开发运行、`build.bat` 前端构建、`test.bat` 前端状态 / IPC 测试 + 构建检查 + Rust 测试、`package.bat` 打包安装包并把当前版本产物收集到 `dist/release/`（`scripts/copy-bundle.mjs`，附 SHA256SUMS.txt）、`clean.bat` 清构建产物。
+- Windows 双击脚本（项目根，均为 pnpm/cargo 的薄包装，风格对齐 sc-code）：`setup.bat` 装依赖、`dev.bat` 开发运行、`build.bat` 前端构建、`test.bat` 前端状态 / IPC 测试 + 构建检查 + Rust 测试、`package.bat` 打包并把**本次新生成**的 NSIS / MSI、`unpack/` 免安装便携目录与便携 zip 发布到 `dist/release/`（`scripts/copy-bundle.mjs`：构建前 `snapshot` 记录安装包指纹，构建后 `collect` 只导出指纹变化的产物并附 SHA256SUMS.txt）、`clean.bat` 清构建产物。
 - 等价命令定义在 `package.json` 的 scripts（`dev`、`test`、`build`、`tauri:dev`、`tauri:build`），Rust 侧用 `cargo check` / `cargo test`（在 `src-tauri/`）。
 - Linux / macOS 用 `sh test.sh`；三平台 CI 矩阵在 `.github/workflows/build-and-test.yml`。
 - 大仓库性能测量：`cd src-tauri && cargo run --release --example bench -- <仓库路径> 3`；测量沿用正式同步读实现；输出首批 / 全日志、全量 diff、文件清单 / 首文件 patch 与两类选中链路 P95（不含 IPC / WebView 绘制）。历史基线见 `docs/03-性能与平台验证.md`。
@@ -276,3 +276,4 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 - **自绘顶部栏（无边框窗口）**：`tauri.conf.json` 设 `decorations: false`，Tauri 2 在 Windows 原生处理 undecorated 窗口的边缘缩放，无需自绘边框。`data-tauri-drag-region` 只作用于直接标注的元素，按钮 / 可拖拽子元素不触发窗口拖动。窗口控制需 capabilities 追加 `core:window:allow-minimize/toggle-maximize/close/start-dragging`（默认权限不含）。关闭必须走 `closeWindow` 汇总确认（dirty/busy），并用 `allowCloseRef` 防止 `onCloseRequested` 拦截后再次触发自身造成循环。Windows 无边框窗口圆角 / 阴影变化属预期。
 - **标签分组是纯 UI 配置，不改 Git 数据**：按仓库存 localStorage `git-extensions.tagGroups.v1:<path>`，配置提升到 App 层与 TitleBar / RepoWorkspace 共享。Default 组强制存在、不可改名 / 删除 / Pin，未分配标签归入 Default。删除组时勾选「移入 Default」只清分组记录；不勾选则先逐个 `git tag -d` 删除组内标签再清记录（危险操作，UI 列出标签并二次确认）。分组只过滤标签列表显示（TagDialog / LeftPanel），不影响提交图 ref 徽标、对比 ref 候选。切组后若 `leftRef` 指向被隐藏标签则清除该过滤。校验用白名单（sanitizeConfig），容忍脏数据与指向已删标签 / 组的记录。
 - **拖拽排序复用 HTML5 DnD**：与 `RebasePlanner` 同模式（`draggable` + `onDragStart/Over/Drop`），不引入库。页签排序仅会话内（`reorderRepos`），Pin 组顺序持久化在 config（`reorderPinned` 把 pinned 组按新序写回，Default 恒在首位）。Tauri `dragDropEnabled` 管的是文件拖入窗口，与元素间排序无关。
+- **打包产物只导本次构建**：NSIS / MSI 每次构建都会内嵌时间戳，大小与 SHA256 都会变，不能靠「文件已存在 + 版本号」判断新包。`package.bat` 先 `snapshot` 记录 bundle 内安装包的 size / mtime / birthtime，构建后 `collect` 只导出指纹变化且版本匹配的产物，否则报错而不是发布旧包。`dist/release/` 整目录重建（旧产物清理），unpack 直接取 `target/release` 的 exe（Tauri 打包时写入 bundle 信息后仍可独立运行），zip 用系统 `Compress-Archive -Path unpack\*` 使条目以应用根为根目录，并回读条目校验。

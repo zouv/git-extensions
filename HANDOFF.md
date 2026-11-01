@@ -5,7 +5,7 @@
 - 最近更新：2026-11-02。无进行中任务。
 - 远程已关联并推送：origin = https://github.com/zouv/git-extensions，main + v0.2.0 + v0.3.0 已推送。
 - 0.3.0 已发布：提交 856dca9；GitHub Release v0.3.0 含 NSIS / MSI 安装包与 SHA256SUMS-v0.3.0.txt（发布说明与校验文件在本机 .runtime/）。
-- `package.bat` 现已把当前版本安装包收集到 `dist/release/`（`scripts/copy-bundle.mjs`，含 SHA256SUMS.txt），完整打包流程已验证通过。
+- `package.bat` 已对齐 sc-code：构建前 snapshot、构建后 collect，把本次新生成的安装包 + `unpack/` 便携目录 + `Git.Extensions_<版本>_x64-unpack.zip` + SHA256SUMS.txt 发布到 `dist/release/`；完整流程与「重复 collect 拒绝旧包」均已验证。
 
 ## 待验收
 

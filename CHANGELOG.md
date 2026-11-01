@@ -13,7 +13,7 @@
 ## [未发布]
 
 ### 变更
-- `package.bat` 打包成功后自动把当前版本的 NSIS / MSI 安装包收集到 `dist/release/`，并生成 `SHA256SUMS.txt`；不再需要手动从 `src-tauri/target/release/bundle/` 翻找。
+- `package.bat` 打包成功后把本次构建产物发布到 `dist/release/`：NSIS / MSI 安装包、`unpack/` 免安装便携目录、便携目录 zip 与 `SHA256SUMS.txt`；构建前记录安装包指纹，只导出本次新生成的产物，不会混入历史版本。
 
 ---
 
