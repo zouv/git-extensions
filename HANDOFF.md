@@ -2,15 +2,9 @@
 
 ## 状态快照
 
-- 最近更新：2026-11-02。当前任务：发布 0.3.0（版本号 → commit/push → package → upload Release）。
-- 远程已关联并推送：origin = https://github.com/zouv/git-extensions，main + v0.2.0 已推送。
-
-## 当前任务：发布 0.3.0
-
-- 范围：三处版本号（package.json / Cargo.toml / tauri.conf.json）、CHANGELOG 归档、tag v0.3.0、打包 Windows 安装包、创建 GitHub Release 上传资产。
-- 完成定义：三处版本一致 + CHANGELOG 归档 + 推送 main/tag + Release 含本版安装包与 SHA256 校验文件。
-- 步骤：[ ] 版本号+CHANGELOG → [ ] commit/push+tag → [ ] package → [ ] upload Release。
-- 注意：上传资产含 0.3.0 安装包；0.2.0 未发 Release（用户当时选只推送），本次只发 0.3.0。
+- 最近更新：2026-11-02。无进行中任务。
+- 远程已关联并推送：origin = https://github.com/zouv/git-extensions，main + v0.2.0 + v0.3.0 已推送。
+- 0.3.0 已发布：提交 856dca9；GitHub Release v0.3.0 含 NSIS / MSI 安装包与 SHA256SUMS-v0.3.0.txt（发布说明与校验文件在本机 .runtime/）。
 
 ## 待验收
 
