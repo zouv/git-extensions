@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { useRepoBusy } from "../useRepoBusy";
 import type { FileDiff, StatusEntry, StatusSnapshot } from "../types";
 import DiffView from "./DiffView";
 import type { FileAction } from "./DiffView";
@@ -13,7 +14,8 @@ interface Props {
   width: number;
   conflictCount: number;
   onWidth: (width: number) => void;
-  onRefresh: () => void;
+  onRefresh: (historyChanged?: boolean) => void;
+  refreshVersion: number;
   setMessage: (msg: string) => void;
   highlightEnabled?: boolean;
   onFileAction?: (action: FileAction, file: FileDiff) => void;
@@ -31,22 +33,27 @@ export default function ChangesPanel(props: Props) {
   const [checked, setChecked] = useState<Record<Side, Set<string>>>({ staged: new Set(), unstaged: new Set() });
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [localBusy, setBusy] = useState(false);
+  const repoBusy = useRepoBusy(props.repoPath);
+  const busy = localBusy || repoBusy;
   const [filter, setFilter] = useState("");
   const [preview, setPreview] = useState<{ side: Side; path: string; file: FileDiff | null } | null>(null);
   const [menu, setMenu] = useState<MenuTarget | null>(null);
-  const diffCache = useRef(new Map<Side, FileDiff[]>());
+  const [previewError, setPreviewError] = useState("");
   const previewRequest = useRef(0);
 
   useEffect(() => {
-    diffCache.current.clear();
     previewRequest.current += 1;
-    setPreview(null);
     setChecked((prev) => ({
       staged: new Set([...prev.staged].filter((path) => status.staged.some((entry) => entry.path === path))),
       unstaged: new Set([...prev.unstaged].filter((path) => status.unstaged.some((entry) => entry.path === path))),
     }));
-  }, [status]);
+    if (preview) {
+      const entries = preview.side === "staged" ? status.staged : status.unstaged;
+      if (entries.some((entry) => entry.path === preview.path)) void showPreview(preview.side, preview.path);
+      else setPreview(null);
+    }
+  }, [status, props.refreshVersion]);
 
   useEffect(() => {
     props.onDirtyChange(title.trim().length > 0 || body.trim().length > 0);
@@ -54,27 +61,26 @@ export default function ChangesPanel(props: Props) {
 
   const showPreview = async (side: Side, path: string) => {
     const request = ++previewRequest.current;
-    setPreview({ side, path, file: null });
+    setPreviewError(""); setPreview({ side, path, file: null });
     try {
-      let diffs = diffCache.current.get(side);
-      if (!diffs) {
-        diffs = await api.getWorktreeDiff(repoPath, side === "staged");
-        diffCache.current.set(side, diffs);
-      }
+      const oldPath = (side === "staged" ? status.staged : status.unstaged).find((entry) => entry.path === path)?.oldPath;
+      const diffs = await api.getWorktreeFileDiff(repoPath, side === "staged", path, oldPath);
       if (request !== previewRequest.current) return;
-      setPreview({ side, path, file: diffs.find((d) => d.path === path || d.oldPath === path) ?? null });
+      const file = diffs.find((d) => d.path === path || d.oldPath === path) ?? null;
+      setPreview({ side, path, file });
+      if (!file) setPreviewError("文件差异已改变或消失，请刷新后重选。");
     } catch (e) {
-      if (request === previewRequest.current) props.setMessage(String(e));
+      if (request === previewRequest.current) { setPreviewError(String(e)); props.setMessage(String(e)); }
     }
   };
 
-  const run = async (action: () => Promise<unknown>, success: string) => {
+  const run = async (action: () => Promise<unknown>, success: string, historyChanged = false) => {
     if (busy) return;
     setBusy(true);
     try {
       await action();
       props.setMessage(success);
-      props.onRefresh();
+      props.onRefresh(historyChanged);
     } catch (e) {
       props.setMessage(String(e));
     } finally { setBusy(false); }
@@ -94,7 +100,6 @@ export default function ChangesPanel(props: Props) {
     }
     previewRequest.current += 1;
     setPreview(null);
-    diffCache.current.clear();
     void run(
       () => side === "unstaged" ? api.stageFiles(repoPath, safePaths) : api.unstageFiles(repoPath, safePaths),
       `${side === "unstaged" ? "已暂存" : "已取消暂存"} ${safePaths.length} 个文件${conflictHint ? `；${conflictHint}` : ""}`,
@@ -109,7 +114,7 @@ export default function ChangesPanel(props: Props) {
       const result = await api.commit(repoPath, message);
       setTitle(""); setBody("");
       return result;
-    }, "提交完成");
+    }, "提交完成", true);
   };
 
   const renderList = (side: Side, entries: StatusEntry[]) => {
@@ -149,9 +154,9 @@ export default function ChangesPanel(props: Props) {
         {renderList("unstaged", status.unstaged)}
         {renderList("staged", status.staged)}
         <div className="commit-box">
-          <input aria-label="提交标题" placeholder="提交标题（必填）" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <input aria-label="提交标题" placeholder="提交标题（必填）" disabled={busy} value={title} onChange={(e) => setTitle(e.target.value)} />
           <div className="commit-title-count">{title.length > 50 ? "标题建议不超过 50 字符 · " : ""}{title.length}/50</div>
-          <textarea aria-label="提交正文" placeholder="提交正文（可选）" value={body} onChange={(e) => setBody(e.target.value)} rows={3} onKeyDown={(e) => {
+          <textarea aria-label="提交正文" placeholder="提交正文（可选）" disabled={busy} value={body} onChange={(e) => setBody(e.target.value)} rows={3} onKeyDown={(e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doCommit(); }
           }} />
           <button className="primary commit-button" disabled={busy || status.staged.length === 0} onClick={doCommit}>{busy ? <span className="spinner" /> : <Icon name="check" />}提交 ({status.staged.length})</button>
@@ -159,7 +164,7 @@ export default function ChangesPanel(props: Props) {
       </div>
       <SplitHandle direction="vertical" label="调整变更文件列表宽度" onResize={(delta) => props.onWidth(Math.min(720, Math.max(300, props.width + delta)))} onReset={() => props.onWidth(420)} />
       <div className="changes-preview">
-        {preview ? preview.file ? <DiffView files={[preview.file]} highlightEnabled={props.highlightEnabled} onFileAction={props.onFileAction} /> : <div className="empty-state"><span className="spinner" /><span>diff 加载中…</span></div> : <div className="empty-state"><Icon name="file" size={28} /><strong>选择一个文件</strong><span>查看工作区或暂存区差异</span></div>}
+        {preview ? previewError ? <div className="empty-state" role="alert">{previewError}</div> : preview.file ? <DiffView files={[preview.file]} highlightEnabled={props.highlightEnabled} onFileAction={props.onFileAction} /> : <div className="empty-state"><span className="spinner" /><span>diff 加载中…</span></div> : <div className="empty-state"><Icon name="file" size={28} /><strong>选择一个文件</strong><span>查看工作区或暂存区差异</span></div>}
       </div>
       {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={[
         ...(menu.entry.status !== "conflicted" ? [{ id: "stage", label: menu.side === "staged" ? "取消暂存" : "暂存", onSelect: () => stagePaths(menu.side, [menu.entry.path]) }] : [{ id: "resolve", label: "解决冲突", icon: "conflict" as const, onSelect: props.onOpenConflict }]),

@@ -9,7 +9,7 @@ const NODE_R = 4;
 const PALETTE = ["#e06c75", "#65a9f5", "#57bd8a", "#d19a66", "#c678dd", "#56b6c2", "#d5a84e", "#be5046", "#7ec8e3", "#b5cea8"];
 const MAX_GRAPH_W = 320;
 
-export type RevisionAction = "diff" | "cherry-pick" | "revert" | "rebase" | "copy-sha" | "copy-subject" | "compare-head" | "compare-base" | "new-branch" | "new-tag" | "interactive-rebase";
+export type RevisionAction = "reset" | "diff" | "cherry-pick" | "revert" | "rebase" | "copy-sha" | "copy-subject" | "compare-head" | "compare-base" | "new-branch" | "new-tag" | "interactive-rebase";
 
 interface Props {
   revisions: Revision[];
@@ -146,6 +146,7 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
         { id: "cherry", label: "Cherry-pick 此提交…", onSelect: () => onContextAction("cherry-pick", menu.rev) },
         { id: "revert", label: "Revert 此提交…", onSelect: () => onContextAction("revert", menu.rev) },
         { id: "rebase", label: "将当前分支 Rebase 到此提交…", danger: true, onSelect: () => onContextAction("rebase", menu.rev) },
+        { id: "reset", label: "Reset 当前 HEAD 到此提交…", danger: true, onSelect: () => onContextAction("reset", menu.rev) },
         { id: "interactive", label: "从此提交开始交互式 Rebase…", danger: true, onSelect: () => onContextAction("interactive-rebase", menu.rev) },
       ]} />}
     </div>

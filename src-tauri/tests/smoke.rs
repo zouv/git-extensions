@@ -257,8 +257,16 @@ fn push_fetch_pull_against_local_bare_remote() {
     let repo = git2::Repository::open(&t.root).unwrap();
     repo.remote("origin", bare_root.to_str().unwrap()).unwrap();
 
-    // 首次 push 无 upstream，命令内部应退回 push -u origin HEAD
-    git::cli::push(path.clone()).unwrap();
+    // 首次 push 无 upstream，必须显式选择远程/分支，并绑定预览时的 HEAD
+    let preview = git::cli::get_push_info(path.clone()).unwrap();
+    git::cli::push(
+        path.clone(),
+        Some("origin".into()),
+        Some(preview.branch.clone()),
+        Some(preview.head_oid),
+        Some(preview.branch_ref),
+    )
+    .unwrap();
     let bare = git2::Repository::open_bare(&bare_root).unwrap();
     assert!(
         bare.find_reference("refs/heads/master").is_ok()

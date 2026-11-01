@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
+import { useRepoBusy } from "../useRepoBusy";
 import type { SubmoduleInfo } from "../types";
 import Dialog from "../ui/Dialog";
 
@@ -7,10 +8,13 @@ interface Props { repoPath: string; onClose: () => void; onChanged: () => void; 
 
 export default function SubmoduleDialog({ repoPath, onClose, onChanged, setMessage }: Props) {
   const [modules, setModules] = useState<SubmoduleInfo[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [localBusy, setBusy] = useState(false);
+  const repoBusy = useRepoBusy(repoPath);
+  const busy = localBusy || repoBusy;
   const reload = useCallback(() => { api.submoduleList(repoPath).then(setModules).catch((e) => setMessage(String(e))); }, [repoPath, setMessage]);
   useEffect(reload, [reload]);
   const update = async () => {
+    if (busy) return;
     setBusy(true);
     try { await api.submoduleUpdate(repoPath); setMessage("子模块更新完成"); reload(); onChanged(); }
     catch (e) { setMessage(String(e)); }

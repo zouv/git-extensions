@@ -54,7 +54,7 @@ export default function BlameDialog({ repoPath, file, oid, onClose }: Props) {
               <div key={line.line} className="blame-row" style={{ top: (line.line - 1) * LINE_H, height: LINE_H }}>
                 <span className="blame-sha" title={line.oid}>{line.shortId}</span>
                 <span className="blame-author">{line.author}</span>
-                <span className="blame-date">{formatDate(line.time).slice(0, 10)}</span>
+                <span className="blame-date">{line.oid ? formatDate(line.time).slice(0, 10) : "—"}</span>
                 <span className="blame-lineno">{line.line}</span>
                 <span className="blame-content">{line.content || " "}</span>
               </div>

@@ -3,7 +3,7 @@ use std::io::Read;
 use std::path::Path;
 
 use git2::{Repository, RepositoryState, Status, StatusOptions};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{open, resolve_worktree_path};
 use crate::error::{GitError, GitResult};
@@ -41,7 +41,6 @@ fn classify(flags: Status) -> &'static str {
     }
 }
 
-#[tauri::command]
 pub fn get_status(path: String) -> GitResult<StatusSnapshot> {
     let repo = open(&path)?;
     let mut opts = StatusOptions::new();
@@ -126,7 +125,7 @@ pub fn get_status(path: String) -> GitResult<StatusSnapshot> {
     Ok(snapshot)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationState {
     /// none | merge | cherryPick | revert | rebase
@@ -148,7 +147,7 @@ struct ConflictContent {
     truncated: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ConflictFile {
     pub path: String,
@@ -200,7 +199,6 @@ fn conflict_paths(repo: &Repository) -> GitResult<Vec<String>> {
     Ok(paths)
 }
 
-#[tauri::command]
 pub fn get_operation_state(path: String) -> GitResult<OperationState> {
     let repo = open(&path)?;
     let git_dir = repo.path();
@@ -319,7 +317,6 @@ fn blob_content(
     }
 }
 
-#[tauri::command]
 pub fn get_conflict_file(path: String, file: String) -> GitResult<ConflictFile> {
     let repo = open(&path)?;
     let normalized = super::validate_relative_path(&file)?

@@ -59,15 +59,28 @@ fn main() {
         let mut detail_times = Vec::with_capacity(oids.len());
         let mut diff_times = Vec::with_capacity(oids.len());
         let mut selection_times = Vec::with_capacity(oids.len());
+        let mut manifest_times = Vec::new();
+        let mut first_patch_times = Vec::new();
+        let mut lazy_selection_times = Vec::new();
         for oid in &oids {
             let selection = Instant::now();
             let detail = Instant::now();
             git::diff::get_commit(path.clone(), oid.clone()).unwrap();
             detail_times.push(detail.elapsed());
+            let manifest = Instant::now();
+            let files = git::diff::get_commit_files(path.clone(), oid.clone()).unwrap();
+            manifest_times.push(manifest.elapsed());
+            if let Some(file) = files.first() {
+                let patch = Instant::now();
+                git::diff::get_commit_file_diff(path.clone(), oid.clone(), file.path.clone())
+                    .unwrap();
+                first_patch_times.push(patch.elapsed());
+            }
+            lazy_selection_times.push(selection.elapsed());
             let diff = Instant::now();
             git::diff::get_commit_diff(path.clone(), oid.clone()).unwrap();
             diff_times.push(diff.elapsed());
-            selection_times.push(selection.elapsed());
+            selection_times.push(*detail_times.last().unwrap() + *diff_times.last().unwrap());
         }
 
         let result = serde_json::json!({
@@ -79,6 +92,9 @@ fn main() {
             "selectionSamples": oids.len(),
             "detailAvgMs": average(&detail_times),
             "diffAvgMs": average(&diff_times),
+            "manifestAvgMs": average(&manifest_times),
+            "firstFilePatchAvgMs": average(&first_patch_times),
+            "lazySelectionP95Ms": (!lazy_selection_times.is_empty()).then(|| percentile(&mut lazy_selection_times, 0.95)),
             "selectionP95Ms": (!selection_times.is_empty()).then(|| percentile(&mut selection_times, 0.95)),
         });
         println!("{}", serde_json::to_string(&result).unwrap());

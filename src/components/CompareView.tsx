@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { CompareResult, FileDiff } from "../types";
 import DiffView from "./DiffView";
@@ -21,19 +21,25 @@ export default function CompareView(props: Props) {
   const [result, setResult] = useState<CompareResult | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const sequence = useRef(0);
   const compare = useCallback(async (a: string, b: string) => {
     if (!a.trim() || !b.trim()) return;
-    setLoading(true);
-    try { setResult(await api.getCompareDiff(props.repoPath, a.trim(), b.trim())); }
-    catch (e) { props.onError(String(e)); }
-    finally { setLoading(false); }
+    const id = ++sequence.current; setLoading(true); setResult(null);
+    try { const next = await api.getCompareFiles(props.repoPath, a.trim(), b.trim()); if (id === sequence.current) setResult(next); }
+    catch (e) { if (id === sequence.current) props.onError(String(e)); }
+    finally { if (id === sequence.current) setLoading(false); }
   }, [props.repoPath, props.onError]);
 
   useEffect(() => {
-    setBase(props.initialBase);
-    setTarget(props.initialTarget);
+    setBase(props.initialBase); setTarget(props.initialTarget);
     void compare(props.initialBase, props.initialTarget);
+    return () => { sequence.current++; };
   }, [compare, props.initialBase, props.initialTarget]);
+  const loadFile = useCallback(async (file: FileDiff) => {
+    if (!result) return null;
+    const files = await api.getCompareFileDiff(props.repoPath, result.baseOid, result.targetOid, file.path, file.oldPath);
+    return files.find((f) => f.path === file.path || f.oldPath === file.path) ?? null;
+  }, [props.repoPath, result]);
 
   return (
     <div className="task-view compare-view">
@@ -54,7 +60,7 @@ export default function CompareView(props: Props) {
       <div className="compare-summary">
         {result ? <><span className="mono">{result.baseOid.slice(0, 10)}</span><span>→</span><span className="mono">{result.targetOid.slice(0, 10)}</span><span>{result.files.length} 个文件</span></> : <span>比较两个提交、分支或标签的文件树</span>}
       </div>
-      <div className="task-content"><DiffView files={result?.files ?? []} loading={loading} onFileAction={props.onFileAction} /></div>
+      <div className="task-content"><DiffView files={result?.files ?? []} loadFile={loadFile} loading={loading} onFileAction={props.onFileAction} /></div>
     </div>
   );
 }

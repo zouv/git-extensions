@@ -2,6 +2,7 @@ export interface RepoInfo {
   path: string;
   name: string;
   headBranch: string | null;
+  headOid: string | null;
   isEmpty: boolean;
 }
 
@@ -109,6 +110,7 @@ export interface BlameLine {
 }
 
 export interface FileLogEntry {
+  filePath: string;
   oid: string;
   shortId: string;
   authorName: string;
@@ -163,3 +165,24 @@ export interface RebasePlan {
   branch: string;
   entries: RebaseTodoEntry[];
 }
+
+export interface PushInfo {
+  branch: string;
+  branchRef: string;
+  headOid: string;
+  hasUpstream: boolean;
+  upstream: string | null;
+  remotes: string[];
+}
+
+export type ResetMode = "soft" | "mixed" | "hard";
+export interface ResetPreview {
+  branch: string; headOid: string; targetOid: string; targetSubject: string; mode: ResetMode;
+  fingerprint: string; staged: number; unstaged: number; untracked: number;
+  affectedFiles: string[]; commitsToLeave: number; countLimited: boolean; blockedPaths: string[];
+}
+export interface ResetResult { backupRef: string; previousHead: string; newHead: string; output: string }
+export interface RecoveryEntry { oid: string; label: string; time: number; backupRef: string | null }
+
+export interface ConflictDraft { file: ConflictFile; result: string; resolveAsDeletion: boolean }
+export interface RebaseDraft { plan: RebasePlan; entries: RebaseTodoEntry[]; dirty: boolean }

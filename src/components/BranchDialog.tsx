@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
+import { useRepoBusy } from "../useRepoBusy";
 import type { BranchInfo } from "../types";
 import Dialog from "../ui/Dialog";
 import { useConfirm } from "../ui/Confirm";
@@ -17,11 +18,14 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, on
   const [selected, setSelected] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [force, setForce] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [localBusy, setBusy] = useState(false);
+  const repoBusy = useRepoBusy(repoPath);
+  const busy = localBusy || repoBusy;
   const confirm = useConfirm();
   const selectedBranch = branches.find((b) => b.name === selected && !b.isRemote) ?? null;
 
   const run = async (action: () => Promise<unknown>, success: string) => {
+    if (busy) return;
     setBusy(true);
     try { await action(); setMessage(success); onChanged(); onClose(); }
     catch (e) { setMessage(String(e)); setBusy(false); }

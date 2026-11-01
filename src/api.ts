@@ -1,5 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { runRepoWrite } from "./repoOperations";
 import type {
   AheadBehind,
   BlameLine,
@@ -18,75 +19,105 @@ import type {
   OperationState,
   ConflictFile,
   RebasePlan,
-  RebaseTodoEntry,
+  PushInfo,
+  ResetMode, ResetPreview, ResetResult, RecoveryEntry,
 } from "./types";
+
+// 只合并仍在途的同参数读取，不缓存工作区结果。
+const pendingReads = new Map<string, Promise<unknown>>();
+function invoke<T>(command: string, args: Record<string, unknown>): Promise<T> {
+  const key = JSON.stringify([command, args]);
+  const pending = pendingReads.get(key);
+  if (pending) return pending as Promise<T>;
+  const request = tauriInvoke<T>(command, args);
+  pendingReads.set(key, request);
+  const release = () => { if (pendingReads.get(key) === request) pendingReads.delete(key); };
+  void request.then(release, release);
+  return request;
+}
+
+function writeInvoke<T>(command: string, args: { path: string; [key: string]: unknown }): Promise<T> {
+  return runRepoWrite(args.path, command, () => tauriInvoke<T>(command, args));
+}
 
 export const api = {
   openRepo: (path: string) => invoke<RepoInfo>("open_repo", { path }),
   getBranches: (path: string) => invoke<BranchInfo[]>("get_branches", { path }),
   startLog: (path: string, requestId: number, maxCount?: number, revspec?: string | null) =>
     invoke<void>("start_log", { path, requestId, maxCount, revspec }),
+  cancelLog: (path: string, requestId: number) => invoke<void>("cancel_log", { path, requestId }),
   reportFrontendState: (state: string) => invoke<void>("report_frontend_state", { state }),
   getCommit: (path: string, oid: string) =>
     invoke<CommitDetail>("get_commit", { path, oid }),
   getCommitDiff: (path: string, oid: string) =>
     invoke<FileDiff[]>("get_commit_diff", { path, oid }),
+  getCommitFiles: (path: string, oid: string) => invoke<FileDiff[]>("get_commit_files", { path, oid }),
+  getCommitFileDiff: (path: string, oid: string, file: string, oldFile?: string | null) => invoke<FileDiff[]>("get_commit_file_diff", { path, oid, file, oldFile }),
+  getWorktreeFileDiff: (path: string, staged: boolean, file: string, oldFile?: string | null) => invoke<FileDiff[]>("get_worktree_file_diff", { path, staged, file, oldFile }),
   getWorktreeDiff: (path: string, staged: boolean) =>
     invoke<FileDiff[]>("get_worktree_diff", { path, staged }),
   getStatus: (path: string) => invoke<StatusSnapshot>("get_status", { path }),
   stageFiles: (path: string, paths: string[]) =>
-    invoke<string>("stage_files", { path, paths }),
+    writeInvoke<string>("stage_files", { path, paths }),
   unstageFiles: (path: string, paths: string[]) =>
-    invoke<string>("unstage_files", { path, paths }),
+    writeInvoke<string>("unstage_files", { path, paths }),
   commit: (path: string, message: string) =>
-    invoke<string>("commit", { path, message }),
+    writeInvoke<string>("commit", { path, message }),
   createBranch: (path: string, name: string, startPoint?: string) =>
-    invoke<string>("create_branch", { path, name, startPoint }),
+    writeInvoke<string>("create_branch", { path, name, startPoint }),
   checkoutBranch: (path: string, name: string) =>
-    invoke<string>("checkout_branch", { path, name }),
+    writeInvoke<string>("checkout_branch", { path, name }),
   deleteBranch: (path: string, name: string, force: boolean) =>
-    invoke<string>("delete_branch", { path, name, force }),
+    writeInvoke<string>("delete_branch", { path, name, force }),
   getAheadBehind: (path: string) => invoke<AheadBehind | null>("get_ahead_behind", { path }),
-  fetch: (path: string, remote?: string) => invoke<string>("fetch", { path, remote }),
-  pull: (path: string) => invoke<string>("pull", { path }),
-  push: (path: string) => invoke<string>("push", { path }),
+  fetch: (path: string, remote?: string) => writeInvoke<string>("fetch", { path, remote }),
+  pull: (path: string) => writeInvoke<string>("pull", { path }),
+  getPushInfo: (path: string) => invoke<PushInfo>("get_push_info", { path }),
+  push: (path: string, remote?: string, branch?: string, preview?: PushInfo) =>
+    writeInvoke<string>("push", { path, remote, branch, expectedHead: preview?.headOid, expectedBranch: preview?.branchRef }),
   stashList: (path: string) => invoke<StashInfo[]>("stash_list", { path }),
   stashPush: (path: string, message: string, includeUntracked: boolean) =>
-    invoke<string>("stash_push", { path, message, includeUntracked }),
-  stashApply: (path: string, name: string, pop: boolean) =>
-    invoke<string>("stash_apply", { path, name, pop }),
-  stashDrop: (path: string, name: string) => invoke<string>("stash_drop", { path, name }),
-  cherryPick: (path: string, oid: string) => invoke<string>("cherry_pick", { path, oid }),
-  revert: (path: string, oid: string) => invoke<string>("revert", { path, oid }),
-  rebase: (path: string, onto: string) => invoke<string>("rebase", { path, onto }),
+    writeInvoke<string>("stash_push", { path, message, includeUntracked }),
+  stashApply: (path: string, name: string, pop: boolean, expectedOid?: string) =>
+    writeInvoke<string>("stash_apply", { path, name, pop, expectedOid }),
+  stashDrop: (path: string, name: string, expectedOid?: string) => writeInvoke<string>("stash_drop", { path, name, expectedOid }),
+  cherryPick: (path: string, oid: string) => writeInvoke<string>("cherry_pick", { path, oid }),
+  revert: (path: string, oid: string) => writeInvoke<string>("revert", { path, oid }),
+  rebase: (path: string, onto: string) => writeInvoke<string>("rebase", { path, onto }),
   getContainedIn: (path: string, oid: string) =>
     invoke<ContainedInfo>("get_contained_in", { path, oid }),
   tagList: (path: string) => invoke<TagInfo[]>("tag_list", { path }),
   createTag: (path: string, name: string, oid?: string, message?: string) =>
-    invoke<string>("create_tag", { path, name, oid, message }),
-  deleteTag: (path: string, name: string) => invoke<string>("delete_tag", { path, name }),
+    writeInvoke<string>("create_tag", { path, name, oid, message }),
+  deleteTag: (path: string, name: string) => writeInvoke<string>("delete_tag", { path, name }),
   submoduleList: (path: string) => invoke<SubmoduleInfo[]>("submodule_list", { path }),
-  submoduleUpdate: (path: string) => invoke<string>("submodule_update", { path }),
+  submoduleUpdate: (path: string) => writeInvoke<string>("submodule_update", { path }),
   blameFile: (path: string, file: string, oid?: string) =>
     invoke<BlameLine[]>("blame_file", { path, file, oid }),
   fileLog: (path: string, file: string, maxCount?: number) =>
     invoke<FileLogEntry[]>("file_log", { path, file, maxCount }),
+  getCompareFiles: (path: string, base: string, target: string) => invoke<CompareResult>("get_compare_files", { path, base, target }),
+  getCompareFileDiff: (path: string, base: string, target: string, file: string, oldFile?: string | null) => invoke<FileDiff[]>("get_compare_file_diff", { path, base, target, file, oldFile }),
   getCompareDiff: (path: string, base: string, target: string) =>
     invoke<CompareResult>("get_compare_diff", { path, base, target }),
   getOperationState: (path: string) => invoke<OperationState>("get_operation_state", { path }),
   getConflictFile: (path: string, file: string) => invoke<ConflictFile>("get_conflict_file", { path, file }),
-  saveResolvedFile: (path: string, file: string, content: string, resolveAsDeletion = false) =>
-    invoke<OperationState>("save_resolved_file", { path, file, content, resolveAsDeletion }),
-  continueOperation: (path: string) => invoke<string>("continue_operation", { path }),
-  abortOperation: (path: string) => invoke<string>("abort_operation", { path }),
-  discardFiles: (path: string, paths: string[]) => invoke<string>("discard_files", { path, paths }),
-  deleteUntrackedFiles: (path: string, paths: string[]) => invoke<string>("delete_untracked_files", { path, paths }),
+  saveResolvedFile: (path: string, file: string, content: string, resolveAsDeletion = false, expected?: ConflictFile) =>
+    writeInvoke<OperationState>("save_resolved_file", { path, file, content, resolveAsDeletion, expected }),
+  continueOperation: (path: string) => writeInvoke<string>("continue_operation", { path }),
+  skipOperation: (path: string, expected: OperationState) => writeInvoke<string>("skip_operation", { path, expected }),
+  abortOperation: (path: string) => writeInvoke<string>("abort_operation", { path }),
+  discardFiles: (path: string, paths: string[]) => writeInvoke<string>("discard_files", { path, paths }),
+  deleteUntrackedFiles: (path: string, paths: string[]) => writeInvoke<string>("delete_untracked_files", { path, paths }),
   openPath: (path: string, file: string) => invoke<void>("open_path", { path, file }),
   revealPath: (path: string, file?: string) => invoke<void>("reveal_path", { path, file }),
+  getResetPreview: (path: string, target: string, mode: ResetMode) => invoke<ResetPreview>("get_reset_preview", { path, target, mode }),
+  reset: (path: string, preview: ResetPreview) => writeInvoke<ResetResult>("reset", { path, preview }),
+  getRecoveryEntries: (path: string) => invoke<RecoveryEntry[]>("get_recovery_entries", { path }),
   prepareInteractiveRebase: (path: string, oid: string) =>
     invoke<RebasePlan>("prepare_interactive_rebase", { path, oid }),
-  startInteractiveRebase: (path: string, onto: string, originalHead: string, entries: RebaseTodoEntry[]) =>
-    invoke<string>("start_interactive_rebase", { path, onto, originalHead, entries }),
+  startInteractiveRebase: (path: string, plan: RebasePlan) =>
+    writeInvoke<string>("start_interactive_rebase", { path, plan }),
 };
 
 let logRequestId = 0;

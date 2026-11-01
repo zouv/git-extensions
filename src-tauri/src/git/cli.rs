@@ -4,7 +4,11 @@ use std::process::{Command, Stdio};
 use git2::RepositoryState;
 use serde::Serialize;
 
-use super::{open, resolve_worktree_path, validate_relative_path};
+use super::{
+    open,
+    operations::{acquire_write, WriteLease},
+    resolve_worktree_path, validate_relative_path,
+};
 use crate::error::{GitError, GitResult};
 
 /// 写操作统一走 git CLI：hooks 会执行，行为与命令行完全一致。
@@ -48,6 +52,102 @@ pub(crate) fn run_git_with_env(
         };
         Err(GitError::Cli(details))
     }
+}
+
+/// 分支/标签名与 revision 是不同类型的输入，不能直接当 CLI 选项拼接。
+fn validate_ref_name(name: &str, namespace: &str) -> GitResult<()> {
+    if name.trim() != name
+        || name.contains('\0')
+        || name.starts_with('-')
+        || name == "HEAD"
+        || !git2::Reference::is_valid_name(&format!("refs/{namespace}/{name}"))
+    {
+        return Err(GitError::InvalidInput(format!(
+            "invalid {namespace} name: {name}"
+        )));
+    }
+    Ok(())
+}
+
+fn commit_argument(repo: &git2::Repository, value: &str) -> GitResult<String> {
+    if value.is_empty() || value.starts_with('-') || value.contains(['\0', '\n', '\r']) {
+        return Err(GitError::InvalidInput("invalid commit reference".into()));
+    }
+    Ok(repo
+        .revparse_single(value)?
+        .peel_to_commit()?
+        .id()
+        .to_string())
+}
+
+fn local_branch(repo: &git2::Repository) -> GitResult<String> {
+    let head = repo.head()?;
+    head.name()
+        .and_then(|name| name.strip_prefix("refs/heads/"))
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| {
+            GitError::InvalidInput("push requires a local branch; HEAD is detached".into())
+        })
+}
+
+fn config_value(config: &git2::Config, key: &str) -> GitResult<Option<String>> {
+    match config.get_string(key) {
+        Ok(value) => Ok(Some(value)),
+        Err(error) if error.code() == git2::ErrorCode::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn validate_remote(repo: &git2::Repository, name: &str) -> GitResult<()> {
+    if name.is_empty() || name.starts_with('-') || name.contains(['\0', '\n', '\r']) {
+        return Err(GitError::InvalidInput("invalid remote name".into()));
+    }
+    // 只接受仓库中配置的远程，不能传入 URL、路径或 Git 选项。
+    repo.find_remote(name)?;
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushInfo {
+    pub branch: String,
+    pub branch_ref: String,
+    pub head_oid: String,
+    pub has_upstream: bool,
+    pub upstream: Option<String>,
+    pub remotes: Vec<String>,
+}
+
+pub fn get_push_info(path: String) -> GitResult<PushInfo> {
+    let repo = open(&path)?;
+    let branch = local_branch(&repo)?;
+    let config = repo.config()?;
+    let remote = config_value(&config, &format!("branch.{branch}.remote"))?;
+    let merge = config_value(&config, &format!("branch.{branch}.merge"))?;
+    let upstream = remote
+        .filter(|remote| !remote.is_empty())
+        .zip(merge.filter(|merge| !merge.is_empty()))
+        .map(|(remote, merge)| {
+            format!(
+                "{remote}/{}",
+                merge.strip_prefix("refs/heads/").unwrap_or(&merge)
+            )
+        });
+    let remotes = repo
+        .remotes()?
+        .iter()
+        .flatten()
+        .map(ToOwned::to_owned)
+        .collect();
+    let head_oid = repo.head()?.peel_to_commit()?.id().to_string();
+    Ok(PushInfo {
+        branch_ref: format!("refs/heads/{branch}"),
+        branch,
+        head_oid,
+        has_upstream: upstream.is_some(),
+        upstream,
+        remotes,
+    })
 }
 
 fn paths_args(paths: &[String]) -> GitResult<Vec<String>> {
@@ -120,17 +220,22 @@ fn expand_rename_paths(
     Ok(unique)
 }
 
-#[tauri::command]
 pub fn stage_files(path: String, paths: Vec<String>) -> GitResult<String> {
-    let repo = open(&path)?;
-    let paths = expand_rename_paths(&repo, &paths, false)?;
+    let write = acquire_write(&path)?;
+    stage_files_with_lease(&path, &paths, &write)
+}
+
+// 保存冲突结果与 stage 属于同一写操作，复用已有 lease，不重新申请锁。
+fn stage_files_with_lease(path: &str, paths: &[String], _write: &WriteLease) -> GitResult<String> {
+    let repo = open(path)?;
+    let paths = expand_rename_paths(&repo, paths, false)?;
     let mut args = vec!["add".to_string()];
     args.extend(paths_args(&paths)?);
     run_git(&path, &args)
 }
 
-#[tauri::command]
 pub fn unstage_files(path: String, paths: Vec<String>) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
     let repo = open(&path)?;
     let paths = expand_rename_paths(&repo, &paths, true)?;
     let mut args = vec!["restore".to_string(), "--staged".to_string()];
@@ -146,71 +251,118 @@ pub fn unstage_files(path: String, paths: Vec<String>) -> GitResult<String> {
     }
 }
 
-#[tauri::command]
 pub fn commit(path: String, message: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
     if message.trim().is_empty() {
         return Err(GitError::InvalidInput("commit message is empty".into()));
     }
     run_git(&path, &["commit".to_string(), "-m".to_string(), message])
 }
 
-#[tauri::command]
 pub fn create_branch(path: String, name: String, start_point: Option<String>) -> GitResult<String> {
-    if name.trim().is_empty() {
-        return Err(GitError::InvalidInput("branch name is empty".into()));
-    }
-    let mut args = vec!["branch".to_string(), name];
-    if let Some(start) = start_point.filter(|s| !s.trim().is_empty()) {
-        args.push(start);
+    let _write = acquire_write(&path)?;
+    validate_ref_name(&name, "heads")?;
+    let repo = open(&path)?;
+    let mut args = vec!["branch".into(), "--".into(), name];
+    if let Some(start) = start_point {
+        args.push(commit_argument(&repo, &start)?);
     }
     run_git(&path, &args)
 }
 
-#[tauri::command]
 pub fn checkout_branch(path: String, name: String) -> GitResult<String> {
-    run_git(&path, &["checkout".to_string(), name])
+    let _write = acquire_write(&path)?;
+    validate_ref_name(&name, "heads")?;
+    open(&path)?.find_branch(&name, git2::BranchType::Local)?;
+    run_git(
+        &path,
+        &["switch".into(), "--no-guess".into(), "--".into(), name],
+    )
 }
 
-#[tauri::command]
 pub fn delete_branch(path: String, name: String, force: bool) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    validate_ref_name(&name, "heads")?;
     run_git(
         &path,
         &[
             "branch".to_string(),
             if force { "-D" } else { "-d" }.to_string(),
+            "--".into(),
             name,
         ],
     )
 }
 
-#[tauri::command]
 pub fn fetch(path: String, remote: Option<String>) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
     let mut args = vec!["fetch".to_string()];
-    if let Some(remote) = remote.filter(|r| !r.trim().is_empty()) {
+    if let Some(remote) = remote {
+        validate_remote(&open(&path)?, &remote)?;
+        args.push("--".into());
         args.push(remote);
     }
     run_git(&path, &args)
 }
 
-#[tauri::command]
 pub fn pull(path: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
     run_git(&path, &["pull".to_string()])
 }
 
-#[tauri::command]
-pub fn push(path: String) -> GitResult<String> {
-    // 新仓库首次 push 尚无 upstream，退回 push -u origin HEAD 建立跟踪
-    match run_git(&path, &["push".to_string()]) {
-        Ok(out) => Ok(out),
-        Err(_) => run_git(
-            &path,
-            &[
-                "push".to_string(),
-                "-u".to_string(),
-                "origin".to_string(),
-                "HEAD".to_string(),
-            ],
-        ),
+pub fn push(
+    path: String,
+    remote: Option<String>,
+    branch: Option<String>,
+    expected_head: Option<String>,
+    expected_branch: Option<String>,
+) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let info = get_push_info(path.clone())?;
+    if expected_head
+        .as_ref()
+        .is_some_and(|head| head != &info.head_oid)
+        || expected_branch
+            .as_ref()
+            .is_some_and(|branch| branch != &info.branch_ref)
+    {
+        return Err(GitError::InvalidInput(
+            "push preview is stale; branch or HEAD changed".into(),
+        ));
+    }
+    match (remote, branch) {
+        (None, None) => {
+            if !info.has_upstream {
+                return Err(GitError::InvalidInput(
+                    "no upstream configured; choose a remote and target branch explicitly".into(),
+                ));
+            }
+            // 尊重 Git push 配置；任何失败原样返回，不换远程、不修改 upstream。
+            run_git(&path, &["push".into()])
+        }
+        (Some(remote), Some(branch)) => {
+            if expected_head.is_none() || expected_branch.is_none() {
+                return Err(GitError::InvalidInput(
+                    "explicit push requires the preview branch and HEAD".into(),
+                ));
+            }
+            validate_remote(&open(&path)?, &remote)?;
+            validate_ref_name(&branch, "heads")?;
+            let refspec = format!("{}:refs/heads/{branch}", info.branch_ref);
+            run_git(
+                &path,
+                &[
+                    "push".into(),
+                    "--set-upstream".into(),
+                    "--".into(),
+                    remote,
+                    refspec,
+                ],
+            )
+        }
+        _ => Err(GitError::InvalidInput(
+            "remote and target branch must be supplied together".into(),
+        )),
     }
 }
 
@@ -223,7 +375,6 @@ pub struct StashInfo {
     pub message: String,
 }
 
-#[tauri::command]
 pub fn stash_list(path: String) -> GitResult<Vec<StashInfo>> {
     let out = run_git(
         &path,
@@ -248,8 +399,8 @@ pub fn stash_list(path: String) -> GitResult<Vec<StashInfo>> {
     Ok(stashes)
 }
 
-#[tauri::command]
 pub fn stash_push(path: String, message: String, include_untracked: bool) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
     let mut args = vec!["stash".to_string(), "push".to_string()];
     if include_untracked {
         args.push("-u".to_string());
@@ -261,40 +412,94 @@ pub fn stash_push(path: String, message: String, include_untracked: bool) -> Git
     run_git(&path, &args)
 }
 
-#[tauri::command]
+// 限定真实 stash 序号，并用预览 OID 防止列表变化后 apply/drop 错条目。
+fn checked_stash(path: &str, name: &str, expected_oid: Option<&str>) -> GitResult<String> {
+    let digits = name
+        .strip_prefix("stash@{")
+        .and_then(|s| s.strip_suffix('}'))
+        .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+        .ok_or_else(|| GitError::InvalidInput("stash name must be stash@{index}".into()))?;
+    let index: usize = digits
+        .parse()
+        .map_err(|_| GitError::InvalidInput("invalid stash index".into()))?;
+    let repo = open(path)?;
+    let log = repo.reflog("refs/stash")?;
+    let oid = log
+        .get(index)
+        .ok_or_else(|| GitError::InvalidInput("stash entry no longer exists".into()))?
+        .id_new()
+        .to_string();
+    if expected_oid.is_some_and(|expected| expected != oid) {
+        return Err(GitError::InvalidInput(
+            "stash list changed; refresh and select again".into(),
+        ));
+    }
+    Ok(oid)
+}
 pub fn stash_apply(path: String, name: String, pop: bool) -> GitResult<String> {
+    stash_apply_checked(path, name, pop, None)
+}
+pub fn stash_apply_checked(
+    path: String,
+    name: String,
+    pop: bool,
+    expected_oid: Option<String>,
+) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let oid = checked_stash(&path, &name, expected_oid.as_deref())?;
     run_git(
         &path,
         &[
-            "stash".to_string(),
-            if pop { "pop" } else { "apply" }.to_string(),
-            name,
+            "stash".into(),
+            if pop { "pop" } else { "apply" }.into(),
+            "--".into(),
+            if pop { name } else { oid },
         ],
     )
 }
-
-#[tauri::command]
 pub fn stash_drop(path: String, name: String) -> GitResult<String> {
-    run_git(&path, &["stash".to_string(), "drop".to_string(), name])
+    stash_drop_checked(path, name, None)
+}
+pub fn stash_drop_checked(
+    path: String,
+    name: String,
+    expected_oid: Option<String>,
+) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    checked_stash(&path, &name, expected_oid.as_deref())?;
+    run_git(&path, &["stash".into(), "drop".into(), "--".into(), name])
 }
 
-#[tauri::command]
 pub fn cherry_pick(path: String, oid: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let oid = commit_argument(&open(&path)?, &oid)?;
     run_git(&path, &["cherry-pick".to_string(), oid])
 }
 
-#[tauri::command]
 pub fn revert(path: String, oid: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let oid = commit_argument(&open(&path)?, &oid)?;
     run_git(&path, &["revert".to_string(), "--no-edit".to_string(), oid])
 }
 
-#[tauri::command]
 pub fn rebase(path: String, onto: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let repo = open(&path)?;
+    if repo.state() != RepositoryState::Clean {
+        return Err(GitError::InvalidInput(
+            "finish or abort the current operation before rebasing".into(),
+        ));
+    }
+    let onto = commit_argument(&repo, &onto)?;
+    let head = repo.head()?.peel_to_commit()?.id().to_string();
+    let backup = super::reset::create_backup(&path, &head, "rebase")?;
     run_git(&path, &["rebase".to_string(), onto])
+        .map(|output| format!("{output}\nOriginal HEAD backup: {backup}"))
+        .map_err(|error| GitError::Cli(format!("{error}; original HEAD preserved in {backup}")))
 }
 
-#[tauri::command]
 pub fn discard_files(path: String, paths: Vec<String>) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
     let _ = open(&path)?;
     for file in &paths {
         validate_relative_path(file)?;
@@ -305,8 +510,8 @@ pub fn discard_files(path: String, paths: Vec<String>) -> GitResult<String> {
 }
 
 /// 只删除 Git 确认过的未跟踪普通文件；目录、ignored 和已跟踪文件一律拒绝。
-#[tauri::command]
 pub fn delete_untracked_files(path: String, paths: Vec<String>) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
     let repo = open(&path)?;
     if paths.is_empty() {
         return Err(GitError::InvalidInput("no paths given".into()));
@@ -349,15 +554,28 @@ fn contains_conflict_markers(content: &str) -> bool {
     })
 }
 
-#[tauri::command]
 pub fn save_resolved_file(
     path: String,
     file: String,
     content: String,
     resolve_as_deletion: Option<bool>,
 ) -> GitResult<super::status::OperationState> {
+    save_resolved_file_checked(path, file, content, resolve_as_deletion, None)
+}
+
+pub fn save_resolved_file_checked(
+    path: String,
+    file: String,
+    content: String,
+    resolve_as_deletion: Option<bool>,
+    expected: Option<super::status::ConflictFile>,
+) -> GitResult<super::status::OperationState> {
+    let _write = acquire_write(&path)?;
     // 先验证该文件确实仍有 index conflict，避免把此命令当任意文件写入接口。
     let conflict = super::status::get_conflict_file(path.clone(), file.clone())?;
+    if expected.as_ref().is_some_and(|old| old != &conflict) {
+        return Err(GitError::InvalidInput("conflict preview is stale; file or index stages changed; reload and reconcile your draft before saving".into()));
+    }
     if conflict.truncated || conflict.binary {
         return Err(GitError::InvalidInput(
             "refusing to save truncated or binary conflict content".into(),
@@ -372,7 +590,7 @@ pub fn save_resolved_file(
             Err(error) => return Err(error.into()),
         }
         // git add 对不存在的 literal path 会记录删除，不会留下空文件。
-        stage_files(path.clone(), vec![file])?;
+        stage_files_with_lease(&path, &[file], &_write)?;
         return super::status::get_operation_state(path);
     }
     if content.len() > 16 * 1024 * 1024 {
@@ -386,12 +604,12 @@ pub fn save_resolved_file(
         ));
     }
     std::fs::write(full_path, content)?;
-    stage_files(path.clone(), vec![file])?;
+    stage_files_with_lease(&path, &[file], &_write)?;
     super::status::get_operation_state(path)
 }
 
-#[tauri::command]
 pub fn continue_operation(path: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
     let repo = open(&path)?;
     if repo.index()?.has_conflicts() {
         return Err(GitError::InvalidInput(
@@ -443,8 +661,8 @@ pub fn continue_operation(path: String) -> GitResult<String> {
     Ok(output)
 }
 
-#[tauri::command]
 pub fn abort_operation(path: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
     let repo = open(&path)?;
     let args: &[&str] = match repo.state() {
         RepositoryState::Merge => &["merge", "--abort"],
@@ -481,7 +699,6 @@ pub struct ContainedInfo {
 
 /// 提交详情增强：包含该提交的分支 / 标签、最近标签描述。
 /// 三条命令都是只读；分支 / 标签很多时输出可能大，各限制 100 条。
-#[tauri::command]
 pub fn get_contained_in(path: String, oid: String) -> GitResult<ContainedInfo> {
     let parse = |out: String| -> Vec<String> {
         out.lines()
@@ -522,7 +739,6 @@ pub struct TagInfo {
     pub subject: String,
 }
 
-#[tauri::command]
 pub fn tag_list(path: String) -> GitResult<Vec<TagInfo>> {
     let out = run_git(
         &path,
@@ -547,32 +763,32 @@ pub fn tag_list(path: String) -> GitResult<Vec<TagInfo>> {
     Ok(tags)
 }
 
-#[tauri::command]
 pub fn create_tag(
     path: String,
     name: String,
     oid: Option<String>,
     message: Option<String>,
 ) -> GitResult<String> {
-    if name.trim().is_empty() {
-        return Err(GitError::InvalidInput("tag name is empty".into()));
-    }
+    let _write = acquire_write(&path)?;
+    validate_ref_name(&name, "tags")?;
     let mut args = vec!["tag".to_string()];
     if let Some(msg) = message.filter(|m| !m.trim().is_empty()) {
         args.push("-a".to_string());
         args.push("-m".to_string());
         args.push(msg);
     }
+    args.push("--".into());
     args.push(name);
-    if let Some(oid) = oid.filter(|o| !o.trim().is_empty()) {
-        args.push(oid);
+    if let Some(oid) = oid {
+        args.push(commit_argument(&open(&path)?, &oid)?);
     }
     run_git(&path, &args)
 }
 
-#[tauri::command]
 pub fn delete_tag(path: String, name: String) -> GitResult<String> {
-    run_git(&path, &["tag".to_string(), "-d".to_string(), name])
+    let _write = acquire_write(&path)?;
+    validate_ref_name(&name, "tags")?;
+    run_git(&path, &["tag".into(), "-d".into(), "--".into(), name])
 }
 
 #[derive(Serialize)]
@@ -584,7 +800,6 @@ pub struct SubmoduleInfo {
     pub status: String,
 }
 
-#[tauri::command]
 pub fn submodule_list(path: String) -> GitResult<Vec<SubmoduleInfo>> {
     let out = run_git(&path, &["submodule".to_string(), "status".to_string()])?;
     let mut modules = Vec::new();
@@ -608,8 +823,8 @@ pub fn submodule_list(path: String) -> GitResult<Vec<SubmoduleInfo>> {
     Ok(modules)
 }
 
-#[tauri::command]
 pub fn submodule_update(path: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
     run_git(
         &path,
         &[
@@ -619,4 +834,38 @@ pub fn submodule_update(path: String) -> GitResult<String> {
             "--recursive".to_string(),
         ],
     )
+}
+
+/// 跳过当前序列步骤，确认期间 Git 状态变化时拒绝旧意图。
+pub fn skip_operation(path: String, expected: super::status::OperationState) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let current = super::status::get_operation_state(path.clone())?;
+    if current != expected {
+        return Err(GitError::InvalidInput(
+            "operation state changed; refresh before skipping".into(),
+        ));
+    }
+    let command = match current.kind.as_str() {
+        "rebase" => "rebase",
+        "cherryPick" => "cherry-pick",
+        "revert" => "revert",
+        _ => {
+            return Err(GitError::InvalidInput(
+                "this operation cannot skip a step".into(),
+            ))
+        }
+    };
+    let repo = open(&path)?;
+    let output = run_git_with_env(
+        &path,
+        &[command.into(), "--skip".into()],
+        &[
+            ("GIT_EDITOR", OsStr::new("true")),
+            ("GIT_SEQUENCE_EDITOR", OsStr::new("true")),
+        ],
+    )?;
+    if repo.state() == RepositoryState::Clean {
+        super::rebase::cleanup_rebase_files(&repo);
+    }
+    Ok(output)
 }

@@ -14,7 +14,7 @@ if errorlevel 1 (
     echo [ERROR] Rust toolchain is required. Install via https://rustup.rs
     popd & exit /b 1
 )
-pnpm tauri:build
+call pnpm tauri:build
 set "CODE=%ERRORLEVEL%"
 if %CODE%==0 echo [OK] Installers are under src-tauri\target\release\bundle\
 popd

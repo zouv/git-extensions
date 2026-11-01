@@ -7,7 +7,7 @@ use git2::{Oid, Repository, RepositoryState};
 use serde::{Deserialize, Serialize};
 
 use super::cli::run_git_with_env;
-use super::open;
+use super::{open, operations::acquire_write};
 use crate::error::{GitError, GitResult};
 
 const PLAN_DIR: &str = "git-extensions-rebase";
@@ -43,10 +43,13 @@ fn parse_oid(value: &str, label: &str) -> GitResult<Oid> {
 
 fn current_branch(repo: &Repository) -> GitResult<Option<String>> {
     let head = repo.head()?;
-    Ok(head
-        .name()
-        .and_then(|name| name.strip_prefix("refs/heads/"))
-        .map(ToOwned::to_owned))
+    // 使用完整 ref，不依赖短名称；拒绝 detached HEAD 的历史重写。
+    match head.name().filter(|name| name.starts_with("refs/heads/")) {
+        Some(name) => Ok(Some(name.to_owned())),
+        None => Err(GitError::InvalidInput(
+            "interactive rebase requires a local branch".into(),
+        )),
+    }
 }
 
 fn ensure_clean(repo: &Repository) -> GitResult<()> {
@@ -111,7 +114,6 @@ fn expected_plan(repo: &Repository, onto: Oid) -> GitResult<RebasePlan> {
     })
 }
 
-#[tauri::command]
 pub fn prepare_interactive_rebase(path: String, oid: String) -> GitResult<RebasePlan> {
     let repo = open(&path)?;
     ensure_clean(&repo)?;
@@ -265,20 +267,7 @@ fn run_rebase(repo_path: &str, args: &[String], editor_exe: &Path) -> GitResult<
     run_git_with_env(repo_path, args, &refs)
 }
 
-#[tauri::command]
-pub fn start_interactive_rebase(
-    path: String,
-    onto: String,
-    original_head: String,
-    entries: Vec<RebaseEntry>,
-) -> GitResult<String> {
-    let repo = open(&path)?;
-    let plan = RebasePlan {
-        onto,
-        original_head,
-        branch: current_branch(&repo)?,
-        entries,
-    };
+pub fn start_interactive_rebase(path: String, plan: RebasePlan) -> GitResult<String> {
     let editor = std::env::current_exe()?;
     start_interactive_rebase_with_editor(path, plan, &editor)
 }
@@ -290,8 +279,10 @@ pub fn start_interactive_rebase_with_editor(
     plan: RebasePlan,
     editor_exe: &Path,
 ) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
     let repo = open(&path)?;
     validate_plan(&repo, &plan)?;
+    let backup = super::reset::create_backup(&path, &plan.original_head, "rebase")?;
     write_plan_files(&repo, &plan)?;
     let args = vec![
         "rebase".to_string(),
@@ -302,13 +293,15 @@ pub fn start_interactive_rebase_with_editor(
     match run_rebase(&path, &args, editor_exe) {
         Ok(output) => {
             cleanup_rebase_files(&repo);
-            Ok(output)
+            Ok(format!("{output}\nOriginal HEAD backup: {backup}"))
         }
         Err(error) => {
             if repo.state() == RepositoryState::Clean {
                 cleanup_rebase_files(&repo);
             }
-            Err(error)
+            Err(GitError::Cli(format!(
+                "{error}; original HEAD preserved in {backup}"
+            )))
         }
     }
 }

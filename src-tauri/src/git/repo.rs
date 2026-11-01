@@ -9,6 +9,7 @@ pub struct RepoInfo {
     pub path: String,
     pub name: String,
     pub head_branch: Option<String>,
+    pub head_oid: Option<String>,
     pub is_empty: bool,
 }
 
@@ -21,7 +22,6 @@ pub struct BranchInfo {
     pub oid: String,
 }
 
-#[tauri::command]
 pub fn open_repo(path: String) -> GitResult<RepoInfo> {
     let repo = open(&path)?;
     let workdir = repo
@@ -40,11 +40,15 @@ pub fn open_repo(path: String) -> GitResult<RepoInfo> {
         path: workdir.to_string_lossy().into_owned(),
         name,
         head_branch,
+        head_oid: repo
+            .head()
+            .ok()
+            .and_then(|h| h.target())
+            .map(|oid| oid.to_string()),
         is_empty: repo.is_empty()?,
     })
 }
 
-#[tauri::command]
 pub fn get_branches(path: String) -> GitResult<Vec<BranchInfo>> {
     let repo = open(&path)?;
     let mut branches = Vec::new();
@@ -74,7 +78,6 @@ pub struct AheadBehind {
 }
 
 /// 当前分支相对其 upstream 的 ahead/behind；无 upstream 时返回 None。
-#[tauri::command]
 pub fn get_ahead_behind(path: String) -> GitResult<Option<AheadBehind>> {
     let repo = open(&path)?;
     let head = match repo.head() {

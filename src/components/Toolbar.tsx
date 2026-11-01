@@ -21,6 +21,7 @@ interface Props {
   onTags: () => void;
   onSubmodules: () => void;
   onSettings: () => void;
+  onRecovery: () => void;
   onCompare: () => void;
   onRemote: (kind: "fetch" | "pull" | "push") => void;
 }
@@ -56,6 +57,7 @@ export default function Toolbar(props: Props) {
       <ToolButton icon="panel" title="显示 / 隐藏检查器" onClick={props.onToggleInspector} primary={props.inspectorVisible} />
       <ToolButton icon="settings" title="设置与快捷键 (Ctrl+,)" onClick={props.onSettings} />
       <div className="toolbar-overflow">
+        <ToolButton icon="history" title="恢复历史：HEAD 备份与 reflog" disabled={busy} onClick={props.onRecovery} />
         <ToolButton icon="stash" title="Stash (Ctrl+Shift+S)" disabled={busy} onClick={props.onStash} />
         <ToolButton icon="tag" title="标签 (Ctrl+Shift+T)" disabled={busy} onClick={props.onTags} />
         <ToolButton icon="more" title="子模块 (Ctrl+Shift+M)" disabled={busy} onClick={props.onSubmodules} />

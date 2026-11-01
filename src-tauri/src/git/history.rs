@@ -19,65 +19,115 @@ pub struct BlameLine {
 }
 
 /// 逐行归属。oid 为空时 blame 工作区当前文件，否则 blame 指定提交中的版本。
-#[tauri::command]
 pub fn blame_file(path: String, file: String, oid: Option<String>) -> GitResult<Vec<BlameLine>> {
     let repo = open(&path)?;
-    let rel = std::path::Path::new(&file);
+    let rel = super::validate_relative_path(&file)?;
+    let selected = oid.as_deref().filter(|s| !s.trim().is_empty());
     let mut opts = git2::BlameOptions::new();
-    if let Some(oid) = oid.as_deref().filter(|s| !s.trim().is_empty()) {
+    let bytes = if let Some(oid) = selected {
         let parsed = git2::Oid::from_str(oid)
             .map_err(|_| GitError::InvalidInput(format!("bad oid: {oid}")))?;
         opts.newest_commit(parsed);
-    }
-    let blame = repo.blame_file(rel, Some(&mut opts))?;
-
-    // blame 只给行号，内容按版本来源读取
-    let content: String = if let Some(oid) = oid.as_deref().filter(|s| !s.trim().is_empty()) {
-        let parsed = git2::Oid::from_str(oid).unwrap();
-        let commit = repo.find_commit(parsed)?;
-        let tree = commit.tree()?;
-        let entry = tree.get_path(rel)?;
+        let tree = repo.find_commit(parsed)?.tree()?;
+        let entry = tree.get_path(&rel)?;
+        if repo.odb()?.read_header(entry.id())?.0 > 2 * 1024 * 1024 {
+            return Err(GitError::InvalidInput(
+                "file exceeds blame size limit (2 MiB)".into(),
+            ));
+        }
         let blob = entry.to_object(&repo)?.peel_to_blob()?;
-        String::from_utf8_lossy(blob.content()).into_owned()
+        if blob.size() > 2 * 1024 * 1024 {
+            return Err(GitError::InvalidInput(
+                "file exceeds blame size limit (2 MiB)".into(),
+            ));
+        }
+        blob.content().to_vec()
     } else {
-        let workdir = repo
-            .workdir()
-            .ok_or_else(|| GitError::InvalidInput("bare repository".into()))?;
-        std::fs::read_to_string(workdir.join(rel))?
+        let full = super::resolve_worktree_path(&repo, &file)?;
+        if std::fs::metadata(&full)?.len() > 2 * 1024 * 1024 {
+            return Err(GitError::InvalidInput(
+                "file exceeds blame size limit (2 MiB)".into(),
+            ));
+        }
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        std::fs::File::open(full)?
+            .take(2 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > 2 * 1024 * 1024 {
+            return Err(GitError::InvalidInput(
+                "file exceeds blame size limit".into(),
+            ));
+        }
+        bytes
     };
+    let content = std::str::from_utf8(&bytes)
+        .map_err(|_| GitError::InvalidInput("blame requires UTF-8 text".into()))?;
+    if content.contains('\0') {
+        return Err(GitError::InvalidInput("cannot blame binary file".into()));
+    }
     let lines: Vec<&str> = content.lines().collect();
     if lines.len() > MAX_BLAME_LINES {
         return Err(GitError::InvalidInput(format!(
-            "file has {} lines, blame limit is {MAX_BLAME_LINES}",
-            lines.len()
+            "file exceeds blame limit ({MAX_BLAME_LINES} lines)"
         )));
     }
-
-    let mut result = Vec::with_capacity(lines.len());
-    for hunk in blame.iter() {
-        let oid = hunk.final_commit_id();
-        let sig = hunk.final_signature();
-        let start = hunk.final_start_line();
-        let count = hunk.lines_in_hunk();
-        for offset in 0..count {
-            let line_no = start + offset;
-            result.push(BlameLine {
-                short_id: oid.to_string()[..7].to_string(),
-                oid: oid.to_string(),
-                author: sig.name().unwrap_or_default().to_string(),
-                time: sig.when().seconds(),
-                line: line_no,
-                content: lines.get(line_no - 1).unwrap_or(&"").to_string(),
-            });
+    let committed = match repo.blame_file(&rel, Some(&mut opts)) {
+        Ok(blame) => Some(blame),
+        Err(e)
+            if selected.is_none()
+                && matches!(
+                    e.code(),
+                    git2::ErrorCode::NotFound | git2::ErrorCode::UnbornBranch
+                ) =>
+        {
+            None
         }
+        Err(e) => return Err(e.into()),
+    };
+    // 以工作区 buffer 修正插入/删除造成的行号移动，新增行使用零 OID。
+    let adjusted = if selected.is_none() {
+        committed
+            .as_ref()
+            .map(|b| b.blame_buffer(&bytes))
+            .transpose()?
+    } else {
+        None
+    };
+    let blame = adjusted.as_ref().or(committed.as_ref());
+    let mut result = Vec::with_capacity(lines.len());
+    for (index, content) in lines.into_iter().enumerate() {
+        let hunk = blame.and_then(|b| b.get_line(index + 1));
+        let oid = hunk
+            .as_ref()
+            .map(|h| h.final_commit_id())
+            .filter(|id| !id.is_zero());
+        let sig = hunk
+            .as_ref()
+            .filter(|_| oid.is_some())
+            .map(|h| h.final_signature());
+        result.push(BlameLine {
+            oid: oid.map(|id| id.to_string()).unwrap_or_default(),
+            short_id: oid
+                .map(|id| id.to_string()[..7].to_string())
+                .unwrap_or_else(|| "未提交".into()),
+            author: sig
+                .as_ref()
+                .and_then(|s| s.name())
+                .unwrap_or("工作区")
+                .into(),
+            time: sig.as_ref().map(|s| s.when().seconds()).unwrap_or(0),
+            line: index + 1,
+            content: content.into(),
+        });
     }
-    result.sort_by_key(|l| l.line);
     Ok(result)
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileLogEntry {
+    pub file_path: String,
     pub oid: String,
     pub short_id: String,
     pub author_name: String,
@@ -86,39 +136,75 @@ pub struct FileLogEntry {
 }
 
 /// 单文件提交历史（--follow 跟踪改名）。git2 不支持按路径过滤 revwalk，走 CLI。
-#[tauri::command]
 pub fn file_log(
     path: String,
     file: String,
     max_count: Option<u32>,
 ) -> GitResult<Vec<FileLogEntry>> {
-    let max = max_count.unwrap_or(200).to_string();
+    super::validate_relative_path(&file)?;
+    let max = max_count.unwrap_or(200).clamp(1, 1000).to_string();
     let out = run_git(
         &path,
         &[
-            "log".to_string(),
-            "--follow".to_string(),
-            "--format=%H%x09%an%x09%at%x09%s".to_string(),
-            "-n".to_string(),
+            "log".into(),
+            "--follow".into(),
+            "--format=%x00%H%x00%an%x00%at%x00%s%x00".into(),
+            "--name-status".into(),
+            "-z".into(),
+            "-n".into(),
             max,
-            "--".to_string(),
-            file,
+            "--".into(),
+            file.clone(),
         ],
     )?;
     let mut entries = Vec::new();
-    for line in out.lines() {
-        let mut parts = line.splitn(4, '\t');
-        let (Some(oid), Some(author), Some(time), subject) =
-            (parts.next(), parts.next(), parts.next(), parts.next())
-        else {
+    let mut followed_path = file;
+    // 全部字段用 NUL 定界；记录分隔符等控制字符可以合法出现在 author/subject 中。
+    let mut fields = out.split('\0').peekable();
+    while let Some(token) = fields.next() {
+        let oid = token.trim_start_matches('\n');
+        if oid.len() != 40 || !oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             continue;
+        }
+        let (Some(author), Some(time), Some(subject)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            break;
         };
+        let mut commit_path = followed_path.clone();
+        while let Some(token) = fields.peek() {
+            let status = token.trim_start_matches('\n');
+            if status.len() == 40 && status.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                break;
+            }
+            fields.next();
+            if status.is_empty() {
+                continue;
+            }
+            let Some(first) = fields.next() else {
+                break;
+            };
+            if status.starts_with('R') || status.starts_with('C') {
+                let Some(second) = fields.next() else {
+                    break;
+                };
+                if second == followed_path {
+                    commit_path = second.into();
+                    if status.starts_with('R') {
+                        followed_path = first.into();
+                    }
+                }
+            } else if first == followed_path {
+                commit_path = first.into();
+            }
+        }
         entries.push(FileLogEntry {
-            oid: oid.to_string(),
-            short_id: oid[..7.min(oid.len())].to_string(),
-            author_name: author.to_string(),
+            oid: oid.into(),
+            short_id: oid[..7].into(),
+            author_name: author.into(),
             author_time: time.parse().unwrap_or_default(),
-            subject: subject.unwrap_or_default().to_string(),
+            subject: subject.into(),
+            file_path: commit_path,
         });
     }
     Ok(entries)

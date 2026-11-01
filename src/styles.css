@@ -361,3 +361,19 @@ kbd { font: 11px Consolas, monospace; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: #343c47; border: 2px solid transparent; background-clip: padding-box; border-radius: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* 首次推送的明确目标与错误反馈 */
+.push-options { display: flex; flex-direction: column; gap: 12px; }
+.push-options p { margin: 0; overflow-wrap: anywhere; }
+.push-options label { display: flex; flex-direction: column; gap: 6px; }
+.push-options select, .push-options input { width: 100%; min-width: 0; }
+.push-error { margin-top: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
+
+/* Reset / 恢复与批量计划：窄窗口可换行，长路径不挤出对话框。 */
+.reset-modes, .rebase-batch { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px; }
+.reset-modes label { display: flex; align-items: center; gap: 6px; }
+.reset-paths { max-height: 220px; overflow: auto; background: var(--surface); padding: 8px; overflow-wrap: anywhere; }
+.recovery-list { max-height: 440px; overflow: auto; }
+.recovery-entry { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px; border-bottom: 1px solid var(--border); }
+.recovery-entry > span { flex: 1 1 240px; overflow-wrap: anywhere; }
+.recovery-entry > small { color: var(--muted); }

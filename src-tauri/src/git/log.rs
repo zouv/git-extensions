@@ -179,7 +179,7 @@ impl GraphLayout {
 }
 
 #[tauri::command]
-pub fn start_log(
+pub async fn start_log(
     app: AppHandle,
     path: String,
     request_id: u64,
@@ -199,7 +199,7 @@ pub fn start_log(
         max_count,
         revspec
     );
-    std::thread::spawn(move || {
+    let _ = super::operations::run_read(move || {
         let cancelled = || {
             log_generations()
                 .lock()
@@ -225,7 +225,7 @@ pub fn start_log(
         }));
         match result {
             Ok(Ok(())) => {}
-            Ok(Err(e)) => {
+            Ok(Err(e)) if !cancelled() => {
                 ge_log!("run_log error: {}", e);
                 emit(LogBatch {
                     request_id,
@@ -234,7 +234,7 @@ pub fn start_log(
                     error: Some(e.to_string()),
                 });
             }
-            Err(_) => {
+            Err(_) if !cancelled() => {
                 ge_log!("run_log panicked");
                 emit(LogBatch {
                     request_id,
@@ -243,12 +243,24 @@ pub fn start_log(
                     error: Some("日志加载线程发生内部错误".into()),
                 });
             }
+            _ => {}
         }
+        // 请求过期时不发错误，也不清掉新请求的 generation。
         let mut generations = log_generations().lock().unwrap_or_else(|e| e.into_inner());
         if generations.get(&generation_key).copied() == Some(request_id) {
             generations.remove(&generation_key);
         }
-    });
+        Ok(())
+    })
+    .await;
+}
+
+#[tauri::command]
+pub fn cancel_log(path: String, request_id: u64) {
+    let mut generations = log_generations().lock().unwrap_or_else(|e| e.into_inner());
+    if generations.get(&path).copied() == Some(request_id) {
+        generations.remove(&path);
+    }
 }
 
 #[tauri::command]
@@ -279,9 +291,20 @@ pub fn run_log(
             walk.push(commit.id())?;
             pushed = 1;
         }
-        // --all：把所有 ref 的 tip 作为起点，revwalk 自己去重
+        // --all + HEAD：detached HEAD 可能不属于任何 ref。
         None => {
+            if let Ok(head) = repo.head().and_then(|h| h.peel_to_commit()) {
+                walk.push(head.id())?;
+                pushed += 1;
+            }
             for reference in repo.references()?.flatten() {
+                // 内部恢复引用不属于日常历史，避免 Reset/drop 后旧提交幽灵重现。
+                if reference
+                    .name()
+                    .is_some_and(|name| name.starts_with("refs/git-extensions/backups/"))
+                {
+                    continue;
+                }
                 if let Ok(commit) = reference.peel_to_commit() {
                     let _ = walk.push(commit.id());
                     pushed += 1;

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, nextLogRequestId, onLogBatch } from "./api";
-import type { AheadBehind, BranchInfo, CommitDetail, ContainedInfo, FileDiff, OperationState, RepoInfo, Revision, StatusSnapshot, TagInfo } from "./types";
+import { hasSessionDrafts } from "./viewState";
+import { useRepoBusy } from "./useRepoBusy";
+import { getRepoOperation } from "./repoOperations";
+import type { AheadBehind, BranchInfo, CommitDetail, ContainedInfo, FileDiff, ConflictDraft, RebaseDraft, OperationState, RepoInfo, Revision, StatusSnapshot, TagInfo } from "./types";
 import type { AppSettings } from "./settings";
 import { loadLayout, resetLayout, saveLayout } from "./settings";
 import type { SessionMeta } from "./components/RepositoryTabs";
@@ -16,6 +19,9 @@ import CompareView from "./components/CompareView";
 import ConflictCenter from "./components/ConflictCenter";
 import RebasePlanner from "./components/RebasePlanner";
 import BranchDialog from "./components/BranchDialog";
+import ResetDialog from "./components/ResetDialog";
+import RecoveryDialog from "./components/RecoveryDialog";
+import PushDialog from "./components/PushDialog";
 import StashDialog from "./components/StashDialog";
 import TagDialog from "./components/TagDialog";
 import SubmoduleDialog from "./components/SubmoduleDialog";
@@ -64,14 +70,29 @@ export default function RepoWorkspace(props: Props) {
   const [leftRef, setLeftRef] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [message, setMessage] = useState("就绪");
-  const [busy, setBusy] = useState(false);
+  const [localBusy, setBusy] = useState(false);
+  const repoBusy = useRepoBusy(repo.path);
+  const busy = localBusy || repoBusy;
   const [showBranches, setShowBranches] = useState(false);
+  const [resetTarget, setResetTarget] = useState<string | null>(null);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [showPush, setShowPush] = useState(false);
   const [showStash, setShowStash] = useState(false);
   const [showTags, setShowTags] = useState(false);
   const [showSubmodules, setShowSubmodules] = useState(false);
   const [branchStart, setBranchStart] = useState<string | undefined>();
   const [tagTarget, setTagTarget] = useState<string | undefined>();
   const [fileAction, setFileAction] = useState<{ action: "history" | "blame"; file: FileDiff; oid?: string } | null>(null);
+  const conflictDrafts = useRef(new Map<string, ConflictDraft>());
+  const rebaseDrafts = useRef(new Map<string, RebaseDraft>());
+  const saveConflictDraft = useCallback((file: string, draft: ConflictDraft | null) => {
+    if (draft) conflictDrafts.current.set(file, draft); else conflictDrafts.current.delete(file);
+    setConflictDirty(conflictDrafts.current.size > 0);
+  }, []);
+  const saveRebaseDraft = useCallback((oid: string, draft: RebaseDraft | null) => {
+    if (draft?.dirty) rebaseDrafts.current.set(oid, draft); else rebaseDrafts.current.delete(oid);
+    setRebaseDirty(rebaseDrafts.current.size > 0);
+  }, []);
   const [commitDirty, setCommitDirty] = useState(false);
   const [conflictDirty, setConflictDirty] = useState(false);
   const [rebaseDirty, setRebaseDirty] = useState(false);
@@ -80,6 +101,7 @@ export default function RepoWorkspace(props: Props) {
   const selectionRef = useRef(0);
   const headOidRef = useRef("");
   const headNameRef = useRef("");
+  const refsFingerprint = useRef("");
   const statusRef = useRef<StatusSnapshot>(EMPTY_STATUS);
   const busyRef = useRef(false);
   const settingsRef = useRef(settings);
@@ -95,8 +117,8 @@ export default function RepoWorkspace(props: Props) {
   settingsRef.current = settings;
   selectedOidsRef.current = selectedOids;
 
-  useEffect(() => saveLayout(repo.path, layout), [layout, repo.path]);
-  useEffect(() => metaRef.current({ busy, dirty: commitDirty || conflictDirty || rebaseDirty, conflictCount: operation?.conflicts.length ?? 0 }), [busy, commitDirty, conflictDirty, rebaseDirty, operation]);
+  useEffect(() => { if (!(import.meta.env.DEV && import.meta.env.VITE_TEST_REPO)) saveLayout(repo.path, layout); }, [layout, repo.path]);
+  useEffect(() => metaRef.current({ busy, dirty: hasSessionDrafts(commitDirty || conflictDirty || rebaseDirty, conflictDrafts.current.size, rebaseDrafts.current.size), conflictCount: operation?.conflicts.length ?? 0 }), [busy, commitDirty, conflictDirty, rebaseDirty, operation]);
 
   useEffect(() => {
     const unlisten = onLogBatch((batch) => {
@@ -108,15 +130,15 @@ export default function RepoWorkspace(props: Props) {
       if (batch.done) setLogLoading(false);
     });
     logListenReadyRef.current = unlisten;
-    return () => { requestIdRef.current = 0; void unlisten.then((fn) => fn()); };
+    return () => { void api.cancelLog(repo.path, requestIdRef.current); requestIdRef.current = 0; selectionRef.current++; auxSequence.current++; auxPending.current.requested = null; void unlisten.then((fn) => fn()); };
   }, [repo.path]);
 
   const loadCommit = useCallback((oid: string) => {
     const selection = ++selectionRef.current;
-    setDetailLoading(true);
+    setDetailLoading(true); setCommit(null); setCommitDiff([]); setContained(null);
     Promise.all([
       api.getCommit(repo.path, oid),
-      api.getCommitDiff(repo.path, oid),
+      api.getCommitFiles(repo.path, oid),
       api.getContainedIn(repo.path, oid).catch(() => null),
     ]).then(([detail, diff, contains]) => {
       if (selectionRef.current !== selection) return;
@@ -134,18 +156,49 @@ export default function RepoWorkspace(props: Props) {
     });
   }, [repo.path]);
 
-  const refreshAux = useCallback(() => {
-    void api.getBranches(repo.path).then((value) => {
-      setBranches(value);
-      const head = value.find((b) => b.isHead);
-      if (head) { headOidRef.current = head.oid; headNameRef.current = head.name; }
-    }).catch((e) => setMessage(String(e)));
-    void api.getStatus(repo.path).then(setStatus).catch((e) => setMessage(String(e)));
-    void api.getAheadBehind(repo.path).then(setAheadBehind).catch(() => undefined);
-    void api.tagList(repo.path).then(setTags).catch(() => undefined);
-    void api.getOperationState(repo.path).then(setOperation).catch(() => undefined);
-    void api.openRepo(repo.path).then(setRepoInfo).catch(() => undefined);
+  const loadCommitFile = useCallback(async (file: FileDiff) => {
+    if (!commit) return null;
+    const files = await api.getCommitFileDiff(repo.path, commit.oid, file.path, file.oldPath);
+    return files.find((f) => f.path === file.path || f.oldPath === file.path) ?? null;
+  }, [repo.path, commit]);
+
+  const auxSequence = useRef(0);
+  const auxPending = useRef<{ running: boolean; requested: "all" | "worktree" | null }>({ running: false, requested: null });
+  const [worktreeVersion, setWorktreeVersion] = useState(0);
+  const refreshAux = useCallback((scope: "all" | "worktree" = "all") => {
+    const queue = auxPending.current;
+    auxSequence.current++;
+    queue.requested = queue.requested === "all" || scope === "all" ? "all" : "worktree";
+    if (queue.running) return;
+    queue.running = true;
+    void (async () => {
+      try {
+        while (queue.requested) {
+          const next = queue.requested; queue.requested = null;
+          const id = auxSequence.current;
+          try {
+            const [snapshot, state, refs, ahead, tagRefs, info] = await Promise.all([
+              api.getStatus(repo.path), api.getOperationState(repo.path),
+              next === "all" ? api.getBranches(repo.path) : Promise.resolve(null),
+              next === "all" ? api.getAheadBehind(repo.path) : Promise.resolve(null),
+              next === "all" ? api.tagList(repo.path) : Promise.resolve(null),
+              next === "all" ? api.openRepo(repo.path) : Promise.resolve(null),
+            ]);
+            if (id !== auxSequence.current) continue;
+            setStatus(snapshot); setOperation(state); setWorktreeVersion((n) => n + 1);
+            if (refs) {
+              setBranches(refs); const head = refs.find((b) => b.isHead);
+              headOidRef.current = info?.headOid ?? head?.oid ?? ""; headNameRef.current = info?.headBranch ?? head?.name ?? "";
+              refsFingerprint.current = JSON.stringify([refs, tagRefs]);
+              setAheadBehind(ahead);
+            }
+            if (tagRefs) setTags(tagRefs); if (info) setRepoInfo(info);
+          } catch (e) { if (id === auxSequence.current) setMessage(String(e)); }
+        }
+      } finally { queue.running = false; }
+    })();
   }, [repo.path]);
+  const refreshWorktree = useCallback(() => refreshAux("worktree"), [refreshAux]);
 
   const refreshAll = useCallback(() => {
     const id = nextLogRequestId();
@@ -171,33 +224,37 @@ export default function RepoWorkspace(props: Props) {
 
   useEffect(() => {
     if (!active || !settings.autoRefresh) return;
+    let polling = false; let alive = true;
     const timer = window.setInterval(() => {
-      if (busyRef.current || document.visibilityState !== "visible") return;
+      if (polling || auxPending.current.running || busyRef.current || getRepoOperation(repo.path) || document.visibilityState !== "visible") return;
+      polling = true; const generation = auxSequence.current;
       void (async () => {
         try {
-          const snapshot = await api.getStatus(repo.path);
-          if (JSON.stringify(snapshot) !== JSON.stringify(statusRef.current)) setStatus(snapshot);
-          const nextOperation = await api.getOperationState(repo.path);
-          setOperation(nextOperation);
-          const nextBranches = await api.getBranches(repo.path);
-          const head = nextBranches.find((b) => b.isHead);
-          if (head && ((headOidRef.current && head.oid !== headOidRef.current) || (headNameRef.current && head.name !== headNameRef.current))) refreshAll();
-          else setBranches(nextBranches);
-        } catch { /* 下轮重试，不覆盖用户当前编辑 */ }
+          const [snapshot, nextOperation, nextBranches, nextTags, nextInfo, nextAhead] = await Promise.all([
+            api.getStatus(repo.path), api.getOperationState(repo.path), api.getBranches(repo.path),
+            api.tagList(repo.path), api.openRepo(repo.path), api.getAheadBehind(repo.path),
+          ]);
+          if (!alive || generation !== auxSequence.current || getRepoOperation(repo.path)) return;
+          setStatus(snapshot); setWorktreeVersion((n) => n + 1); setOperation(nextOperation);
+          const fingerprint = JSON.stringify([nextBranches, nextTags]);
+          if ((nextInfo.headOid ?? "") !== headOidRef.current || (nextInfo.headBranch ?? "") !== headNameRef.current || fingerprint !== refsFingerprint.current) refreshAll();
+          else { setBranches(nextBranches); setTags(nextTags); setRepoInfo(nextInfo); setAheadBehind(nextAhead); }
+        } catch { /* 下轮重试，不覆盖用户当前编辑 */ } finally { polling = false; }
       })();
     }, settings.pollIntervalSeconds * 1000);
-    return () => window.clearInterval(timer);
+    return () => { alive = false; window.clearInterval(timer); };
   }, [active, refreshAll, repo.path, settings.autoRefresh, settings.pollIntervalSeconds]);
 
   const openCompare = useCallback((base: string, target: string) => {
-    const open = () => { setWorkspace("history"); setTask({ type: "compare", base, target }); setMaximized(false); };
+    if (getRepoOperation(repo.path)) return;
+    const open = () => { if (getRepoOperation(repo.path)) return; setWorkspace("history"); setTask({ type: "compare", base, target }); setMaximized(false); };
     if ((task?.type === "conflict" && conflictDirty) || (task?.type === "rebase" && rebaseDirty)) {
       const isConflict = task.type === "conflict";
-      void confirm({ title: isConflict ? "离开冲突编辑器？" : "放弃 Rebase 计划？", body: isConflict ? "当前文件有未保存编辑。" : "当前重排、动作和提交信息编辑尚未执行。", confirmLabel: "放弃编辑并打开对比", danger: true }).then((ok) => {
-        if (ok) { setConflictDirty(false); setRebaseDirty(false); open(); }
+      void confirm({ title: isConflict ? "离开冲突编辑器？" : "离开 Rebase 计划？", body: "未执行的编辑将保留在当前仓库会话，重新打开任务可继续；关闭仓库页签才会丢失。", confirmLabel: "保留草稿并打开对比" }).then((ok) => {
+        if (ok && !getRepoOperation(repo.path)) { open(); }
       });
     } else open();
-  }, [conflictDirty, confirm, rebaseDirty, task]);
+  }, [conflictDirty, confirm, rebaseDirty, repo.path, task]);
 
   const selectCommit = useCallback((oid: string, additive: boolean) => {
     if (additive && selectedOids.length > 0 && selectedOids[0] !== oid) {
@@ -207,12 +264,12 @@ export default function RepoWorkspace(props: Props) {
     setSelectedOids([oid]); loadCommit(oid);
   }, [loadCommit, openCompare, selectedOids]);
 
-  const runAction = useCallback(async (action: () => Promise<unknown>, success: string) => {
-    if (busyRef.current) return;
+  const runAction = useCallback(async (action: () => Promise<unknown>, success: string, scope: "all" | "worktree" = "all") => {
+    if (busyRef.current || getRepoOperation(repo.path)) return;
     setBusy(true);
     try {
       await action();
-      setMessage(success); notifyRef.current("success", success); refreshAll();
+      setMessage(success); notifyRef.current("success", success); if (scope === "all") refreshAll(); else refreshWorktree();
     } catch (e) {
       const details = String(e);
       setMessage(details); notifyRef.current("error", "操作失败", details);
@@ -220,10 +277,12 @@ export default function RepoWorkspace(props: Props) {
       if (state) setOperation(state);
       if (state && state.kind !== "none") { setWorkspace("changes"); setTask({ type: "conflict" }); setMaximized(false); }
     } finally { setBusy(false); }
-  }, [refreshAll, repo.path]);
+  }, [refreshAll, refreshWorktree, repo.path]);
 
   const runRemote = useCallback((kind: "fetch" | "pull" | "push") => {
-    const label = kind === "fetch" ? "Fetch" : kind === "pull" ? "Pull" : "Push";
+    if (busyRef.current || getRepoOperation(repo.path)) return;
+    if (kind === "push") { setShowPush(true); return; }
+    const label = kind === "fetch" ? "Fetch" : "Pull";
     void runAction(() => api[kind](repo.path), `${label} 完成`);
   }, [repo.path, runAction]);
 
@@ -256,7 +315,7 @@ export default function RepoWorkspace(props: Props) {
       ackLabel: "我确认这些未跟踪文件不再需要",
     });
     if (!ok) return;
-    void runAction(() => untracked ? api.deleteUntrackedFiles(repo.path, paths) : api.discardFiles(repo.path, paths), untracked ? "已删除未跟踪文件" : "已丢弃未暂存变更");
+    void runAction(() => untracked ? api.deleteUntrackedFiles(repo.path, paths) : api.discardFiles(repo.path, paths), untracked ? "已删除未跟踪文件" : "已丢弃未暂存变更", "worktree");
   }, [confirm, repo.path, runAction]);
 
   const onRevisionAction = useCallback(async (action: RevisionAction, rev: Revision) => {
@@ -270,6 +329,7 @@ export default function RepoWorkspace(props: Props) {
       if (compareBase && compareBase !== rev.oid) { openCompare(compareBase, rev.oid); setCompareBase(null); }
       else { setCompareBase(rev.oid); setMessage(`已设 ${rev.shortId} 为对比基准，右键另一提交完成对比`); }
     } else if (action === "new-branch") { setBranchStart(rev.oid); setShowBranches(true); }
+    else if (action === "reset") { setResetTarget(rev.oid); }
     else if (action === "new-tag") { setTagTarget(rev.oid); setShowTags(true); }
     else if (action === "interactive-rebase") { setTask({ type: "rebase", oid: rev.oid }); setMaximized(false); }
     else {
@@ -295,25 +355,25 @@ export default function RepoWorkspace(props: Props) {
 
   const showConflict = useCallback(() => { setWorkspace("changes"); setTask({ type: "conflict" }); setMaximized(false); }, []);
   const dismissTask = useCallback(async () => {
+    if (getRepoOperation(repo.path)) return;
     if ((task?.type === "conflict" && conflictDirty) || (task?.type === "rebase" && rebaseDirty)) {
       const isConflict = task.type === "conflict";
-      const ok = await confirm({ title: isConflict ? "离开冲突编辑器？" : "放弃 Rebase 计划？", body: isConflict ? "当前文件有未保存编辑。" : "当前重排、动作和提交信息编辑尚未执行。", confirmLabel: "放弃编辑并离开", danger: true });
-      if (!ok) return;
-      setConflictDirty(false); setRebaseDirty(false);
+      const ok = await confirm({ title: isConflict ? "离开冲突编辑器？" : "离开 Rebase 计划？", body: isConflict ? "当前文件有未保存编辑。" : "当前重排、动作和提交信息编辑尚未执行。", confirmLabel: "保留草稿并离开" });
+      if (!ok || getRepoOperation(repo.path)) return;
     }
     setTask(null); setMaximized(false);
-  }, [conflictDirty, confirm, rebaseDirty, task]);
+  }, [conflictDirty, confirm, rebaseDirty, repo.path, task]);
   const switchWorkspace = useCallback(async (next: Workspace) => {
+    if (getRepoOperation(repo.path)) return;
     if ((task?.type === "conflict" && conflictDirty) || (task?.type === "rebase" && rebaseDirty)) {
       const isConflict = task.type === "conflict";
-      const ok = await confirm({ title: isConflict ? "离开冲突编辑器？" : "放弃 Rebase 计划？", body: isConflict ? "当前文件有未保存编辑。" : "当前重排、动作和提交信息编辑尚未执行。", confirmLabel: "放弃编辑并离开", danger: true });
-      if (!ok) return;
-      setConflictDirty(false); setRebaseDirty(false);
+      const ok = await confirm({ title: isConflict ? "离开冲突编辑器？" : "离开 Rebase 计划？", body: isConflict ? "当前文件有未保存编辑。" : "当前重排、动作和提交信息编辑尚未执行。", confirmLabel: "保留草稿并切换" });
+      if (!ok || getRepoOperation(repo.path)) return;
     }
     setWorkspace(next); setTask(null); setMaximized(false);
-  }, [conflictDirty, confirm, rebaseDirty, task]);
+  }, [conflictDirty, confirm, rebaseDirty, repo.path, task]);
   const closeDialog = useCallback(() => {
-    setShowBranches(false); setShowStash(false); setShowTags(false); setShowSubmodules(false); setFileAction(null);
+    setResetTarget(null); setShowRecovery(false); setShowPush(false); setShowBranches(false); setShowStash(false); setShowTags(false); setShowSubmodules(false); setFileAction(null);
   }, []);
 
   useEffect(() => {
@@ -377,15 +437,15 @@ export default function RepoWorkspace(props: Props) {
   const changeCount = status.staged.length + status.unstaged.length;
   const compareError = useCallback((value: string) => { setMessage(value); notifyRef.current("error", "对比失败", value); }, []);
   const updateCommitDirty = useCallback((value: boolean) => setCommitDirty(value), []);
-  const updateConflictDirty = useCallback((value: boolean) => setConflictDirty(value), []);
-  const updateRebaseDirty = useCallback((value: boolean) => setRebaseDirty(value), []);
+  const updateConflictDirty = useCallback((value: boolean) => setConflictDirty(value || conflictDrafts.current.size > 0), []);
+  const updateRebaseDirty = useCallback((value: boolean) => setRebaseDirty(value || rebaseDrafts.current.size > 0), []);
   const verticalInspector = layout.inspectorPosition === "right";
 
   return (
     <div className="repo-workspace">
       <Toolbar repo={repoInfo} loading={logLoading} busy={busy} revisionCount={filteredRevisions.length} aheadBehind={aheadBehind} filter={filter} workspace={workspace} inspectorVisible={layout.showInspector}
         onFilter={setFilter} onOpen={props.onOpen} onRefresh={refreshAll} onToggleLeft={() => setLayout((prev) => ({ ...prev, showLeft: !prev.showLeft }))} onToggleInspector={() => setLayout((prev) => ({ ...prev, showInspector: !prev.showInspector }))}
-        onBranches={() => { setBranchStart(undefined); setShowBranches(true); }} onStash={() => setShowStash(true)} onTags={() => { setTagTarget(undefined); setShowTags(true); }} onSubmodules={() => setShowSubmodules(true)} onSettings={props.onSettings}
+        onBranches={() => { setBranchStart(undefined); setShowBranches(true); }} onStash={() => setShowStash(true)} onTags={() => { setTagTarget(undefined); setShowTags(true); }} onSubmodules={() => setShowSubmodules(true)} onSettings={props.onSettings} onRecovery={() => setShowRecovery(true)}
         onCompare={() => openCompare(compareBase ?? selectedOids[0] ?? "HEAD", "HEAD")} onRemote={runRemote} />
       <div className="workspace-body">
         {layout.showLeft && <LeftPanel branches={branches} tags={tags} activeRef={leftRef} workspace={workspace} changeCount={changeCount} width={layout.leftWidth} conflictCount={operation?.conflicts.length ?? 0}
@@ -395,16 +455,16 @@ export default function RepoWorkspace(props: Props) {
           onStash={() => setShowStash(true)} onSubmodules={() => setShowSubmodules(true)} />}
         {layout.showLeft && <SplitHandle direction="vertical" label="调整导航宽度" onResize={(delta) => setLayout((prev) => ({ ...prev, leftWidth: Math.min(360, Math.max(160, prev.leftWidth + delta)) }))} onReset={() => setLayout((prev) => ({ ...prev, leftWidth: 224 }))} />}
         <div className={`content-area${verticalInspector ? " horizontal" : " vertical"}`}>
-          {!maximized && <main className="workspace-main">
+          <main className="workspace-main" style={{ display: maximized ? "none" : undefined }}>
             {task?.type === "compare" && <CompareView repoPath={repo.path} initialBase={task.base} initialTarget={task.target} refs={refs} onClose={() => setTask(null)} onFileAction={onFileAction} onError={compareError} />}
-            {task?.type === "rebase" && <RebasePlanner repoPath={repo.path} startOid={task.oid} onExit={() => setTask(null)} onConflict={showConflict} onChanged={refreshAll} onDirtyChange={updateRebaseDirty} onNotify={props.onNotify} />}
-            {task?.type === "conflict" && <ConflictCenter repoPath={repo.path} onExit={() => setTask(null)} onChanged={refreshAll} onDirtyChange={updateConflictDirty} onNotify={props.onNotify} />}
+            {task?.type === "rebase" && <RebasePlanner key={task.oid} repoPath={repo.path} startOid={task.oid} draft={rebaseDrafts.current.get(task.oid)} onDraftChange={saveRebaseDraft} onExit={() => setTask(null)} onConflict={showConflict} onChanged={refreshAll} onDirtyChange={updateRebaseDirty} onNotify={props.onNotify} />}
+            {task?.type === "conflict" && <ConflictCenter repoPath={repo.path} drafts={conflictDrafts.current} onDraftChange={saveConflictDraft} onExit={() => setTask(null)} onChanged={refreshAll} onDirtyChange={updateConflictDirty} onNotify={props.onNotify} />}
             {!task && workspace === "history" && <RevisionGrid revisions={filteredRevisions} selectedOids={selectedOids} onSelect={selectCommit} onContextAction={(action, rev) => void onRevisionAction(action, rev)} loading={logLoading} />}
             <div className="changes-workspace" style={{ display: workspace === "changes" && !task ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
               <ChangesPanel repoPath={repo.path} status={status} width={layout.changesWidth} conflictCount={operation?.conflicts.length ?? 0} onWidth={(changesWidth) => setLayout((prev) => ({ ...prev, changesWidth }))}
-                onRefresh={refreshAll} setMessage={setMessage} highlightEnabled={settings.highlightEnabled} onFileAction={onFileAction} onPathAction={onPathAction} onDiscard={discard} onOpenConflict={showConflict} onDirtyChange={updateCommitDirty} />
+                onRefresh={(historyChanged) => historyChanged ? refreshAll() : refreshWorktree()} refreshVersion={worktreeVersion} setMessage={setMessage} highlightEnabled={settings.highlightEnabled} onFileAction={onFileAction} onPathAction={onPathAction} onDiscard={discard} onOpenConflict={showConflict} onDirtyChange={updateCommitDirty} />
             </div>
-          </main>}
+          </main>
           {workspace === "history" && !task && layout.showInspector && <>
             {!maximized && <SplitHandle direction={verticalInspector ? "vertical" : "horizontal"} label="调整检查器尺寸" onResize={(delta) => setLayout((prev) => ({ ...prev, inspectorSize: Math.min(720, Math.max(180, prev.inspectorSize - delta)) }))} onReset={() => setLayout((prev) => ({ ...prev, inspectorSize: 400 }))} />}
             <section className={`inspector${maximized ? " maximized" : ""}`} style={verticalInspector && !maximized ? { width: layout.inspectorSize } : !maximized ? { height: layout.inspectorSize } : undefined} tabIndex={-1}>
@@ -414,7 +474,7 @@ export default function RepoWorkspace(props: Props) {
                 <button className="icon-button" title={maximized ? "还原 (Esc)" : "最大化"} onClick={() => setMaximized(!maximized)}>{maximized ? "↙" : "↗"}</button>
                 <button className="icon-button" title="关闭检查器" onClick={() => { setMaximized(false); setLayout((prev) => ({ ...prev, showInspector: false })); }}><Icon name="close" /></button>
               </div>
-              <div className="inspector-content">{inspectorTab === "details" ? <CommitInfo commit={commit} contained={contained} loading={detailLoading} /> : <DiffView files={commitDiff} loading={detailLoading} highlightEnabled={settings.highlightEnabled} onFileAction={onCommitFileAction} />}</div>
+              <div className="inspector-content">{inspectorTab === "details" ? <CommitInfo commit={commit} contained={contained} loading={detailLoading} /> : <DiffView files={commitDiff} loadFile={loadCommitFile} loading={detailLoading} highlightEnabled={settings.highlightEnabled} onFileAction={onCommitFileAction} />}</div>
             </section>
           </>}
         </div>
@@ -427,6 +487,9 @@ export default function RepoWorkspace(props: Props) {
         <button title="宽 Diff 布局" onClick={() => setLayout((prev) => ({ ...prev, showLeft: false, showInspector: true, inspectorPosition: "right", inspectorSize: 640 }))}>宽 Diff</button>
         <button title="专注历史" onClick={() => { void switchWorkspace("history"); setLayout((prev) => ({ ...prev, showInspector: false })); }}>专注历史</button>
       </div>
+      {resetTarget && <ResetDialog repoPath={repo.path} target={resetTarget} onClose={() => setResetTarget(null)} onChanged={refreshAll} onNotify={props.onNotify} />}
+      {showRecovery && <RecoveryDialog repoPath={repo.path} onClose={() => setShowRecovery(false)} onRestore={(oid) => { setShowRecovery(false); setResetTarget(oid); }} />}
+      {showPush && <PushDialog repoPath={repo.path} onClose={() => setShowPush(false)} onChanged={refreshAll} onNotify={props.onNotify} />}
       {showBranches && <BranchDialog repoPath={repo.path} branches={branches} initialStartPoint={branchStart} onClose={() => setShowBranches(false)} onChanged={refreshAll} setMessage={setMessage} />}
       {showStash && <StashDialog repoPath={repo.path} onClose={() => setShowStash(false)} onChanged={refreshAll} setMessage={setMessage} />}
       {showTags && <TagDialog repoPath={repo.path} initialTarget={tagTarget} onClose={() => setShowTags(false)} onChanged={refreshAll} setMessage={setMessage} />}

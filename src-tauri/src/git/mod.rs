@@ -1,9 +1,12 @@
 pub mod cli;
+pub mod commands;
 pub mod diff;
 pub mod history;
 pub mod log;
+mod operations;
 pub mod rebase;
 pub mod repo;
+pub mod reset;
 pub mod status;
 
 use std::path::{Component, Path, PathBuf};

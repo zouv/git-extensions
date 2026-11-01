@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
+import { useRepoBusy } from "../useRepoBusy";
 import type { TagInfo } from "../types";
 import Dialog from "../ui/Dialog";
 import { useConfirm } from "../ui/Confirm";
@@ -12,11 +13,14 @@ export default function TagDialog({ repoPath, initialTarget, onClose, onChanged,
   const [name, setName] = useState("");
   const [target, setTarget] = useState(initialTarget ?? "");
   const [tagMessage, setTagMessage] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [localBusy, setBusy] = useState(false);
+  const repoBusy = useRepoBusy(repoPath);
+  const busy = localBusy || repoBusy;
   const confirm = useConfirm();
   const reload = useCallback(() => { api.tagList(repoPath).then(setTags).catch((e) => setMessage(String(e))); }, [repoPath, setMessage]);
   useEffect(reload, [reload]);
   const run = async (action: () => Promise<unknown>, success: string) => {
+    if (busy) return;
     setBusy(true);
     try { await action(); setMessage(success); reload(); onChanged(); }
     catch (e) { setMessage(String(e)); }

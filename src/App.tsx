@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import { getRepoOperation } from "./repoOperations";
 import type { RepoInfo } from "./types";
 import RepoWorkspace from "./RepoWorkspace";
 import RepositoryTabs from "./components/RepositoryTabs";
@@ -14,6 +15,12 @@ import { loadSettings, saveSettings } from "./settings";
 
 const LAST_REPO_KEY = "git-extensions.lastRepo";
 const RECENT_REPOS_KEY = "git-extensions.recentRepos.v2";
+const TEST_REPO = import.meta.env.DEV ? import.meta.env.VITE_TEST_REPO : undefined;
+function rememberActive(path: string | null) {
+  if (TEST_REPO) return;
+  if (path) localStorage.setItem(LAST_REPO_KEY, path);
+  else localStorage.removeItem(LAST_REPO_KEY);
+}
 const EMPTY_META: SessionMeta = { busy: false, dirty: false, conflictCount: 0 };
 
 function recentRepos(): string[] {
@@ -26,7 +33,7 @@ function recentRepos(): string[] {
 function AppShell() {
   const [repos, setRepos] = useState<RepoInfo[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
-  const [recent, setRecent] = useState<string[]>(recentRepos);
+  const [recent, setRecent] = useState<string[]>(() => TEST_REPO ? [] : recentRepos());
   const [settings, setSettings] = useState(loadSettings);
   const [showSettings, setShowSettings] = useState(false);
   const [showOpen, setShowOpen] = useState(false);
@@ -37,7 +44,7 @@ function AppShell() {
   const noticeId = useRef(0);
   const confirm = useConfirm();
 
-  useEffect(() => saveSettings(settings), [settings]);
+  useEffect(() => { if (!TEST_REPO) saveSettings(settings); }, [settings]);
 
   const notify = useCallback((repoPath: string, kind: Notice["kind"], message: string, details?: string, repoName?: string) => {
     const id = ++noticeId.current;
@@ -53,10 +60,10 @@ function AppShell() {
       const info = await api.openRepo(trimmed);
       setRepos((prev) => prev.some((r) => r.path === info.path) ? prev : [...prev, info]);
       setActivePath(info.path);
-      localStorage.setItem(LAST_REPO_KEY, info.path);
+      rememberActive(info.path);
       setRecent((prev) => {
         const next = [info.path, ...prev.filter((p) => p !== info.path)].slice(0, 12);
-        localStorage.setItem(RECENT_REPOS_KEY, JSON.stringify(next));
+        if (!TEST_REPO) localStorage.setItem(RECENT_REPOS_KEY, JSON.stringify(next));
         return next;
       });
       setShowOpen(false);
@@ -68,27 +75,26 @@ function AppShell() {
 
   useEffect(() => {
     const last = localStorage.getItem(LAST_REPO_KEY);
-    const testRepo = import.meta.env.DEV ? import.meta.env.VITE_TEST_REPO : undefined;
-    if (testRepo || last) void openRepo(testRepo || last!);
+    if (TEST_REPO || last) void openRepo(TEST_REPO || last!);
     // 启动只恢复一个仓库，避免多个大仓库同时加载。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const closeRepo = useCallback(async (path: string) => {
     const state = meta[path] ?? EMPTY_META;
-    if (state.busy) {
+    if (state.busy || getRepoOperation(path)) {
       notify(path, "info", "当前仓库有操作进行中，完成后才能关闭");
       return;
     }
-    if (state.dirty && !await confirm({ title: "关闭含未保存内容的仓库？", body: "提交或冲突编辑草稿尚未保存。关闭页签不会删除仓库，但会丢弃这些界面草稿。", confirmLabel: "丢弃草稿并关闭", danger: true })) return;
+    if (state.dirty && !await confirm({ title: "关闭含未保存内容的仓库？", body: "提交、冲突编辑或 Rebase 计划草稿尚未保存。关闭页签不会删除仓库，但会丢弃这些界面草稿。", confirmLabel: "丢弃草稿并关闭", danger: true })) return;
+    if (getRepoOperation(path)) { notify(path, "info", "当前仓库有操作进行中，完成后才能关闭"); return; }
     setRepos((prev) => {
       const index = prev.findIndex((r) => r.path === path);
       const next = prev.filter((r) => r.path !== path);
       if (path === activePath) {
         const fallback = next[Math.min(index, next.length - 1)];
         setActivePath(fallback?.path ?? null);
-        if (fallback) localStorage.setItem(LAST_REPO_KEY, fallback.path);
-        else localStorage.removeItem(LAST_REPO_KEY);
+        rememberActive(fallback?.path ?? null);
       }
       return next;
     });
@@ -96,13 +102,13 @@ function AppShell() {
   }, [activePath, confirm, meta, notify]);
 
   const closeOthers = useCallback((path: string) => {
-    const closing = repos.filter((repo) => repo.path !== path && !meta[repo.path]?.busy && !meta[repo.path]?.dirty);
-    if (closing.length === 0) { setActivePath(path); localStorage.setItem(LAST_REPO_KEY, path); return; }
+    const closing = repos.filter((repo) => repo.path !== path && !meta[repo.path]?.busy && !getRepoOperation(repo.path) && !meta[repo.path]?.dirty);
+    if (closing.length === 0) { setActivePath(path); rememberActive(path); return; }
     const paths = new Set(closing.map((repo) => repo.path));
     setRepos((prev) => prev.filter((repo) => !paths.has(repo.path)));
     setMeta((prev) => Object.fromEntries(Object.entries(prev).filter(([repoPath]) => !paths.has(repoPath))));
     setActivePath(path);
-    localStorage.setItem(LAST_REPO_KEY, path);
+    rememberActive(path);
   }, [meta, repos]);
 
   useEffect(() => {
@@ -122,7 +128,7 @@ function AppShell() {
         const index = repos.findIndex((r) => r.path === activePath);
         const next = (index + (event.shiftKey ? -1 : 1) + repos.length) % repos.length;
         setActivePath(repos[next].path);
-        localStorage.setItem(LAST_REPO_KEY, repos[next].path);
+        rememberActive(repos[next].path);
       } else if (event.key === ",") {
         event.preventDefault();
         setShowSettings(true);
@@ -146,7 +152,7 @@ function AppShell() {
         repos={repos}
         activePath={activePath}
         meta={meta}
-        onActivate={(path) => { setActivePath(path); localStorage.setItem(LAST_REPO_KEY, path); }}
+        onActivate={(path) => { setActivePath(path); rememberActive(path); }}
         onClose={(path) => void closeRepo(path)}
         onCloseOthers={(path) => closeOthers(path)}
         onOpen={() => { setOpenPath(""); setShowOpen(true); }}

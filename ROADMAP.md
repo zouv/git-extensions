@@ -11,10 +11,11 @@
 
 ---
 
-## 总进度（2026-10-31 更新）
+## 总进度（2026-11-01 更新）
 
 - M1–M4 规划开发与可执行验证已完成；Windows / Linux 自动化测试全绿。后续为统一 GUI 验收、Git Extensions 界面性能对比及 macOS 实机或 CI 验收。
 - M5 功能实现、Windows 常规 DPI GUI 实测与 17,783 提交基准已完成；高 DPI 和 macOS 验收待补。
+- 审查加固与高级操作优化已整体交付代码：安全调度、按需 Diff / 历史正确性、分级刷新、草稿、Reset / 恢复及 Rebase / 冲突 / Stash；Windows 自动回归与 release 大仓库测量完成，新增 GUI / 高 DPI / macOS 验收仍待补。
 
 ---
 
@@ -24,6 +25,7 @@
 - ✅ M2 流畅度与同步（2026-10-31）：异步高亮、过滤、自动刷新、远程同步、大仓库测量工具与 17,783 提交实测。
 - ✅ M3 历史操作与平台支持（2026-10-31）：stash、rebase / cherry-pick / revert、contained-in、submodule；Windows / Linux 实测通过，macOS CI 链路就绪。
 - ✅ M4 导航与配置（2026-10-31）：标签、blame、文件历史、左侧引用树、设置页与完整键盘操作。
+- ✅ ~~审查加固与高级操作优化~~（2026-11-01）：三阶段代码与 Windows 自动回归、大仓库测量一次性交付；详见 CHANGELOG [0.2.0]，平台 GUI 验收独立保留。
 
 ---
 
@@ -38,3 +40,9 @@
 - [ ] 完成 150% / 200% DPI、macOS 实机或 CI 及完整 GUI 人工验收。
 
 设计方案见 [`docs/04-UI设计方案.md`](./docs/04-UI设计方案.md)。统一验收发现的问题作为修复任务另行登记。
+
+
+### 优化后验收
+
+- [ ] 新增 Push / busy / Reset / 恢复 / 草稿 / Rebase 与冲突完整 Windows GUI 工作流补验。
+- [ ] 高 DPI / macOS 验收与上游 Git Extensions 界面端到端性能对比（后台 release 基准已完成，不代替 WebView 测量）。

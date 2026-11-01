@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 setlocal
-rem Git Extensions - test: frontend type-check/build + Rust unit and integration tests.
+rem Git Extensions - test: frontend operation tests + type-check/build + Rust tests.
 pushd "%~dp0"
 if errorlevel 1 exit /b 1
 where pnpm >nul 2>&1
@@ -12,6 +12,11 @@ if errorlevel 1 (
 where cargo >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] Rust toolchain is required. Install via https://rustup.rs
+    popd & exit /b 1
+)
+call pnpm test
+if errorlevel 1 (
+    echo [ERROR] Frontend operation tests failed.
     popd & exit /b 1
 )
 call pnpm build

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FileDiff } from "../types";
+import { classifyDiffLine as classify, selectedFileIndex, diffWindow } from "../viewState";
 import { languageForPath } from "../languages";
 import type { HighlightResponse } from "../highlight.worker";
 import ContextMenu from "../ui/ContextMenu";
@@ -13,22 +14,14 @@ export type FileAction = "history" | "blame" | "open" | "reveal" | "copy-path";
 interface Props {
   files: FileDiff[];
   loading?: boolean;
+  loadFile?: (file: FileDiff) => Promise<FileDiff | null>;
   highlightEnabled?: boolean;
   onFileAction?: (action: FileAction, file: FileDiff) => void;
 }
 
-type LineKind = "add" | "del" | "hunk" | "meta" | "ctx";
 type DisplayRow = { kind: "dir"; path: string; depth: number } | { kind: "file"; file: FileDiff; index: number; depth: number };
 
-function classify(line: string): LineKind {
-  if (line.startsWith("@@")) return "hunk";
-  if (line.startsWith("+")) return "add";
-  if (line.startsWith("-")) return "del";
-  if (/^(diff |index |---|\+\+\+|new file|deleted file|similarity|rename |old mode|new mode)/.test(line)) return "meta";
-  return "ctx";
-}
-
-export default function DiffView({ files, loading, highlightEnabled = true, onFileAction }: Props) {
+export default function DiffView({ files, loading, highlightEnabled = true, onFileAction, loadFile }: Props) {
   const [selected, setSelected] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(400);
@@ -40,8 +33,22 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
   const workerRef = useRef<Worker | null>(null);
   const reqRef = useRef(0);
   const patchRef = useRef<HTMLDivElement>(null);
+  const selectedPath = useRef<string | null>(null);
+  useEffect(() => { setSelected(selectedFileIndex(files, selectedPath.current)); }, [files]);
 
-  const file = files.length > 0 ? files[Math.min(selected, files.length - 1)] : null;
+  const manifestFile = files.length > 0 ? files[Math.min(selected, files.length - 1)] : null;
+  const [loaded, setLoaded] = useState<{ source: FileDiff; value: FileDiff | null } | null>(null);
+  const [patchError, setPatchError] = useState("");
+  const lazySequence = useRef(0);
+  const file = loadFile ? loaded?.source === manifestFile ? loaded.value : null : manifestFile;
+  const patchLoading = !!loadFile && !!manifestFile && loaded?.source !== manifestFile && !patchError;
+  useEffect(() => {
+    const id = ++lazySequence.current; setPatchError("");
+    if (!loadFile || !manifestFile) return;
+    loadFile(manifestFile).then((value) => { if (id === lazySequence.current) setLoaded({ source: manifestFile, value }); })
+      .catch((e) => { if (id === lazySequence.current) { setPatchError(String(e)); setLoaded({ source: manifestFile, value: null }); } });
+    return () => { lazySequence.current++; };
+  }, [manifestFile, loadFile]);
   const lines = useMemo(() => (file ? file.patch.split("\n") : []), [file]);
 
   useEffect(() => {
@@ -86,20 +93,28 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
       let hidden = false;
       for (let i = 1; i < parts.length; i++) {
         const dir = parts.slice(0, i).join("/");
-        if ([...collapsed].some((c) => dir === c || dir.startsWith(c + "/"))) hidden = true;
+        if ([...collapsed].some((c) => dir.startsWith(c + "/"))) { hidden = true; break; }
         if (!seen.has(dir)) { result.push({ kind: "dir", path: dir, depth: i - 1 }); seen.add(dir); }
+        if (collapsed.has(dir)) { hidden = true; break; }
       }
       if (!hidden) result.push({ kind: "file", file, index, depth: Math.max(0, parts.length - 1) });
     });
     return result;
   }, [collapsed, files, mode]);
 
-  const start = Math.max(0, Math.floor(scrollTop / LINE_H) - 5);
-  const end = Math.min(lines.length, start + Math.ceil(viewportH / LINE_H) + 10);
-  const selectFile = (index: number) => { setSelected(index); setScrollTop(0); if (patchRef.current) patchRef.current.scrollTop = 0; };
+  const effectiveWrap = wrap && lines.length <= MAX_HIGHLIGHT_LINES;
+  const { start, end } = diffWindow(lines.length, scrollTop, viewportH, LINE_H);
+  useEffect(() => {
+    const el = patchRef.current;
+    if (!el) return;
+    // 新来源或变短的 patch 不沿用已超出范围的虚拟滚动位置。
+    const top = effectiveWrap ? el.scrollTop : Math.min(el.scrollTop, Math.max(0, lines.length * LINE_H - el.clientHeight));
+    el.scrollTop = top; setScrollTop(top);
+  }, [lines, effectiveWrap]);
+  const selectFile = (index: number) => { selectedPath.current = files[index]?.path ?? null; setSelected(index); setScrollTop(0); if (patchRef.current) patchRef.current.scrollTop = 0; };
   const renderLine = (line: string, row: number) => {
     const html = highlight.get(row);
-    return <div key={row} className={`diff-line line-${classify(line)}${wrap ? " wrapped" : ""}`} style={wrap ? undefined : { top: row * LINE_H, height: LINE_H }}>{html !== undefined ? <span dangerouslySetInnerHTML={{ __html: line.charAt(0) + html }} /> : line || " "}</div>;
+    return <div key={row} className={`diff-line line-${classify(line)}${effectiveWrap ? " wrapped" : ""}`} style={effectiveWrap ? undefined : { top: row * LINE_H, height: LINE_H }}>{html !== undefined ? <span dangerouslySetInnerHTML={{ __html: line.charAt(0) + html }} /> : line || " "}</div>;
   };
 
   if (loading) return <div className="empty-state"><span className="spinner" /><span>正在加载差异…</span></div>;
@@ -108,13 +123,14 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
   return (
     <div className="diff-view">
       <div className="diff-toolbar">
-        <span className="panel-title">{file?.path}</span>
+        <span className="panel-title">{manifestFile?.path}</span>
         <button className="icon-button" title="上一个文件" disabled={selected <= 0} onClick={() => selectFile(selected - 1)}>↑</button>
         <button className="icon-button" title="下一个文件" disabled={selected >= files.length - 1} onClick={() => selectFile(selected + 1)}>↓</button>
         <button className={`text-toggle${mode === "tree" ? " active" : ""}`} title="切换文件列表 / 目录树" onClick={() => setMode(mode === "list" ? "tree" : "list")}>{mode === "list" ? "列表" : "目录树"}</button>
         <button className={`text-toggle${wrap ? " active" : ""}`} disabled={lines.length > MAX_HIGHLIGHT_LINES} title={lines.length > MAX_HIGHLIGHT_LINES ? "超大 patch 不支持自动换行" : "自动换行"} onClick={() => setWrap(!wrap)}>换行</button>
         <button className="icon-button" title="复制当前 patch" onClick={() => { if (file) void navigator.clipboard?.writeText(file.patch); }}><Icon name="copy" size={14} /></button>
       </div>
+      {file?.truncated && <div className="truncated-hint" role="status">文件或 patch 超过安全限制，未完整显示；请使用外部工具查看。</div>}
       <div className="diff-body">
         <div className="diff-file-list" role="listbox" aria-label="差异文件">
           {rows.map((row) => row.kind === "dir" ? (
@@ -124,11 +140,13 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
               key={`${row.file.path}-${row.index}`}
               className={`diff-file-item${row.index === selected ? " selected" : ""}`}
               style={{ paddingLeft: 8 + row.depth * 14 }}
+              data-file-index={row.index}
               role="option"
               aria-selected={row.index === selected}
               tabIndex={row.index === selected ? 0 : -1}
               title={row.file.oldPath ? `${row.file.oldPath} → ${row.file.path}` : row.file.path}
               onClick={() => selectFile(row.index)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectFile(row.index); } else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); const visible = rows.filter((r): r is Extract<DisplayRow, { kind: "file" }> => r.kind === "file"); const current = visible.findIndex((r) => r.index === selected); const next = visible[Math.max(0, Math.min(visible.length - 1, current + (e.key === "ArrowDown" ? 1 : -1)))]?.index ?? selected; selectFile(next); (e.currentTarget.parentElement?.querySelector(`[data-file-index="${next}"]`) as HTMLElement | null)?.focus(); } }}
               onContextMenu={(e) => {
                 if (!onFileAction) return;
                 e.preventDefault(); selectFile(row.index); setMenu({ x: e.clientX, y: e.clientY, file: row.file });
@@ -139,13 +157,15 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
             </div>
           ))}
         </div>
-        <div className={`diff-patch${wrap ? " wrap" : ""}`} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)} ref={patchRef}>
-          {file?.isBinary ? <div className="empty-state"><Icon name="file" size={28} /><span>二进制文件，无法显示文本 diff</span></div> : (
-            <div className={`diff-lines${wrap ? " wrapped" : ""}`} style={wrap ? undefined : { height: lines.length * LINE_H }}>
-              {(wrap ? lines.map(renderLine) : lines.slice(start, end).map((line, i) => renderLine(line, start + i)))}
-              {file?.truncated && <div className="truncated-hint">patch 过大，已截断</div>}
+        <div className={`diff-patch${effectiveWrap ? " wrap" : ""}`} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)} ref={patchRef}>
+          {patchLoading ? <div className="empty-state"><span className="spinner" />正在读取单文件 diff…</div> : patchError ? <div className="empty-state" role="alert">{patchError}</div> : file?.isBinary ? <div className="empty-state"><Icon name="file" size={28} /><span>二进制文件，无法显示文本 diff</span></div> : (
+            <div className={`diff-lines${effectiveWrap ? " wrapped" : ""}`} style={effectiveWrap ? undefined : { height: lines.length * LINE_H }}>
+              {(effectiveWrap ? lines.map(renderLine) : lines.slice(start, end).map((line, i) => renderLine(line, start + i)))}
+
             </div>
           )}
+          {!patchLoading && !patchError && !file?.isBinary && lines.length <= 1 && !file?.truncated && <div className="panel-hint">无文本差异（可能仅权限/路径变化）</div>}
+          {wrap && !effectiveWrap && <div className="panel-hint">巨型 patch 使用虚拟滚动，已暂停换行。</div>}
         </div>
       </div>
       {menu && onFileAction && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={[
