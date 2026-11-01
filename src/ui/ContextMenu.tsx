@@ -9,6 +9,7 @@ export interface MenuItem {
   shortcut?: string;
   danger?: boolean;
   disabled?: boolean;
+  checked?: boolean;
   title?: string;
   separator?: boolean;
   onSelect?: () => void;
@@ -77,13 +78,15 @@ export default function ContextMenu({ x, y, items, onClose, ariaLabel = "上下�
       ) : (
         <button
           type="button"
-          role="menuitem"
+          role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+          aria-checked={item.checked === undefined ? undefined : item.checked}
           className={`context-item${item.danger ? " danger" : ""}`}
           key={item.id}
           disabled={item.disabled}
           title={item.title}
           onClick={() => { onClose(); item.onSelect?.(); }}
         >
+          {item.checked !== undefined && <span className="menu-check">{item.checked ? <Icon name="check" size={14} /> : null}</span>}
           {item.icon && <Icon name={item.icon} />}
           <span>{item.label}</span>
           {item.shortcut && <kbd>{item.shortcut}</kbd>}

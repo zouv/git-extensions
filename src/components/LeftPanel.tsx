@@ -1,5 +1,7 @@
 import { useState } from "react";
 import type { BranchInfo, TagInfo } from "../types";
+import type { TagGroupConfig } from "../tagGroups";
+import { DEFAULT_GROUP_ID } from "../tagGroups";
 import Icon from "../ui/Icon";
 import ContextMenu from "../ui/ContextMenu";
 import type { MenuItem } from "../ui/ContextMenu";
@@ -7,6 +9,7 @@ import type { MenuItem } from "../ui/ContextMenu";
 interface Props {
   branches: BranchInfo[];
   tags: TagInfo[];
+  tagGroups: TagGroupConfig;
   activeRef: string | null;
   workspace: "history" | "changes";
   changeCount: number;
@@ -19,6 +22,7 @@ interface Props {
   onNewBranch: (startPoint: string) => void;
   onDeleteBranch: (branch: BranchInfo) => void;
   onDeleteTag: (name: string) => void;
+  onSetTagGroup: (name: string, groupId: string) => void;
   onStash: () => void;
   onSubmodules: () => void;
 }
@@ -73,7 +77,18 @@ export default function LeftPanel(props: Props) {
     { id: "compare", label: "与当前分支对比", icon: "compare", onSelect: () => props.onCompare(menu.name) },
     { id: "copy", label: "复制名称", icon: "copy", onSelect: () => { void navigator.clipboard?.writeText(menu.name); } },
     ...(menu.kind === "branch" ? [{ id: "sep", separator: true }, { id: "delete", label: "删除分支…", icon: "close" as const, danger: true, disabled: menu.branch?.isHead, onSelect: () => { if (menu.branch) props.onDeleteBranch(menu.branch); } }] : []),
-    ...(menu.kind === "tag" ? [{ id: "sep-tag", separator: true }, { id: "delete-tag", label: "删除标签…", icon: "close" as const, danger: true, onSelect: () => props.onDeleteTag(menu.name) }] : []),
+    ...(menu.kind === "tag" ? [
+      { id: "sep-tag", separator: true },
+      ...props.tagGroups.groups.map((g): MenuItem => ({
+        id: `move-${g.id}`,
+        label: `移到 ${g.name}${g.id === DEFAULT_GROUP_ID ? "（取消分组）" : ""}`,
+        icon: "group" as const,
+        checked: (props.tagGroups.assignments[menu.name] ?? DEFAULT_GROUP_ID) === g.id,
+        onSelect: () => props.onSetTagGroup(menu.name, g.id),
+      })),
+      { id: "sep-del", separator: true },
+      { id: "delete-tag", label: "删除标签…", icon: "close" as const, danger: true, onSelect: () => props.onDeleteTag(menu.name) },
+    ] : []),
   ] : [];
 
   return (

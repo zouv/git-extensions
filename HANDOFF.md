@@ -2,23 +2,20 @@
 
 ## 状态快照
 
-- 最近更新：2026-11-01。0.2.0 版本配置、变更归档、验证与 Windows x64 打包已完成；远程发布等待目标仓库。
-- 用户已授权 commit / push / package / upload，但当前 main 无 Git remote，不擅自新建仓库或公开代码。
-
-## 待完成：远程发布
-
-- 待用户提供目标仓库地址；若需新建，须明确名称和公开 / 私有属性。
-- 先核对 main / v0.2.0 本地提交与远程历史，不强推；推送后发布 GitHub Release 并核对上传资产。
-- 安装包：src-tauri/target/release/bundle/msi/Git Extensions_0.2.0_x64_en-US.msi 与 nsis/Git Extensions_0.2.0_x64-setup.exe。
-- bundle/ 下已准备 SHA256SUMS-0.2.0.txt 和 release-notes-0.2.0.md；只上传本版本安装包与校验文件，不上传 PDB 或旧版本产物。
+- 最近更新：2026-11-01。无进行中任务；顶部栏重构 + 标签分组 + 拖拽排序代码完成并通过自动验证，待 GUI 实测。
+- 远程已关联并推送：origin = https://github.com/zouv/git-extensions，main + v0.2.0 已推送（用户选「只关联+推送」，未建 Release）。
 
 ## 待验收
 
-1. 完整 Windows GUI 新工作流：桌面工具 GetCursorPos 拒绝访问，本轮未完成实际交互验收。
-2. 150% / 200% DPI、macOS 实机或 CI。
-3. 上游界面端到端性能对比；后端基准不包含 IPC / WebView 绘制。
+1. **顶部栏 GUI**：拖动空白移动窗口、双击最大化/还原、最小化/最大化/关闭按钮、边缘缩放、应用图标菜单、分组入口菜单。
+2. **标签分组 GUI**：新建/重命名/删除组（含「移入 Default」与「同时删标签」两种勾选）、切组后 TagDialog 与 LeftPanel 只显示该组、未分组归 Default、Pin 图标缩写与配色、多仓库配置隔离。
+3. **拖拽**：仓库页签排序、Pin 组图标排序，Pin 顺序刷新后保持。
+4. （遗留）完整 Windows GUI 工作流验收；150% / 200% DPI、macOS 实机或 CI；上游界面端到端性能对比。
+5. （遗留）0.2.0 Release 资产上传（安装包在 src-tauri/target/release/bundle/，SHA256SUMS 与 release-notes 已备）。
 
 ## 验证边界
 
+- 本轮：前端 tsc + vite build 通过；23 个 Node 单测全过（含新增 tag-groups 6 项）；cargo test 全过（61 项）；dev 模式启动无报错、日志流正常。
+- 环境限制：GUI 截图 / 自动化（CopyFromScreen 句柄无效、GetCursorPos 拒绝访问）不可用，顶部栏与分组的实际交互未实测，需人工验收。
 - 仅临时仓库做破坏性 Git 回归，真实大仓库仅只读测量。
 - 安装包未代码签名。应用写互斥不能消除外部 Git 竞态，HEAD 备份不包含未提交内容。

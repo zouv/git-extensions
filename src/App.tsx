@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import { getRepoOperation } from "./repoOperations";
 import type { RepoInfo } from "./types";
 import RepoWorkspace from "./RepoWorkspace";
-import RepositoryTabs from "./components/RepositoryTabs";
+import TitleBar from "./components/TitleBar";
 import type { SessionMeta } from "./components/RepositoryTabs";
 import SettingsDialog from "./components/SettingsDialog";
 import NotificationCenter from "./components/NotificationCenter";
@@ -12,6 +13,8 @@ import Dialog from "./ui/Dialog";
 import Icon from "./ui/Icon";
 import { ConfirmProvider, useConfirm } from "./ui/Confirm";
 import { loadSettings, saveSettings } from "./settings";
+import type { TagGroupConfig } from "./tagGroups";
+import { emptyConfig, loadTagGroups, saveTagGroups } from "./tagGroups";
 
 const LAST_REPO_KEY = "git-extensions.lastRepo";
 const RECENT_REPOS_KEY = "git-extensions.recentRepos.v2";
@@ -41,6 +44,8 @@ function AppShell() {
   const [opening, setOpening] = useState(false);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [meta, setMeta] = useState<Record<string, SessionMeta>>({});
+  const [tagGroups, setTagGroups] = useState<Record<string, TagGroupConfig>>({});
+  const [showGroupManager, setShowGroupManager] = useState(false);
   const noticeId = useRef(0);
   const confirm = useConfirm();
 
@@ -59,6 +64,7 @@ function AppShell() {
     try {
       const info = await api.openRepo(trimmed);
       setRepos((prev) => prev.some((r) => r.path === info.path) ? prev : [...prev, info]);
+      setTagGroups((prev) => prev[info.path] ? prev : { ...prev, [info.path]: loadTagGroups(info.path) });
       setActivePath(info.path);
       rememberActive(info.path);
       setRecent((prev) => {
@@ -146,18 +152,76 @@ function AppShell() {
     });
   }, []);
 
+  const updateTagGroups = useCallback((path: string, next: TagGroupConfig) => {
+    setTagGroups((prev) => ({ ...prev, [path]: next }));
+    if (!TEST_REPO) saveTagGroups(path, next);
+  }, []);
+
+  const reorderRepos = useCallback((fromPath: string, toPath: string) => {
+    setRepos((prev) => {
+      const from = prev.findIndex((r) => r.path === fromPath);
+      const to = prev.findIndex((r) => r.path === toPath);
+      if (from < 0 || to < 0 || from === to) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  }, []);
+
+  const activeTagGroups = activePath ? tagGroups[activePath] ?? null : null;
+
+  // 窗口关闭保护：任一仓库有未保存草稿或写操作进行中时需确认。
+  const metaRef = useRef(meta);
+  metaRef.current = meta;
+  const allowCloseRef = useRef(false);
+  const closeWindow = useCallback(async () => {
+    const entries = Object.entries(metaRef.current);
+    const anyDirty = entries.some(([, m]) => m.dirty);
+    const anyBusy = entries.some(([, m]) => m.busy);
+    if (anyBusy && !anyDirty) { notify(activePath ?? "", "info", "有仓库操作进行中，完成后才能关闭窗口"); return; }
+    if (anyDirty || anyBusy) {
+      const ok = await confirm({ title: "关闭应用？", body: "有仓库存在未保存草稿或正在执行的操作。关闭窗口会丢弃界面草稿（不会删除仓库），进行中的 Git 写操作可能在后台完成。", confirmLabel: "退出", danger: true });
+      if (!ok) return;
+    }
+    allowCloseRef.current = true;
+    await getCurrentWindow().close();
+  }, [activePath, confirm, notify]);
+
+  // 兜底：系统途径关窗（Alt+F4 等）同样拦截；确认后放行避免循环。
+  useEffect(() => {
+    let guarding = false;
+    const unlisten = getCurrentWindow().onCloseRequested((event) => {
+      if (allowCloseRef.current) return;
+      const entries = Object.entries(metaRef.current);
+      const needConfirm = entries.some(([, m]) => m.dirty || m.busy);
+      if (!needConfirm) return;
+      event.preventDefault();
+      if (guarding) return;
+      guarding = true;
+      void closeWindow().finally(() => { guarding = false; });
+    });
+    return () => { void unlisten.then((f) => f()); };
+  }, [closeWindow]);
+
   return (
     <div className="app">
-      <RepositoryTabs
+      <TitleBar
         repos={repos}
         activePath={activePath}
         meta={meta}
+        tagGroups={activeTagGroups}
         onActivate={(path) => { setActivePath(path); rememberActive(path); }}
         onClose={(path) => void closeRepo(path)}
         onCloseOthers={(path) => closeOthers(path)}
         onOpen={() => { setOpenPath(""); setShowOpen(true); }}
+        onSettings={() => setShowSettings(true)}
         onCopyPath={(path) => { void navigator.clipboard?.writeText(path).then(() => notify(path, "success", "已复制仓库路径")); }}
         onReveal={(path) => { void api.revealPath(path).catch((e) => notify(path, "error", "无法打开文件管理器", String(e))); }}
+        onReorderRepo={reorderRepos}
+        onTagGroupsChange={(next) => { if (activePath) updateTagGroups(activePath, next); }}
+        onManageGroups={() => setShowGroupManager(true)}
+        onCloseWindow={() => void closeWindow()}
       />
       {repos.map((repo) => (
         <div className={`repo-host${repo.path === activePath ? " active" : ""}`} key={repo.path} aria-hidden={repo.path !== activePath}>
@@ -165,6 +229,10 @@ function AppShell() {
             repo={repo}
             active={repo.path === activePath}
             settings={settings}
+            tagGroups={tagGroups[repo.path] ?? emptyConfig()}
+            onTagGroupsChange={(next) => updateTagGroups(repo.path, next)}
+            showGroupManager={repo.path === activePath && showGroupManager}
+            onCloseGroupManager={() => setShowGroupManager(false)}
             onOpen={() => { setOpenPath(repo.path); setShowOpen(true); }}
             onSettings={() => setShowSettings(true)}
             onNotify={(kind, message, details) => notify(repo.path, kind, message, details, repo.name)}

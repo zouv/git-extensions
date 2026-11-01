@@ -16,23 +16,39 @@ interface Props {
   onOpen: () => void;
   onCopyPath: (path: string) => void;
   onReveal: (path: string) => void;
+  onReorder: (fromPath: string, toPath: string) => void;
 }
 
 export default function RepositoryTabs(props: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number; repo: RepoInfo } | null>(null);
+  const [dragPath, setDragPath] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  const drop = (targetPath: string) => {
+    if (dragPath && dragPath !== targetPath) props.onReorder(dragPath, targetPath);
+    setDragPath(null);
+    setDropTarget(null);
+  };
+
   return (
-    <div className="repository-tabs" role="tablist" aria-label="打开的仓库">
-      <div className="repository-tab-scroll">
+    <div className="repository-tabs">
+      <div className="repository-tab-scroll" role="tablist" aria-label="打开的仓库">
         {props.repos.map((repo) => {
           const state = props.meta[repo.path];
           return (
             <div
-              className={`repository-tab${repo.path === props.activePath ? " active" : ""}`}
+              className={`repository-tab${repo.path === props.activePath ? " active" : ""}${dragPath === repo.path ? " dragging" : ""}${dropTarget === repo.path && dragPath !== repo.path ? " drop-target" : ""}`}
               key={repo.path}
               role="tab"
               aria-selected={repo.path === props.activePath}
               tabIndex={repo.path === props.activePath ? 0 : -1}
               title={repo.path}
+              draggable
+              onDragStart={() => setDragPath(repo.path)}
+              onDragEnd={() => { setDragPath(null); setDropTarget(null); }}
+              onDragOver={(e) => { e.preventDefault(); setDropTarget(repo.path); }}
+              onDragLeave={() => setDropTarget((prev) => prev === repo.path ? null : prev)}
+              onDrop={() => drop(repo.path)}
               onClick={() => props.onActivate(repo.path)}
               onAuxClick={(e) => { if (e.button === 1) props.onClose(repo.path); }}
               onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, repo }); }}
