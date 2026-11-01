@@ -12,6 +12,9 @@
 
 ## [未发布]
 
+### 变更
+- `package.bat` 打包成功后自动把当前版本的 NSIS / MSI 安装包收集到 `dist/release/`，并生成 `SHA256SUMS.txt`；不再需要手动从 `src-tauri/target/release/bundle/` 翻找。
+
 ---
 
 ## [0.3.0] - 2026-11-02
