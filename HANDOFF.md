@@ -10,14 +10,14 @@
 ## 待验收
 
 1. **顶部栏与拖拽 GUI**：拖动空白移动窗口、双击最大化/还原、最小化/最大化/关闭、边缘缩放、应用图标菜单；仓库页签排序、Pin 图标排序（Pin 顺序刷新后保持）。
-2. **分组多选 GUI**：分组入口菜单与 Pin 图标菜单可多选、标签栏显示并集、「显示全部组 / 仅显示 Default」；Pin 图标左键切换、右键菜单；新建/重命名/删除组（两种勾选）、未分组归 Default、多仓库配置隔离。
-3. **标签别名 GUI**：管理界面逐标签更换分组、编辑显示名；左侧右键「设置显示名…」；标签树 / 标签管理 / 提交图徽标 / 提交详情显示别名，Git 操作仍用真实名；旧单组配置自动迁移。
+2. **仓库页签分组 GUI**：分组入口菜单与 Pin 图标菜单多选切换、页签栏显示并集、「显示全部组 / 仅显示 Default」；Pin 图标左键切换、右键菜单；新建/重命名/删除组、未分组页签归 Default；活动页签被隐藏时自动切换、空组提示。
+3. **仓库页签别名 GUI**：管理界面逐页签更换分组、编辑显示名；页签右键「设置页签显示名…」；别名只改显示，Git 操作仍用真实路径。
 4. **重建 dist/release**：关闭正在运行的 `dist/release/unpack/git-extensions.exe`（PID 45852）后重跑 `package.bat` 或 `node scripts/copy-bundle.mjs collect`；当前 dist/release 只剩旧 unpack，安装包与 zip 未重建。
 5. （遗留）完整 Windows GUI 工作流、150% / 200% DPI、macOS 实机或 CI；0.2.0 Release 资产上传（安装包在 bundle/，SHA256SUMS 与 release-notes 已备）。
 
 ## 验证边界
 
-- 本轮：tsc + vite build 通过；25 个 Node 单测全过（tag-groups 8 项）；cargo test 全过（6 + 21 + 14 + 14）。前置打包验证：tauri build 成功，collect 因运行中的便携版占用目录失败（非代码问题）。
+- 本轮：tsc + vite build 通过；25 个 Node 单测全过（repo-groups 8 项）；cargo test 全过（6 + 21 + 14 + 14）。前置打包验证：tauri build 成功，collect 因运行中的便携版占用目录失败（非代码问题）。
 - 环境限制：GUI 截图 / 自动化（CopyFromScreen 句柄无效、GetCursorPos 拒绝访问）不可用，顶部栏与分组的实际交互未实测，需人工验收。
 - 仅临时仓库做破坏性 Git 回归，真实大仓库仅只读测量。
 - 安装包未代码签名。应用写互斥不能消除外部 Git 竞态，HEAD 备份不包含未提交内容。

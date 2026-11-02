@@ -1,16 +1,12 @@
 import { useState } from "react";
 import type { BranchInfo, TagInfo } from "../types";
-import type { TagGroupConfig } from "../tagGroups";
-import { DEFAULT_GROUP_ID, displayName } from "../tagGroups";
 import Icon from "../ui/Icon";
 import ContextMenu from "../ui/ContextMenu";
 import type { MenuItem } from "../ui/ContextMenu";
-import Dialog from "../ui/Dialog";
 
 interface Props {
   branches: BranchInfo[];
   tags: TagInfo[];
-  tagGroups: TagGroupConfig;
   activeRef: string | null;
   workspace: "history" | "changes";
   changeCount: number;
@@ -23,8 +19,6 @@ interface Props {
   onNewBranch: (startPoint: string) => void;
   onDeleteBranch: (branch: BranchInfo) => void;
   onDeleteTag: (name: string) => void;
-  onSetTagGroup: (name: string, groupId: string) => void;
-  onSetTagAlias: (name: string, alias: string) => void;
   onStash: () => void;
   onSubmodules: () => void;
 }
@@ -34,8 +28,6 @@ type MenuTarget = { x: number; y: number; kind: "branch" | "remote" | "tag"; nam
 export default function LeftPanel(props: Props) {
   const [menu, setMenu] = useState<MenuTarget | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [aliasTarget, setAliasTarget] = useState<string | null>(null);
-  const [aliasValue, setAliasValue] = useState("");
   const local = props.branches.filter((b) => !b.isRemote);
   const remote = props.branches.filter((b) => b.isRemote);
   const toggle = (name: string) => setCollapsed((prev) => {
@@ -81,19 +73,7 @@ export default function LeftPanel(props: Props) {
     { id: "compare", label: "与当前分支对比", icon: "compare", onSelect: () => props.onCompare(menu.name) },
     { id: "copy", label: "复制名称", icon: "copy", onSelect: () => { void navigator.clipboard?.writeText(menu.name); } },
     ...(menu.kind === "branch" ? [{ id: "sep", separator: true }, { id: "delete", label: "删除分支…", icon: "close" as const, danger: true, disabled: menu.branch?.isHead, onSelect: () => { if (menu.branch) props.onDeleteBranch(menu.branch); } }] : []),
-    ...(menu.kind === "tag" ? [
-      { id: "alias", label: "设置显示名…", icon: "edit" as const, onSelect: () => { setAliasValue(props.tagGroups.aliases[menu.name] ?? ""); setAliasTarget(menu.name); } },
-      { id: "sep-tag", separator: true },
-      ...props.tagGroups.groups.map((g): MenuItem => ({
-        id: `move-${g.id}`,
-        label: `移到 ${g.name}${g.id === DEFAULT_GROUP_ID ? "（取消分组）" : ""}`,
-        icon: "group" as const,
-        checked: (props.tagGroups.assignments[menu.name] ?? DEFAULT_GROUP_ID) === g.id,
-        onSelect: () => props.onSetTagGroup(menu.name, g.id),
-      })),
-      { id: "sep-del", separator: true },
-      { id: "delete-tag", label: "删除标签…", icon: "close" as const, danger: true, onSelect: () => props.onDeleteTag(menu.name) },
-    ] : []),
+    ...(menu.kind === "tag" ? [{ id: "sep-tag", separator: true }, { id: "delete-tag", label: "删除标签…", icon: "close" as const, danger: true, onSelect: () => props.onDeleteTag(menu.name) }] : []),
   ] : [];
 
   return (
@@ -109,7 +89,7 @@ export default function LeftPanel(props: Props) {
         {group("remote", "远程分支", remote.length)}
         {!collapsed.has("remote") && remote.map((b) => refRow(b.name, "remote", b))}
         {group("tags", "标签", props.tags.length)}
-        {!collapsed.has("tags") && props.tags.map((tag) => <div className={`tree-item${props.activeRef === tag.name ? " selected" : ""}`} role="treeitem" tabIndex={0} key={tag.name} title={props.tagGroups.aliases[tag.name] ? `${displayName(props.tagGroups, tag.name)}（原标签 ${tag.name}）` : tag.name} onClick={() => { props.onFilter(tag.name); props.onWorkspace("history"); }} onContextMenu={(e) => openMenu(e, { kind: "tag", name: tag.name })}><Icon name="tag" size={14} /><span>{displayName(props.tagGroups, tag.name)}{props.tagGroups.aliases[tag.name] && <span className="muted"> ({tag.name})</span>}</span></div>)}
+        {!collapsed.has("tags") && props.tags.map((tag) => <div className={`tree-item${props.activeRef === tag.name ? " selected" : ""}`} role="treeitem" tabIndex={0} key={tag.name} title={tag.name} onClick={() => { props.onFilter(tag.name); props.onWorkspace("history"); }} onContextMenu={(e) => openMenu(e, { kind: "tag", name: tag.name })}><Icon name="tag" size={14} /><span>{tag.name}</span></div>)}
         <div className="tree-section-actions">
           <button onClick={props.onStash}><Icon name="stash" size={14} />Stash</button>
           <button onClick={props.onSubmodules}><Icon name="folder" size={14} />子模块</button>
@@ -117,31 +97,6 @@ export default function LeftPanel(props: Props) {
       </div>
       {props.conflictCount > 0 && <button className="conflict-entry" onClick={() => props.onWorkspace("changes")}><Icon name="conflict" />{props.conflictCount} 个冲突待解决</button>}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
-      {aliasTarget && (
-        <Dialog
-          title={`设置显示名 · ${aliasTarget}`}
-          onClose={() => setAliasTarget(null)}
-          footer={<>
-            <button onClick={() => setAliasTarget(null)}>取消</button>
-            <button disabled={!props.tagGroups.aliases[aliasTarget]} onClick={() => { props.onSetTagAlias(aliasTarget, ""); setAliasTarget(null); }}>恢复原名</button>
-            <button className="primary" onClick={() => { props.onSetTagAlias(aliasTarget, aliasValue); setAliasTarget(null); }}>保存</button>
-          </>}
-        >
-          <div className="branch-create">
-            <input
-              data-autofocus
-              placeholder="显示名（空 = 原名）"
-              value={aliasValue}
-              onChange={(e) => setAliasValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") { props.onSetTagAlias(aliasTarget, aliasValue); setAliasTarget(null); }
-                if (e.key === "Escape") setAliasTarget(null);
-              }}
-            />
-          </div>
-          <p className="panel-hint">别名只改变界面显示，标签名与 Git 操作保持原样。</p>
-        </Dialog>
-      )}
     </aside>
   );
 }

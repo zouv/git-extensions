@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import { getRepoOperation } from "./repoOperations";
@@ -13,8 +13,12 @@ import Dialog from "./ui/Dialog";
 import Icon from "./ui/Icon";
 import { ConfirmProvider, useConfirm } from "./ui/Confirm";
 import { loadSettings, saveSettings } from "./settings";
-import type { TagGroupConfig } from "./tagGroups";
-import { emptyConfig, loadTagGroups, saveTagGroups } from "./tagGroups";
+import type { RepoGroupConfig } from "./repoGroups";
+import {
+  DEFAULT_GROUP_ID, ensureGroupActive, groupForRepo, loadRepoGroups, primaryGroupId,
+  saveRepoGroups, setRepoAlias, setRepoGroup, visibleRepos,
+} from "./repoGroups";
+import RepoGroupsDialog from "./components/RepoGroupsDialog";
 
 const LAST_REPO_KEY = "git-extensions.lastRepo";
 const RECENT_REPOS_KEY = "git-extensions.recentRepos.v2";
@@ -44,12 +48,13 @@ function AppShell() {
   const [opening, setOpening] = useState(false);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [meta, setMeta] = useState<Record<string, SessionMeta>>({});
-  const [tagGroups, setTagGroups] = useState<Record<string, TagGroupConfig>>({});
+  const [repoGroups, setRepoGroups] = useState<RepoGroupConfig>(loadRepoGroups);
   const [showGroupManager, setShowGroupManager] = useState(false);
   const noticeId = useRef(0);
   const confirm = useConfirm();
 
   useEffect(() => { if (!TEST_REPO) saveSettings(settings); }, [settings]);
+  useEffect(() => { if (!TEST_REPO) saveRepoGroups(repoGroups); }, [repoGroups]);
 
   const notify = useCallback((repoPath: string, kind: Notice["kind"], message: string, details?: string, repoName?: string) => {
     const id = ++noticeId.current;
@@ -64,7 +69,14 @@ function AppShell() {
     try {
       const info = await api.openRepo(trimmed);
       setRepos((prev) => prev.some((r) => r.path === info.path) ? prev : [...prev, info]);
-      setTagGroups((prev) => prev[info.path] ? prev : { ...prev, [info.path]: loadTagGroups(info.path) });
+      // 新仓库归入当前可见的组；重新打开已有仓库时确保其所在组处于选中状态。
+      setRepoGroups((prev) => {
+        if (!Object.prototype.hasOwnProperty.call(prev.assignments, info.path)) {
+          const target = prev.activeGroupIds.includes(DEFAULT_GROUP_ID) ? DEFAULT_GROUP_ID : primaryGroupId(prev);
+          return setRepoGroup(prev, info.path, target);
+        }
+        return ensureGroupActive(prev, groupForRepo(prev, info.path));
+      });
       setActivePath(info.path);
       rememberActive(info.path);
       setRecent((prev) => {
@@ -85,6 +97,14 @@ function AppShell() {
     // 启动只恢复一个仓库，避免多个大仓库同时加载。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const shownRepos = useMemo(() => visibleRepos(repoGroups, repos), [repoGroups, repos]);
+  // 切换分组后若当前活动仓库被隐藏，自动切到该组第一个可见页签；空组则清空活动页签。
+  useEffect(() => {
+    if (activePath && shownRepos.some((repo) => repo.path === activePath)) return;
+    const fallback = shownRepos[0]?.path ?? null;
+    if (fallback !== activePath) { setActivePath(fallback); rememberActive(fallback); }
+  }, [activePath, shownRepos]);
 
   const closeRepo = useCallback(async (path: string) => {
     const state = meta[path] ?? EMPTY_META;
@@ -108,14 +128,14 @@ function AppShell() {
   }, [activePath, confirm, meta, notify]);
 
   const closeOthers = useCallback((path: string) => {
-    const closing = repos.filter((repo) => repo.path !== path && !meta[repo.path]?.busy && !getRepoOperation(repo.path) && !meta[repo.path]?.dirty);
+    const closing = shownRepos.filter((repo) => repo.path !== path && !meta[repo.path]?.busy && !getRepoOperation(repo.path) && !meta[repo.path]?.dirty);
     if (closing.length === 0) { setActivePath(path); rememberActive(path); return; }
     const paths = new Set(closing.map((repo) => repo.path));
     setRepos((prev) => prev.filter((repo) => !paths.has(repo.path)));
     setMeta((prev) => Object.fromEntries(Object.entries(prev).filter(([repoPath]) => !paths.has(repoPath))));
     setActivePath(path);
     rememberActive(path);
-  }, [meta, repos]);
+  }, [meta, shownRepos]);
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
@@ -152,10 +172,7 @@ function AppShell() {
     });
   }, []);
 
-  const updateTagGroups = useCallback((path: string, next: TagGroupConfig) => {
-    setTagGroups((prev) => ({ ...prev, [path]: next }));
-    if (!TEST_REPO) saveTagGroups(path, next);
-  }, []);
+  const updateRepoGroups = useCallback((next: RepoGroupConfig) => setRepoGroups(next), []);
 
   const reorderRepos = useCallback((fromPath: string, toPath: string) => {
     setRepos((prev) => {
@@ -168,8 +185,6 @@ function AppShell() {
       return next;
     });
   }, []);
-
-  const activeTagGroups = activePath ? tagGroups[activePath] ?? null : null;
 
   // 窗口关闭保护：任一仓库有未保存草稿或写操作进行中时需确认。
   const metaRef = useRef(meta);
@@ -207,10 +222,10 @@ function AppShell() {
   return (
     <div className="app">
       <TitleBar
-        repos={repos}
+        repos={shownRepos}
         activePath={activePath}
         meta={meta}
-        tagGroups={activeTagGroups}
+        repoGroups={repoGroups}
         onActivate={(path) => { setActivePath(path); rememberActive(path); }}
         onClose={(path) => void closeRepo(path)}
         onCloseOthers={(path) => closeOthers(path)}
@@ -219,7 +234,8 @@ function AppShell() {
         onCopyPath={(path) => { void navigator.clipboard?.writeText(path).then(() => notify(path, "success", "已复制仓库路径")); }}
         onReveal={(path) => { void api.revealPath(path).catch((e) => notify(path, "error", "无法打开文件管理器", String(e))); }}
         onReorderRepo={reorderRepos}
-        onTagGroupsChange={(next) => { if (activePath) updateTagGroups(activePath, next); }}
+        onRepoGroupsChange={updateRepoGroups}
+        onSetRepoAlias={(path, alias) => updateRepoGroups(setRepoAlias(repoGroups, path, alias))}
         onManageGroups={() => setShowGroupManager(true)}
         onCloseWindow={() => void closeWindow()}
       />
@@ -229,10 +245,6 @@ function AppShell() {
             repo={repo}
             active={repo.path === activePath}
             settings={settings}
-            tagGroups={tagGroups[repo.path] ?? emptyConfig()}
-            onTagGroupsChange={(next) => updateTagGroups(repo.path, next)}
-            showGroupManager={repo.path === activePath && showGroupManager}
-            onCloseGroupManager={() => setShowGroupManager(false)}
             onOpen={() => { setOpenPath(repo.path); setShowOpen(true); }}
             onSettings={() => setShowSettings(true)}
             onNotify={(kind, message, details) => notify(repo.path, kind, message, details, repo.name)}
@@ -240,12 +252,19 @@ function AppShell() {
           />
         </div>
       ))}
+      {repos.length > 0 && shownRepos.length === 0 && <div className="welcome-screen">
+        <Icon name="group" size={42} />
+        <h1>当前分组没有仓库页签</h1>
+        <p>切换分组或在「管理分组…」中把仓库页签移入当前组。</p>
+        <button onClick={() => setShowGroupManager(true)}><Icon name="group" />管理分组</button>
+      </div>}
       {repos.length === 0 && <div className="welcome-screen">
         <Icon name="branch" size={42} />
         <h1>Git Extensions</h1>
         <p>打开一个本地 Git 仓库，开始查看历史或提交变更。</p>
         <button className="primary" onClick={() => setShowOpen(true)}><Icon name="plus" />打开仓库</button>
       </div>}
+      {showGroupManager && <RepoGroupsDialog config={repoGroups} repos={repos} onChange={updateRepoGroups} onClose={() => setShowGroupManager(false)} />}
       {showOpen && <Dialog title="打开 Git 仓库" onClose={() => { if (!opening) setShowOpen(false); }} busy={opening} footer={<>
         <button disabled={opening} onClick={() => setShowOpen(false)}>取消</button>
         <button className="primary" disabled={opening || !openPath.trim()} onClick={() => void openRepo(openPath)}>{opening ? "打开中…" : "打开"}</button>

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { RepoInfo } from "../types";
-import type { TagGroupConfig } from "../tagGroups";
+import type { RepoGroupConfig } from "../repoGroups";
 import {
   DEFAULT_GROUP_ID, isGroupActive, pinnedGroups, reorderPinned, setActiveGroups,
   toggleActiveGroup,
-} from "../tagGroups";
+} from "../repoGroups";
 import type { SessionMeta } from "./RepositoryTabs";
 import RepositoryTabs from "./RepositoryTabs";
 import ContextMenu from "../ui/ContextMenu";
@@ -18,7 +18,7 @@ interface Props {
   repos: RepoInfo[];
   activePath: string | null;
   meta: Record<string, SessionMeta>;
-  tagGroups: TagGroupConfig | null;
+  repoGroups: RepoGroupConfig;
   onActivate: (path: string) => void;
   onClose: (path: string) => void;
   onCloseOthers: (path: string) => void;
@@ -27,14 +27,15 @@ interface Props {
   onCopyPath: (path: string) => void;
   onReveal: (path: string) => void;
   onReorderRepo: (fromPath: string, toPath: string) => void;
-  onTagGroupsChange: (next: TagGroupConfig) => void;
+  onRepoGroupsChange: (next: RepoGroupConfig) => void;
+  onSetRepoAlias: (path: string, alias: string) => void;
   onManageGroups: () => void;
   onCloseWindow: () => void;
 }
 
 const win = getCurrentWindow();
 
-/** 自绘顶部栏：应用图标 + 分组入口 + Pin 组图标 + 仓库页签 + 窗口控制。 */
+/** 自绘顶部栏：应用图标 + 仓库页签分组入口 + Pin 组图标 + 仓库页签 + 窗口控制。 */
 export default function TitleBar(props: Props) {
   const [appMenu, setAppMenu] = useState<{ x: number; y: number } | null>(null);
   const [groupMenu, setGroupMenu] = useState<{ x: number; y: number } | null>(null);
@@ -50,10 +51,9 @@ export default function TitleBar(props: Props) {
     return () => { disposed = true; void unlisten.then((f) => f()); };
   }, []);
 
-  const config = props.tagGroups;
-  const pinned = config ? pinnedGroups(config) : [];
-  const activeGroupIds = config?.activeGroupIds ?? [DEFAULT_GROUP_ID];
-  const onlyDefault = activeGroupIds.length === 1 && activeGroupIds[0] === DEFAULT_GROUP_ID;
+  const config = props.repoGroups;
+  const pinned = pinnedGroups(config);
+  const onlyDefault = config.activeGroupIds.length === 1 && config.activeGroupIds[0] === DEFAULT_GROUP_ID;
 
   const openMenu = (setter: (v: { x: number; y: number } | null) => void, el: HTMLElement | null) => {
     if (!el) return;
@@ -61,29 +61,29 @@ export default function TitleBar(props: Props) {
     setter({ x: r.left, y: r.bottom + 2 });
   };
 
-  const groupMenuItems: MenuItem[] = config ? [
+  const groupMenuItems: MenuItem[] = [
     ...config.groups.map((g) => ({
       id: `switch-${g.id}`,
       label: g.name,
       checked: isGroupActive(config, g.id),
-      onSelect: () => props.onTagGroupsChange(toggleActiveGroup(config, g.id)),
+      onSelect: () => props.onRepoGroupsChange(toggleActiveGroup(config, g.id)),
     })),
     { id: "sep-quick", separator: true },
-    { id: "show-all", label: "显示全部组", icon: "group" as const, onSelect: () => props.onTagGroupsChange(setActiveGroups(config, config.groups.map((g) => g.id))) },
-    { id: "show-default", label: "仅显示 Default", onSelect: () => props.onTagGroupsChange(setActiveGroups(config, [DEFAULT_GROUP_ID])) },
+    { id: "show-all", label: "显示全部组", icon: "group" as const, onSelect: () => props.onRepoGroupsChange(setActiveGroups(config, config.groups.map((g) => g.id))) },
+    { id: "show-default", label: "仅显示 Default", onSelect: () => props.onRepoGroupsChange(setActiveGroups(config, [DEFAULT_GROUP_ID])) },
     { id: "sep-manage", separator: true },
     { id: "manage", label: "管理分组…", icon: "group" as const, onSelect: props.onManageGroups },
-  ] : [];
+  ];
 
   const dropPin = (targetId: string) => {
-    if (!config || !dragPin || dragPin === targetId) { setDragPin(null); return; }
+    if (!dragPin || dragPin === targetId) { setDragPin(null); return; }
     const ids = pinned.map((g) => g.id);
     const from = ids.indexOf(dragPin);
     const to = ids.indexOf(targetId);
     if (from < 0 || to < 0) { setDragPin(null); return; }
     ids.splice(from, 1);
     ids.splice(to, 0, dragPin);
-    props.onTagGroupsChange(reorderPinned(config, ids));
+    props.onRepoGroupsChange(reorderPinned(config, ids));
     setDragPin(null);
   };
 
@@ -102,16 +102,15 @@ export default function TitleBar(props: Props) {
       <button
         ref={groupBtn}
         className={`icon-button title-group-button${config && !onlyDefault ? " has-group" : ""}`}
-        title="标签分组（可多选）"
-        aria-label="标签分组"
-        disabled={!config}
+        title="仓库页签分组（可多选）"
+        aria-label="仓库页签分组"
         onClick={() => openMenu(setGroupMenu, groupBtn.current)}
       >
         <Icon name="group" size={17} />
       </button>
 
-      {config && pinned.length > 0 && (
-        <div className="title-pinned" role="group" aria-label="已 Pin 的分组">
+      {pinned.length > 0 && (
+        <div className="title-pinned" role="group" aria-label="已 Pin 的仓库页签分组">
           {pinned.map((g) => (
             <button
               key={g.id}
@@ -124,7 +123,7 @@ export default function TitleBar(props: Props) {
               onDragEnd={() => setDragPin(null)}
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => dropPin(g.id)}
-              onClick={() => props.onTagGroupsChange(toggleActiveGroup(config, g.id))}
+              onClick={() => props.onRepoGroupsChange(toggleActiveGroup(config, g.id))}
               onContextMenu={(e) => {
                 e.preventDefault();
                 const r = e.currentTarget.getBoundingClientRect();
@@ -141,6 +140,8 @@ export default function TitleBar(props: Props) {
         repos={props.repos}
         activePath={props.activePath}
         meta={props.meta}
+        aliases={config.aliases}
+        onSetAlias={props.onSetRepoAlias}
         onActivate={props.onActivate}
         onClose={props.onClose}
         onCloseOthers={props.onCloseOthers}
@@ -152,7 +153,7 @@ export default function TitleBar(props: Props) {
 
       <div className="title-window-controls">
         <button className="title-win-btn" title="最小化" aria-label="最小化" onClick={() => void win.minimize()}><Icon name="minimize" size={15} /></button>
-        <button className="title-win-btn" title={maximized ? "还原" : "最大化"} aria-label={maximized ? "还原" : "最大化"} onClick={() => void win.toggleMaximize()}><Icon name={maximized ? "restore" : "maximize"} size={14} /></button>
+        <button className="title-win-btn" title={maximized ? "还原" : "最大化"} aria-label={maximized ? "还原" : "最大化"} onClick={() => void win.toggleMaximize()}>{maximized ? <Icon name="restore" size={14} /> : <Icon name="maximize" size={14} />}</button>
         <button className="title-win-btn title-win-close" title="关闭" aria-label="关闭" onClick={props.onCloseWindow}><Icon name="close" size={15} /></button>
       </div>
 
@@ -162,8 +163,8 @@ export default function TitleBar(props: Props) {
           { id: "settings", label: "设置", icon: "settings", onSelect: props.onSettings },
         ]} />
       )}
-      {groupMenu && config && (
-        <ContextMenu x={groupMenu.x} y={groupMenu.y} onClose={() => setGroupMenu(null)} ariaLabel="标签分组" items={groupMenuItems} />
+      {groupMenu && (
+        <ContextMenu x={groupMenu.x} y={groupMenu.y} onClose={() => setGroupMenu(null)} ariaLabel="仓库页签分组" items={groupMenuItems} />
       )}
     </div>
   );

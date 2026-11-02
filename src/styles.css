@@ -296,12 +296,7 @@ kbd { font: 11px Consolas, monospace; }
 .context-item .menu-check { flex: 0 0 16px; display: inline-flex; color: var(--accent); }
 .menu-separator { height: 1px; background: var(--border); margin: 4px; }
 
-/* 标签分组管理 */
-.tag-group-filter { display: flex; align-items: flex-start; gap: 8px; }
-.tag-group-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.tag-group-chip { padding: 2px 9px; border: 1px solid var(--border); border-radius: 10px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
-.tag-group-chip:hover { background: var(--hover); color: var(--text); }
-.tag-group-chip.active { border-color: var(--accent); color: var(--accent); background: var(--selected); }
+/* 仓库页签分组管理 */
 .group-manager-list { display: flex; flex-direction: column; gap: 2px; max-height: 32vh; overflow-y: auto; }
 .group-manager-row { display: flex; align-items: center; gap: 10px; padding: 5px 6px; border-radius: 4px; }
 .group-manager-row:hover { background: var(--hover); }
