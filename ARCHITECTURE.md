@@ -50,7 +50,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 
 | 文件 | 职责 | 何时改它 |
 |---|---|---|
-| `src-tauri/src/lib.rs` | Tauri 命令注册、应用入口 | 新增 / 删除 IPC 命令 |
+| `src-tauri/src/lib.rs` | Tauri 命令注册、应用入口、主窗口销毁后退出进程 | 新增 / 删除 IPC 命令、改应用生命周期 |
 | `src-tauri/src/error.rs` | 统一错误类型 `GitError`（可序列化给前端） | 新增错误类别 |
 | `src-tauri/src/git/mod.rs` | `open()`：按路径 discover 打开仓库 | 改仓库打开策略 |
 | `src-tauri/src/git/repo.rs` | 仓库信息、分支列表 | 改仓库概览 / 分支字段 |
@@ -273,7 +273,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 - **Stash 选择不是稳定索引**：应用 / 弹出 / 删除必须校验 expectedOid，stash@{n} 变动后拒绝旧预览；不能只凭索引误操作另一条。
 - **文件历史路径属于对应提交**：--follow 的 rename 状态用 NUL 分隔解析，不用作者 / subject 可包含的文本哨兵；返回 filePath，查看历史 diff 使用该时期路径并从清单取得 oldPath。
 - **图标资源必须跨平台齐全**：即使 bundle 未显式引用，`generate_context!` 在非 Windows 构建也需要 PNG；`icons/` 同时保留 ICO / PNG / ICNS，并在 bundle 配置中引用。
-- **自绘顶部栏（无边框窗口）**：`tauri.conf.json` 设 `decorations: false`，Tauri 2 在 Windows 原生处理 undecorated 窗口的边缘缩放，无需自绘边框。`data-tauri-drag-region` 只作用于直接标注的元素，按钮 / 可拖拽子元素不触发窗口拖动。窗口控制需 capabilities 追加 `core:window:allow-minimize/toggle-maximize/close/destroy/start-dragging`（默认权限不含；`onCloseRequested` 放行后还会自动调用 `destroy()`）。关闭必须走 `closeWindow` 汇总确认（dirty/busy），并用 `allowCloseRef` 防止 `onCloseRequested` 拦截后再次触发自身造成循环；关闭调用失败要恢复该标记并显示错误。Windows 无边框窗口圆角 / 阴影变化属预期。
+- **自绘顶部栏（无边框窗口）**：`tauri.conf.json` 设 `decorations: false`，Tauri 2 在 Windows 原生处理 undecorated 窗口的边缘缩放，无需自绘边框。`data-tauri-drag-region` 只作用于直接标注的元素，按钮 / 可拖拽子元素不触发窗口拖动。窗口控制需 capabilities 追加 `core:window:allow-minimize/toggle-maximize/close/destroy/start-dragging`（默认权限不含；`onCloseRequested` 放行后还会自动调用 `destroy()`）。关闭必须走 `closeWindow` 汇总确认（dirty/busy），并用 `allowCloseRef` 防止 `onCloseRequested` 拦截后再次触发自身造成循环；关闭调用失败要恢复该标记并显示错误。`main.rs` 的发布构建必须启用 `windows_subsystem = "windows"`，否则从资源管理器启动会弹出控制台；`lib.rs` 在主窗口 `Destroyed` 后显式 `exit(0)`，避免 WebView / 后台线程留下无窗口进程。Windows 无边框窗口圆角 / 阴影变化属预期。
 - **仓库页签分组是纯 UI 配置**：全局存 localStorage `git-extensions.repoGroups.v1`（`repoGroups.ts`），`assignments` / `aliases` 以仓库路径为键，配置提升到 App 层供 TitleBar / RepositoryTabs / RepoGroupsDialog 共享。Default 组强制存在、不可改名 / 删除 / Pin，未分配仓库页签归入 Default。活动组为多选 `activeGroupIds`：页签栏只显示所选组页签的并集，至少保留 Default；标题栏分组入口菜单可多选切换，Pin 图标作为常驻快捷入口（左键切换、右键菜单、可拖拽排序）。删除组只把组内页签（含已关闭仓库的分组记录）移回 Default，不关闭或删除任何仓库。管理界面可逐页签更换分组、编辑别名与选择预设颜色；组色只接受 `GROUP_COLOR_PRESETS`，旧配置按组 ID 哈希稳定补色，页签按 `groupForRepo` 的唯一归属取色，多选切换不改变颜色。`ContextMenu` 的 `trailingAction` 用同级按钮实现菜单右侧快速 Pin，不能嵌套 button；快速 Pin 不改变 `activeGroupIds`。别名只影响页签显示，仓库身份 / 路径与所有 Git 操作仍用真实路径。分组只过滤页签栏，不影响已打开仓库的后台状态；当前活动仓库被隐藏时自动切到该组第一个可见页签，空组显示提示。打开仓库时若其所属组未选中会自动补选，新仓库归入 Default 或当前第一个非 Default 选中组。校验用白名单（sanitizeConfig），容忍脏数据与指向已删组 / 已关闭仓库的记录。
 - **拖拽排序复用 HTML5 DnD**：与 `RebasePlanner` 同模式（`draggable` + `onDragStart/Over/Drop`），不引入库。页签排序仅会话内（`reorderRepos`），Pin 组顺序持久化在 config（`reorderPinned` 把 pinned 组按新序写回，Default 恒在首位）。Tauri `dragDropEnabled` 管的是文件拖入窗口，与元素间排序无关。
 - **打包产物只导本次构建**：NSIS / MSI 每次构建都会内嵌时间戳，大小与 SHA256 都会变，不能靠「文件已存在 + 版本号」判断新包。`package.bat` 先 `snapshot` 记录 bundle 内安装包的 size / mtime / birthtime，构建后 `collect` 只导出指纹变化且版本匹配的产物，否则报错而不是发布旧包。`dist/release/` 整目录重建（旧产物清理），unpack 直接取 `target/release` 的 exe（Tauri 打包时写入 bundle 信息后仍可独立运行），zip 用系统 `Compress-Archive -Path unpack\*` 使条目以应用根为根目录，并回读条目校验。

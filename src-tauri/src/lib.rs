@@ -2,6 +2,8 @@ pub mod error;
 pub mod git;
 pub mod system;
 
+use tauri::Manager;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -63,6 +65,12 @@ pub fn run() {
             git::commands::blame_file,
             git::commands::file_log,
         ])
+        .on_window_event(|window, event| {
+            // 主窗口销毁后显式结束命令循环，避免 WebView / 后台线程留下无窗口进程。
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                window.app_handle().exit(0);
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

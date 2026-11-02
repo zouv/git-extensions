@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 fn main() {
     if let Some(result) = git_extensions_lib::git::rebase::internal_editor_entry() {
         if let Err(error) = result {
