@@ -11,7 +11,8 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    port: 1420,
+    // Tauri 官方模板默认 1420，但本机 ScCode 也用 1420；本项目固定 1421 以便同时开发。
+    port: 1421,
     strictPort: true,
   },
   envPrefix: ["VITE_", "TAURI_"],
