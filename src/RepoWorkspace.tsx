@@ -7,7 +7,7 @@ import type { AheadBehind, BranchInfo, CommitDetail, ContainedInfo, FileDiff, Co
 import type { AppSettings } from "./settings";
 import { loadLayout, resetLayout, saveLayout } from "./settings";
 import type { TagGroupConfig } from "./tagGroups";
-import { setTagGroup, visibleTags } from "./tagGroups";
+import { forgetTag, setTagAlias, setTagGroup, visibleTags } from "./tagGroups";
 import type { SessionMeta } from "./components/RepositoryTabs";
 import Toolbar from "./components/Toolbar";
 import LeftPanel from "./components/LeftPanel";
@@ -464,8 +464,9 @@ export default function RepoWorkspace(props: Props) {
         {layout.showLeft && <LeftPanel branches={branches} tags={shownTags} tagGroups={tagGroups} activeRef={leftRef} workspace={workspace} changeCount={changeCount} width={layout.leftWidth} conflictCount={operation?.conflicts.length ?? 0}
           onWorkspace={(next) => { void switchWorkspace(next); }} onFilter={setLeftRef} onCheckout={(name) => void runAction(() => api.checkoutBranch(repo.path, name), `已切换到 ${name}`)} onCompare={(ref) => openCompare("HEAD", ref)}
           onNewBranch={(start) => { setBranchStart(start); setShowBranches(true); }} onDeleteBranch={deleteBranch}
-          onDeleteTag={(name) => { void confirm({ title: `删除标签 ${name}？`, body: "只删除本地标签。", danger: true, confirmLabel: "删除标签" }).then((ok) => { if (ok) void runAction(() => api.deleteTag(repo.path, name), `已删除标签 ${name}`); }); }}
+          onDeleteTag={(name) => { void confirm({ title: `删除标签 ${name}？`, body: "只删除本地标签。", danger: true, confirmLabel: "删除标签" }).then((ok) => { if (ok) void runAction(async () => { await api.deleteTag(repo.path, name); props.onTagGroupsChange(forgetTag(tagGroups, name)); }, `已删除标签 ${name}`); }); }}
           onSetTagGroup={(name, groupId) => props.onTagGroupsChange(setTagGroup(tagGroups, name, groupId))}
+          onSetTagAlias={(name, alias) => props.onTagGroupsChange(setTagAlias(tagGroups, name, alias))}
           onStash={() => setShowStash(true)} onSubmodules={() => setShowSubmodules(true)} />}
         {layout.showLeft && <SplitHandle direction="vertical" label="调整导航宽度" onResize={(delta) => setLayout((prev) => ({ ...prev, leftWidth: Math.min(360, Math.max(160, prev.leftWidth + delta)) }))} onReset={() => setLayout((prev) => ({ ...prev, leftWidth: 224 }))} />}
         <div className={`content-area${verticalInspector ? " horizontal" : " vertical"}`}>
@@ -473,7 +474,7 @@ export default function RepoWorkspace(props: Props) {
             {task?.type === "compare" && <CompareView repoPath={repo.path} initialBase={task.base} initialTarget={task.target} refs={refs} onClose={() => setTask(null)} onFileAction={onFileAction} onError={compareError} />}
             {task?.type === "rebase" && <RebasePlanner key={task.oid} repoPath={repo.path} startOid={task.oid} draft={rebaseDrafts.current.get(task.oid)} onDraftChange={saveRebaseDraft} onExit={() => setTask(null)} onConflict={showConflict} onChanged={refreshAll} onDirtyChange={updateRebaseDirty} onNotify={props.onNotify} />}
             {task?.type === "conflict" && <ConflictCenter repoPath={repo.path} drafts={conflictDrafts.current} onDraftChange={saveConflictDraft} onExit={() => setTask(null)} onChanged={refreshAll} onDirtyChange={updateConflictDirty} onNotify={props.onNotify} />}
-            {!task && workspace === "history" && <RevisionGrid revisions={filteredRevisions} selectedOids={selectedOids} onSelect={selectCommit} onContextAction={(action, rev) => void onRevisionAction(action, rev)} loading={logLoading} />}
+            {!task && workspace === "history" && <RevisionGrid revisions={filteredRevisions} selectedOids={selectedOids} tagAliases={tagGroups.aliases} onSelect={selectCommit} onContextAction={(action, rev) => void onRevisionAction(action, rev)} loading={logLoading} />}
             <div className="changes-workspace" style={{ display: workspace === "changes" && !task ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
               <ChangesPanel repoPath={repo.path} status={status} width={layout.changesWidth} conflictCount={operation?.conflicts.length ?? 0} onWidth={(changesWidth) => setLayout((prev) => ({ ...prev, changesWidth }))}
                 onRefresh={(historyChanged) => historyChanged ? refreshAll() : refreshWorktree()} refreshVersion={worktreeVersion} setMessage={setMessage} highlightEnabled={settings.highlightEnabled} onFileAction={onFileAction} onPathAction={onPathAction} onDiscard={discard} onOpenConflict={showConflict} onDirtyChange={updateCommitDirty} />
@@ -488,7 +489,7 @@ export default function RepoWorkspace(props: Props) {
                 <button className="icon-button" title={maximized ? "还原 (Esc)" : "最大化"} onClick={() => setMaximized(!maximized)}>{maximized ? "↙" : "↗"}</button>
                 <button className="icon-button" title="关闭检查器" onClick={() => { setMaximized(false); setLayout((prev) => ({ ...prev, showInspector: false })); }}><Icon name="close" /></button>
               </div>
-              <div className="inspector-content">{inspectorTab === "details" ? <CommitInfo commit={commit} contained={contained} loading={detailLoading} /> : <DiffView files={commitDiff} loadFile={loadCommitFile} loading={detailLoading} highlightEnabled={settings.highlightEnabled} onFileAction={onCommitFileAction} />}</div>
+              <div className="inspector-content">{inspectorTab === "details" ? <CommitInfo commit={commit} contained={contained} loading={detailLoading} tagAliases={tagGroups.aliases} /> : <DiffView files={commitDiff} loadFile={loadCommitFile} loading={detailLoading} highlightEnabled={settings.highlightEnabled} onFileAction={onCommitFileAction} />}</div>
             </section>
           </>}
         </div>

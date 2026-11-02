@@ -297,8 +297,11 @@ kbd { font: 11px Consolas, monospace; }
 .menu-separator { height: 1px; background: var(--border); margin: 4px; }
 
 /* 标签分组管理 */
-.tag-group-filter { display: flex; align-items: center; gap: 8px; }
-.tag-group-filter select { min-width: 160px; }
+.tag-group-filter { display: flex; align-items: flex-start; gap: 8px; }
+.tag-group-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag-group-chip { padding: 2px 9px; border: 1px solid var(--border); border-radius: 10px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.tag-group-chip:hover { background: var(--hover); color: var(--text); }
+.tag-group-chip.active { border-color: var(--accent); color: var(--accent); background: var(--selected); }
 .group-manager-list { display: flex; flex-direction: column; gap: 2px; max-height: 32vh; overflow-y: auto; }
 .group-manager-row { display: flex; align-items: center; gap: 10px; padding: 5px 6px; border-radius: 4px; }
 .group-manager-row:hover { background: var(--hover); }
@@ -307,8 +310,9 @@ kbd { font: 11px Consolas, monospace; }
 .group-rename-input { flex: 1; min-width: 0; }
 .group-assign-list { display: flex; flex-direction: column; gap: 2px; max-height: 26vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; padding: 4px; }
 .group-assign-row { display: flex; align-items: center; gap: 8px; padding: 2px 4px; }
-.group-assign-tag { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.group-assign-row select { max-width: 180px; }
+.group-assign-tag { flex: 1; min-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-assign-row .alias-input { width: 150px; flex: 0 0 150px; }
+.group-assign-row select { width: 140px; flex: 0 0 140px; }
 
 /* 弹窗与确认 */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .58); display: flex; align-items: center; justify-content: center; z-index: 400; }

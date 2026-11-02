@@ -11,7 +11,10 @@ export interface TagGroupConfig {
   groups: TagGroup[];
   /** tagName → groupId；未记录的标签归入 Default。 */
   assignments: Record<string, string>;
-  activeGroupId: string;
+  /** 当前选中的组（多选）；标签栏显示这些组内标签的并集。 */
+  activeGroupIds: string[];
+  /** tagName → 自定义显示名（别名）；Git 操作始终使用真实标签名。 */
+  aliases: Record<string, string>;
 }
 
 export const DEFAULT_GROUP_ID = "default";
@@ -20,13 +23,14 @@ export const DEFAULT_GROUP_NAME = "Default";
 const KEY_PREFIX = "git-extensions.tagGroups.v1:";
 const MAX_GROUPS = 64;
 const MAX_NAME = 40;
+const MAX_ALIAS = 40;
 
 export function defaultGroup(): TagGroup {
   return { id: DEFAULT_GROUP_ID, name: DEFAULT_GROUP_NAME, pinned: false };
 }
 
 export function emptyConfig(): TagGroupConfig {
-  return { groups: [defaultGroup()], assignments: {}, activeGroupId: DEFAULT_GROUP_ID };
+  return { groups: [defaultGroup()], assignments: {}, activeGroupIds: [DEFAULT_GROUP_ID], aliases: {} };
 }
 
 function validGroup(value: unknown): TagGroup | null {
@@ -37,10 +41,13 @@ function validGroup(value: unknown): TagGroup | null {
   return { id: raw.id, name: raw.name.trim().slice(0, MAX_NAME), pinned: raw.pinned === true };
 }
 
-/** localStorage 可能被手工修改：白名单校验，Default 强制存在且不可 Pin。 */
+/**
+ * localStorage 可能被手工修改：白名单校验，Default 强制存在且不可 Pin。
+ * 兼容旧版单选字段 activeGroupId：读取时迁移为 activeGroupIds。
+ */
 export function sanitizeConfig(value: unknown): TagGroupConfig {
   if (typeof value !== "object" || value === null) return emptyConfig();
-  const raw = value as Partial<TagGroupConfig>;
+  const raw = value as Partial<TagGroupConfig> & { activeGroupId?: unknown };
   const groups: TagGroup[] = [defaultGroup()];
   const ids = new Set<string>([DEFAULT_GROUP_ID]);
   const names = new Set<string>([DEFAULT_GROUP_NAME.toLowerCase()]);
@@ -55,13 +62,28 @@ export function sanitizeConfig(value: unknown): TagGroupConfig {
     }
   }
   const assignments: Record<string, string> = {};
-  if (typeof raw.assignments === "object" && raw.assignments !== null) {
+  if (typeof raw.assignments === "object" && raw.assignments !== null && !Array.isArray(raw.assignments)) {
     for (const [tag, groupId] of Object.entries(raw.assignments)) {
       if (typeof groupId === "string" && ids.has(groupId) && groupId !== DEFAULT_GROUP_ID) assignments[tag] = groupId;
     }
   }
-  const activeGroupId = typeof raw.activeGroupId === "string" && ids.has(raw.activeGroupId) ? raw.activeGroupId : DEFAULT_GROUP_ID;
-  return { groups, assignments, activeGroupId };
+  const rawActive = Array.isArray(raw.activeGroupIds)
+    ? raw.activeGroupIds
+    : typeof raw.activeGroupId === "string" ? [raw.activeGroupId] : [];
+  const activeGroupIds: string[] = [];
+  for (const id of rawActive) {
+    if (typeof id === "string" && ids.has(id) && !activeGroupIds.includes(id)) activeGroupIds.push(id);
+  }
+  if (activeGroupIds.length === 0) activeGroupIds.push(DEFAULT_GROUP_ID);
+  const aliases: Record<string, string> = {};
+  if (typeof raw.aliases === "object" && raw.aliases !== null && !Array.isArray(raw.aliases)) {
+    for (const [tag, alias] of Object.entries(raw.aliases)) {
+      if (!tag || typeof alias !== "string") continue;
+      const trimmed = alias.trim().slice(0, MAX_ALIAS);
+      if (trimmed && trimmed !== tag) aliases[tag] = trimmed;
+    }
+  }
+  return { groups, assignments, activeGroupIds, aliases };
 }
 
 export function loadTagGroups(repoPath: string): TagGroupConfig {
@@ -85,9 +107,10 @@ export function groupForTag(config: TagGroupConfig, tagName: string): string {
   return id && config.groups.some((g) => g.id === id) ? id : DEFAULT_GROUP_ID;
 }
 
-/** 当前组可见的标签；Default 组显示所有未分配标签。 */
+/** 当前选中的组（多选）可见的标签并集；未分配标签只在选中 Default 时显示。 */
 export function visibleTags(config: TagGroupConfig, tags: TagInfo[]): TagInfo[] {
-  return tags.filter((tag) => groupForTag(config, tag.name) === config.activeGroupId);
+  const active = new Set(config.activeGroupIds);
+  return tags.filter((tag) => active.has(groupForTag(config, tag.name)));
 }
 
 export function tagsInGroup(config: TagGroupConfig, tags: TagInfo[], groupId: string): TagInfo[] {
@@ -102,9 +125,27 @@ export function pinnedGroups(config: TagGroupConfig): TagGroup[] {
   return config.groups.filter((g) => g.pinned);
 }
 
-export function setActiveGroup(config: TagGroupConfig, groupId: string): TagGroupConfig {
+export function isGroupActive(config: TagGroupConfig, groupId: string): boolean {
+  return config.activeGroupIds.includes(groupId);
+}
+
+/** 新建标签时优先归入的组：第一个选中的非 Default 组。 */
+export function primaryGroupId(config: TagGroupConfig): string {
+  return config.activeGroupIds.find((id) => id !== DEFAULT_GROUP_ID) ?? DEFAULT_GROUP_ID;
+}
+
+/** 多选切换：点击组图标 / 菜单项切换该组是否参与过滤；至少保留 Default，避免标签栏全空。 */
+export function toggleActiveGroup(config: TagGroupConfig, groupId: string): TagGroupConfig {
   if (!groupById(config, groupId)) return config;
-  return { ...config, activeGroupId: groupId };
+  const next = isGroupActive(config, groupId)
+    ? config.activeGroupIds.filter((id) => id !== groupId)
+    : [...config.activeGroupIds, groupId];
+  return { ...config, activeGroupIds: next.length > 0 ? next : [DEFAULT_GROUP_ID] };
+}
+
+export function setActiveGroups(config: TagGroupConfig, groupIds: string[]): TagGroupConfig {
+  const valid = groupIds.filter((id, index) => groupById(config, id) && groupIds.indexOf(id) === index);
+  return { ...config, activeGroupIds: valid.length > 0 ? valid : [DEFAULT_GROUP_ID] };
 }
 
 export function setTagGroup(config: TagGroupConfig, tagName: string, groupId: string): TagGroupConfig {
@@ -112,6 +153,29 @@ export function setTagGroup(config: TagGroupConfig, tagName: string, groupId: st
   if (groupId === DEFAULT_GROUP_ID || !groupById(config, groupId)) delete assignments[tagName];
   else assignments[tagName] = groupId;
   return { ...config, assignments };
+}
+
+/** 标签显示名：有别名用别名，否则用真实标签名。 */
+export function displayName(config: TagGroupConfig, tagName: string): string {
+  return config.aliases[tagName] ?? tagName;
+}
+
+export function setTagAlias(config: TagGroupConfig, tagName: string, alias: string): TagGroupConfig {
+  const trimmed = alias.trim().slice(0, MAX_ALIAS);
+  const aliases = { ...config.aliases };
+  if (!trimmed || trimmed === tagName) delete aliases[tagName];
+  else aliases[tagName] = trimmed;
+  return { ...config, aliases };
+}
+
+/** Git 标签删除后清理其分组记录与别名。 */
+export function forgetTag(config: TagGroupConfig, tagName: string): TagGroupConfig {
+  if (!(tagName in config.assignments) && !(tagName in config.aliases)) return config;
+  const assignments = { ...config.assignments };
+  const aliases = { ...config.aliases };
+  delete assignments[tagName];
+  delete aliases[tagName];
+  return { ...config, assignments, aliases };
 }
 
 export function createGroup(config: TagGroupConfig, name: string): TagGroupConfig {
@@ -142,10 +206,12 @@ export function deleteGroup(config: TagGroupConfig, groupId: string, moveToDefau
   for (const [tag, id] of Object.entries(config.assignments)) {
     if (id !== groupId) assignments[tag] = id;
   }
+  const activeGroupIds = config.activeGroupIds.filter((id) => id !== groupId);
   return {
     groups: config.groups.filter((g) => g.id !== groupId),
     assignments,
-    activeGroupId: config.activeGroupId === groupId ? DEFAULT_GROUP_ID : config.activeGroupId,
+    activeGroupIds: activeGroupIds.length > 0 ? activeGroupIds : [DEFAULT_GROUP_ID],
+    aliases: config.aliases,
   };
 }
 

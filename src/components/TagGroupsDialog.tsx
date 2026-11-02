@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { TagInfo } from "../types";
 import type { TagGroupConfig } from "../tagGroups";
 import {
-  DEFAULT_GROUP_ID, createGroup, deleteGroup, groupById, renameGroup,
-  setTagGroup, tagsInGroup, togglePin,
+  DEFAULT_GROUP_ID, createGroup, deleteGroup, displayName, forgetTag, groupById,
+  renameGroup, setTagAlias, setTagGroup, tagsInGroup, togglePin,
 } from "../tagGroups";
 import { api } from "../api";
 import Dialog from "../ui/Dialog";
@@ -28,6 +28,27 @@ export default function TagGroupsDialog({ repoPath, config, tags, busy, onChange
   const [deleting, setDeleting] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string; tags: string[] } | null>(null);
   const [moveToDefault, setMoveToDefault] = useState(true);
+  const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
+  const skipAliasBlur = useRef<string | null>(null);
+
+  const saveAlias = (tagName: string) => {
+    const draft = aliasDrafts[tagName];
+    if (draft === undefined) return;
+    onChange(setTagAlias(config, tagName, draft));
+    setAliasDrafts((prev) => {
+      const next = { ...prev };
+      delete next[tagName];
+      return next;
+    });
+  };
+  const cancelAlias = (tagName: string) => {
+    skipAliasBlur.current = tagName;
+    setAliasDrafts((prev) => {
+      const next = { ...prev };
+      delete next[tagName];
+      return next;
+    });
+  };
 
   const submitRename = (groupId: string) => {
     const next = renameGroup(config, groupId, renameValue);
@@ -60,7 +81,10 @@ export default function TagGroupsDialog({ repoPath, config, tags, busy, onChange
       }
       setDeleting(false);
     }
-    onChange(deleteGroup(config, id, moveToDefault));
+    let next = deleteGroup(config, id, moveToDefault);
+    // 标签随组一起删除时，同时清理它们的别名（移入 Default 的标签保留别名）。
+    if (!moveToDefault) for (const name of tagNames) next = forgetTag(next, name);
+    onChange(next);
     setPendingDelete(null);
   };
 
@@ -102,12 +126,28 @@ export default function TagGroupsDialog({ repoPath, config, tags, busy, onChange
         <input data-autofocus placeholder="新分组名称" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && newName.trim()) { onChange(createGroup(config, newName)); setNewName(""); } }} />
         <button className="primary" disabled={!newName.trim()} onClick={() => { const next = createGroup(config, newName); if (next === config) setMessage("组名为空、重名或已达上限"); onChange(next); setNewName(""); }}>新建分组</button>
       </div>
-      <div className="section-label">把标签分配到分组（当前显示全部标签）</div>
+      <div className="section-label">更换标签分组与显示名（别名仅影响界面，Git 仍用真实标签名）</div>
       <div className="group-assign-list">
         {tags.map((tag) => (
           <div className="group-assign-row" key={tag.name}>
             <Icon name="tag" size={13} />
-            <span className="group-assign-tag" title={tag.name}>{tag.name}</span>
+            <span className="group-assign-tag" title={tag.name}>{displayName(config, tag.name)}{config.aliases[tag.name] && <span className="muted"> ({tag.name})</span>}</span>
+            <input
+              className="alias-input"
+              placeholder="显示名（空 = 原名）"
+              value={aliasDrafts[tag.name] ?? config.aliases[tag.name] ?? ""}
+              title="自定义标签在界面中的显示名，留空恢复原名"
+              onChange={(e) => setAliasDrafts((prev) => ({ ...prev, [tag.name]: e.target.value }))}
+              onBlur={() => {
+                if (skipAliasBlur.current === tag.name) { skipAliasBlur.current = null; return; }
+                saveAlias(tag.name);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+                if (e.key === "Escape") { cancelAlias(tag.name); e.currentTarget.blur(); }
+              }}
+              aria-label={`${tag.name} 的显示名`}
+            />
             <select
               value={config.assignments[tag.name] ?? DEFAULT_GROUP_ID}
               onChange={(e) => onChange(setTagGroup(config, tag.name, e.target.value))}

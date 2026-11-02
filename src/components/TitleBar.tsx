@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { RepoInfo } from "../types";
 import type { TagGroupConfig } from "../tagGroups";
-import { DEFAULT_GROUP_ID, pinnedGroups, reorderPinned, setActiveGroup, togglePin } from "../tagGroups";
+import {
+  DEFAULT_GROUP_ID, isGroupActive, pinnedGroups, reorderPinned, setActiveGroups,
+  toggleActiveGroup,
+} from "../tagGroups";
 import type { SessionMeta } from "./RepositoryTabs";
 import RepositoryTabs from "./RepositoryTabs";
 import ContextMenu from "../ui/ContextMenu";
@@ -49,7 +52,8 @@ export default function TitleBar(props: Props) {
 
   const config = props.tagGroups;
   const pinned = config ? pinnedGroups(config) : [];
-  const activeGroupId = config?.activeGroupId ?? DEFAULT_GROUP_ID;
+  const activeGroupIds = config?.activeGroupIds ?? [DEFAULT_GROUP_ID];
+  const onlyDefault = activeGroupIds.length === 1 && activeGroupIds[0] === DEFAULT_GROUP_ID;
 
   const openMenu = (setter: (v: { x: number; y: number } | null) => void, el: HTMLElement | null) => {
     if (!el) return;
@@ -61,17 +65,14 @@ export default function TitleBar(props: Props) {
     ...config.groups.map((g) => ({
       id: `switch-${g.id}`,
       label: g.name,
-      checked: g.id === activeGroupId,
-      onSelect: () => props.onTagGroupsChange(setActiveGroup(config, g.id)),
+      checked: isGroupActive(config, g.id),
+      onSelect: () => props.onTagGroupsChange(toggleActiveGroup(config, g.id)),
     })),
+    { id: "sep-quick", separator: true },
+    { id: "show-all", label: "显示全部组", icon: "group" as const, onSelect: () => props.onTagGroupsChange(setActiveGroups(config, config.groups.map((g) => g.id))) },
+    { id: "show-default", label: "仅显示 Default", onSelect: () => props.onTagGroupsChange(setActiveGroups(config, [DEFAULT_GROUP_ID])) },
     { id: "sep-manage", separator: true },
     { id: "manage", label: "管理分组…", icon: "group" as const, onSelect: props.onManageGroups },
-    ...(activeGroupId !== DEFAULT_GROUP_ID ? [{
-      id: "pin-active",
-      label: pinnedGroups(config).some((g) => g.id === activeGroupId) ? "取消 Pin 当前组" : "Pin 当前组",
-      icon: "pin" as const,
-      onSelect: () => props.onTagGroupsChange(togglePin(config, activeGroupId)),
-    }] : []),
   ] : [];
 
   const dropPin = (targetId: string) => {
@@ -100,8 +101,8 @@ export default function TitleBar(props: Props) {
 
       <button
         ref={groupBtn}
-        className={`icon-button title-group-button${config && activeGroupId !== DEFAULT_GROUP_ID ? " has-group" : ""}`}
-        title="标签分组"
+        className={`icon-button title-group-button${config && !onlyDefault ? " has-group" : ""}`}
+        title="标签分组（可多选）"
         aria-label="标签分组"
         disabled={!config}
         onClick={() => openMenu(setGroupMenu, groupBtn.current)}
@@ -109,22 +110,28 @@ export default function TitleBar(props: Props) {
         <Icon name="group" size={17} />
       </button>
 
-      {pinned.length > 0 && (
+      {config && pinned.length > 0 && (
         <div className="title-pinned" role="group" aria-label="已 Pin 的分组">
           {pinned.map((g) => (
             <button
               key={g.id}
-              className={`title-pin${g.id === activeGroupId ? " active" : ""}${dragPin === g.id ? " dragging" : ""}`}
-              title={`${g.name}（点击切换，可拖拽排序）`}
+              className={`title-pin${isGroupActive(config, g.id) ? " active" : ""}${dragPin === g.id ? " dragging" : ""}`}
+              title={`${g.name}（左键切换显示，右键分组菜单，可拖拽排序）`}
               aria-label={`分组 ${g.name}`}
+              aria-pressed={isGroupActive(config, g.id)}
               draggable
               onDragStart={() => setDragPin(g.id)}
               onDragEnd={() => setDragPin(null)}
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => dropPin(g.id)}
-              onClick={() => config && props.onTagGroupsChange(setActiveGroup(config, g.id))}
+              onClick={() => props.onTagGroupsChange(toggleActiveGroup(config, g.id))}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                const r = e.currentTarget.getBoundingClientRect();
+                setGroupMenu({ x: r.left, y: r.bottom + 2 });
+              }}
             >
-              <GroupAvatar id={g.id} name={g.name} size={22} active={g.id === activeGroupId} />
+              <GroupAvatar id={g.id} name={g.name} size={22} active={isGroupActive(config, g.id)} />
             </button>
           ))}
         </div>

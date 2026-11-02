@@ -5,9 +5,11 @@ interface Props {
   commit: CommitDetail | null;
   contained: ContainedInfo | null;
   loading: boolean;
+  tagAliases?: Record<string, string>;
 }
 
-export default function CommitInfo({ commit, contained, loading }: Props) {
+export default function CommitInfo({ commit, contained, loading, tagAliases = {} }: Props) {
+  const tagName = (name: string) => tagAliases[name] ?? name;
   if (loading) return <div className="panel-hint">提交信息加载中…</div>;
   if (!commit) return <div className="panel-hint">选择一个提交查看详情</div>;
   return (
@@ -40,7 +42,7 @@ export default function CommitInfo({ commit, contained, loading }: Props) {
         {contained && contained.tags.length > 0 && (
           <div>
             <span className="meta-label">标签</span>
-            <span className="contained-list">{contained.tags.join(", ")}</span>
+            <span className="contained-list">{contained.tags.map(tagName).join(", ")}</span>
           </div>
         )}
       </div>

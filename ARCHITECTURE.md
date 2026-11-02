@@ -38,7 +38,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | 改 Reset / 恢复 | `src-tauri/src/git/reset.rs`、`commands.rs`；`src/components/ResetDialog.tsx`、`RecoveryDialog.tsx`、`RepoWorkspace.tsx` | 分支图与高亮 Worker | §2、§3、§4 |
 | 改页面布局 / 状态流转 | `src/App.tsx`、`src/RepoWorkspace.tsx`、`src/ui/`、`src/styles.css` | 后端 git 模块 | §2.2 |
 | 改顶部栏 / 窗口控制 / 页签与 Pin 拖拽 | `src/components/TitleBar.tsx`、`RepositoryTabs.tsx`、`src/App.tsx`、`src-tauri/tauri.conf.json`、`capabilities/default.json` | 后端 git 模块 | §2.2、§7 |
-| 改标签分组 / Pin | `src/tagGroups.ts`、`src/components/TagGroupsDialog.tsx`、`GroupAvatar.tsx`、`TitleBar.tsx`、`TagDialog.tsx`、`LeftPanel.tsx` | 后端 git 模块 | §2.2、§7 |
+| 改标签分组 / Pin / 别名 | `src/tagGroups.ts`、`src/components/TagGroupsDialog.tsx`、`GroupAvatar.tsx`、`TitleBar.tsx`、`TagDialog.tsx`、`LeftPanel.tsx`、`RevisionGrid.tsx`、`CommitInfo.tsx` | 后端 git 模块 | §2.2、§7 |
 | 改对比 / 冲突 / 交互式 Rebase | `src/components/CompareView.tsx`、`ConflictCenter.tsx`、`RebasePlanner.tsx`；后端 `diff.rs`、`status.rs`、`rebase.rs` | 提交图与高亮 Worker | §2、§3、§4 |
 | 改文档 / 流程 | 对应的 `docs/` 篇章或根目录文档 | 源码 | AGENTS §5 |
 
@@ -67,13 +67,13 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | `src/api.ts` | 在途读取去重 / writeInvoke 封装、log-batch 订阅、日期格式化 | 改 IPC 调用方式 |
 | `src/repoOperations.ts` / `useRepoBusy.ts` | 同步发布仓库级写状态与共享 busy，不排队旧写意图 | 改写状态与关闭保护 |
 | `src/settings.ts` | 行为设置、按仓库布局、localStorage 白名单校验 | 新增 / 修改设置项 |
-| `src/tagGroups.ts` | 标签分组纯数据层：组 CRUD、Pin、分配、按组过滤、白名单校验，按仓库持久化 | 改分组规则 / 存储 |
+| `src/tagGroups.ts` | 标签分组纯数据层：组 CRUD、Pin、分配、多选活动组并集过滤、别名、白名单校验，按仓库持久化 | 改分组规则 / 别名 / 存储 |
 | `src/vite-env.d.ts` | Vite 客户端类型声明（`import.meta.env`） | 使用 Vite 环境变量时 |
 | `src/App.tsx` | 全局 AppShell、仓库页签、最近仓库、通知与全局快捷键、标签分组配置托管、窗口关闭保护 | 改跨仓库状态 |
 | `src/RepoWorkspace.tsx` | 单仓库草稿会话、分级刷新、refs / HEAD 轮询、双工作区 / 临时任务与分栏、按组过滤标签 | 改仓库内状态流 / 布局 |
-| `src/components/TitleBar.tsx` | 自绘顶部栏：应用图标菜单、分组入口、Pin 图标（可拖拽）、页签、窗口控制 | 改顶部栏 / 窗口行为 |
+| `src/components/TitleBar.tsx` | 自绘顶部栏：应用图标菜单、分组多选入口、Pin 图标（常驻标签栏入口，左键切换选中 / 右键菜单 / 可拖拽）、页签、窗口控制 | 改顶部栏 / 窗口行为 / 分组切换 |
 | `src/components/RepositoryTabs.tsx` / `NotificationCenter.tsx` | 多仓库页签（可拖拽排序）与按仓库状态、可操作通知 | 改全局反馈 |
-| `src/components/TagGroupsDialog.tsx` | 标签分组管理器：新建 / 重命名 / Pin / 删除组（含移入 Default 或同时删标签）、分配标签 | 改分组管理交互 |
+| `src/components/TagGroupsDialog.tsx` | 标签分组管理器：新建 / 重命名 / Pin / 删除组（含移入 Default 或同时删标签）、逐标签更换分组与编辑显示名（别名） | 改分组管理交互 |
 | `src/components/GroupAvatar.tsx` | 组名 → ≤2 字符缩写 + id 哈希配色（飞书群聊风格） | 改 Pin 图标外观 |
 | `src/components/CompareView.tsx` | 双端提交 / 分支 / 标签对比任务 | 改对比交互 |
 | `src/components/ConflictCenter.tsx` | 冲突草稿、来源快照校验、保存并 stage、继续 / 跳过 / 中止 | 改冲突工作流 |
@@ -136,7 +136,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | 我要改的东西 | 关键函数 / 锚点 | 备注 |
 |---|---|---|
 | 打开仓库 / 页签 | `App.tsx` 的 `openRepo`、`closeRepo`、`reorderRepos` | 每个仓库持久挂载一个 `RepoWorkspace`；页签拖拽调 `reorderRepos` 重排 |
-| 标签分组配置 | `App.tsx` 的 `updateTagGroups`；`tagGroups.ts` 纯函数 | 配置提升到 App（`Record<repoPath, TagGroupConfig>`），`RepoWorkspace` 经 props 收发；`saveTagGroups` 持久化 |
+| 标签分组配置 | `App.tsx` 的 `updateTagGroups`；`tagGroups.ts` 纯函数 | 配置提升到 App（`Record<repoPath, TagGroupConfig>`），`RepoWorkspace` 经 props 收发；`saveTagGroups` 持久化。`activeGroupIds` 为多选集合，`aliases` 存显示名 |
 | 顶部栏 / 窗口控制 | `TitleBar.tsx`；`App.tsx` 的 `closeWindow`、`onCloseRequested` | 关闭前汇总 dirty/busy 确认；`allowCloseRef` 防循环 |
 | 分组管理器 | `TagGroupsDialog.tsx`；`RepoWorkspace.tsx` 的 `showGroupManager` | 在活动仓库 workspace 内渲染（需 tags/busy） |
 | 分级刷新 / 合并 | `RepoWorkspace.tsx` 的 `refreshAll`、`refreshAux`、`refreshWorktree` | 仅工作区变化不重载日志；代际作废 + 一次 pending 合并 |
@@ -239,7 +239,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 
 ## 6. 运维 / 脚本（启停 / 配置 / 打包）
 
-- Windows 双击脚本（项目根，均为 pnpm/cargo 的薄包装，风格对齐 sc-code）：`setup.bat` 装依赖、`dev.bat` 开发运行、`build.bat` 前端构建、`test.bat` 前端状态 / IPC 测试 + 构建检查 + Rust 测试、`package.bat` 打包并把**本次新生成**的 NSIS / MSI、`unpack/` 免安装便携目录与便携 zip 发布到 `dist/release/`（`scripts/copy-bundle.mjs`：构建前 `snapshot` 记录安装包指纹，构建后 `collect` 只导出指纹变化的产物并附 SHA256SUMS.txt）、`clean.bat` 清构建产物。
+- Windows 双击脚本（项目根，均为 pnpm/cargo 的薄包装，风格对齐 sc-code）：`setup.bat` 装依赖、`dev.bat` 开发运行、`build.bat` 前端构建（输出 `.runtime/dist`）、`test.bat` 前端状态 / IPC 测试 + 构建检查 + Rust 测试、`package.bat` 打包并把**本次新生成**的 NSIS / MSI、`unpack/` 免安装便携目录与便携 zip 发布到 `dist/release/`（`scripts/copy-bundle.mjs`：构建前 `snapshot` 记录安装包指纹，构建后 `collect` 只导出指纹变化的产物并附 SHA256SUMS.txt）、`clean.bat` 清构建产物（保留 `dist/release/`）。
 - 等价命令定义在 `package.json` 的 scripts（`dev`、`test`、`build`、`tauri:dev`、`tauri:build`），Rust 侧用 `cargo check` / `cargo test`（在 `src-tauri/`）。
 - Linux / macOS 用 `sh test.sh`；三平台 CI 矩阵在 `.github/workflows/build-and-test.yml`。
 - 大仓库性能测量：`cd src-tauri && cargo run --release --example bench -- <仓库路径> 3`；测量沿用正式同步读实现；输出首批 / 全日志、全量 diff、文件清单 / 首文件 patch 与两类选中链路 P95（不含 IPC / WebView 绘制）。历史基线见 `docs/03-性能与平台验证.md`。
@@ -274,6 +274,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 - **文件历史路径属于对应提交**：--follow 的 rename 状态用 NUL 分隔解析，不用作者 / subject 可包含的文本哨兵；返回 filePath，查看历史 diff 使用该时期路径并从清单取得 oldPath。
 - **图标资源必须跨平台齐全**：即使 bundle 未显式引用，`generate_context!` 在非 Windows 构建也需要 PNG；`icons/` 同时保留 ICO / PNG / ICNS，并在 bundle 配置中引用。
 - **自绘顶部栏（无边框窗口）**：`tauri.conf.json` 设 `decorations: false`，Tauri 2 在 Windows 原生处理 undecorated 窗口的边缘缩放，无需自绘边框。`data-tauri-drag-region` 只作用于直接标注的元素，按钮 / 可拖拽子元素不触发窗口拖动。窗口控制需 capabilities 追加 `core:window:allow-minimize/toggle-maximize/close/start-dragging`（默认权限不含）。关闭必须走 `closeWindow` 汇总确认（dirty/busy），并用 `allowCloseRef` 防止 `onCloseRequested` 拦截后再次触发自身造成循环。Windows 无边框窗口圆角 / 阴影变化属预期。
-- **标签分组是纯 UI 配置，不改 Git 数据**：按仓库存 localStorage `git-extensions.tagGroups.v1:<path>`，配置提升到 App 层与 TitleBar / RepoWorkspace 共享。Default 组强制存在、不可改名 / 删除 / Pin，未分配标签归入 Default。删除组时勾选「移入 Default」只清分组记录；不勾选则先逐个 `git tag -d` 删除组内标签再清记录（危险操作，UI 列出标签并二次确认）。分组只过滤标签列表显示（TagDialog / LeftPanel），不影响提交图 ref 徽标、对比 ref 候选。切组后若 `leftRef` 指向被隐藏标签则清除该过滤。校验用白名单（sanitizeConfig），容忍脏数据与指向已删标签 / 组的记录。
+- **标签分组是纯 UI 配置，不改 Git 数据**：按仓库存 localStorage `git-extensions.tagGroups.v1:<path>`，配置提升到 App 层与 TitleBar / RepoWorkspace 共享。Default 组强制存在、不可改名 / 删除 / Pin，未分配标签归入 Default。活动组为多选 `activeGroupIds`：标签栏与 TagDialog 显示所选组标签的并集，至少保留 Default；标题栏分组入口菜单可多选切换，Pin 图标作为常驻快捷入口（左键切换选中、右键打开分组菜单、可拖拽排序）。删除组时勾选「移入 Default」只清分组记录；不勾选则先逐个 `git tag -d` 删除组内标签再清记录（危险操作，UI 列出标签并二次确认）。管理界面可逐标签更换分组与编辑别名。别名 `aliases` 只影响界面显示（LeftPanel / TagDialog / TagGroupsDialog / 提交图 ref 徽标 / CommitInfo），过滤与 Git 操作始终用真实标签名；删除标签时用 `forgetTag` 一并清理分组与别名记录。分组过滤不影响提交图 ref 徽标与对比 ref 候选；切组后若 `leftRef` 指向被隐藏标签则清除该过滤。校验用白名单（sanitizeConfig），兼容旧版单字段 `activeGroupId`，容忍脏数据与指向已删标签 / 组的记录。
 - **拖拽排序复用 HTML5 DnD**：与 `RebasePlanner` 同模式（`draggable` + `onDragStart/Over/Drop`），不引入库。页签排序仅会话内（`reorderRepos`），Pin 组顺序持久化在 config（`reorderPinned` 把 pinned 组按新序写回，Default 恒在首位）。Tauri `dragDropEnabled` 管的是文件拖入窗口，与元素间排序无关。
 - **打包产物只导本次构建**：NSIS / MSI 每次构建都会内嵌时间戳，大小与 SHA256 都会变，不能靠「文件已存在 + 版本号」判断新包。`package.bat` 先 `snapshot` 记录 bundle 内安装包的 size / mtime / birthtime，构建后 `collect` 只导出指纹变化且版本匹配的产物，否则报错而不是发布旧包。`dist/release/` 整目录重建（旧产物清理），unpack 直接取 `target/release` 的 exe（Tauri 打包时写入 bundle 信息后仍可独立运行），zip 用系统 `Compress-Archive -Path unpack\*` 使条目以应用根为根目录，并回读条目校验。
+- **前端产物与发布产物目录分离**：vite `build.outDir` 设为 `.runtime/dist`，`tauri.conf.json` 的 `frontendDist` 指向 `../.runtime/dist`；项目根 `dist/release/` 只放打包成品。若前端仍输出到 `dist/`，`vite build` 会清空整个目录，把安装包、便携 zip 和 unpack 一起删掉。`clean.bat` 因此保留 `dist/release/`，只清 `.runtime/dist`、打包临时状态与 `src-tauri/target`。

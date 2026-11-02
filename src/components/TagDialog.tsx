@@ -3,7 +3,10 @@ import { api } from "../api";
 import { useRepoBusy } from "../useRepoBusy";
 import type { TagInfo } from "../types";
 import type { TagGroupConfig } from "../tagGroups";
-import { DEFAULT_GROUP_ID, setActiveGroup, setTagGroup, visibleTags } from "../tagGroups";
+import {
+  DEFAULT_GROUP_ID, displayName, forgetTag, isGroupActive, primaryGroupId,
+  setTagGroup, toggleActiveGroup, visibleTags,
+} from "../tagGroups";
 import Dialog from "../ui/Dialog";
 import { useConfirm } from "../ui/Confirm";
 
@@ -29,33 +32,42 @@ export default function TagDialog({ repoPath, initialTarget, config, onConfigCha
   const confirm = useConfirm();
   const reload = useCallback(() => { api.tagList(repoPath).then(setTags).catch((e) => setMessage(String(e))); }, [repoPath, setMessage]);
   useEffect(reload, [reload]);
-  const run = async (action: () => Promise<unknown>, success: string) => {
-    if (busy) return;
+  const run = async (action: () => Promise<unknown>, success: string): Promise<boolean> => {
+    if (busy) return false;
     setBusy(true);
-    try { await action(); setMessage(success); reload(); onChanged(); }
-    catch (e) { setMessage(String(e)); }
+    try { await action(); setMessage(success); reload(); onChanged(); return true; }
+    catch (e) { setMessage(String(e)); return false; }
     finally { setBusy(false); }
   };
   const shown = visibleTags(config, tags);
   const create = () => {
     const trimmed = name.trim();
-    // 新标签归入当前所在组（Default 不写记录）。
-    if (config.activeGroupId !== DEFAULT_GROUP_ID) onConfigChange(setTagGroup(config, trimmed, config.activeGroupId));
+    // 新标签归入当前选中的第一个非 Default 组（Default 不写记录）。
+    const groupId = primaryGroupId(config);
+    if (groupId !== DEFAULT_GROUP_ID) onConfigChange(setTagGroup(config, trimmed, groupId));
     void run(() => api.createTag(repoPath, trimmed, target.trim() || undefined, tagMessage || undefined), `已创建标签 ${trimmed}`);
   };
   return <Dialog title="标签管理" onClose={onClose} busy={busy} footer={<button disabled={busy} onClick={onClose}>关闭</button>}>
     <div className="tag-group-filter">
-      <span className="muted">分组</span>
-      <select value={config.activeGroupId} onChange={(e) => onConfigChange(setActiveGroup(config, e.target.value))} aria-label="标签分组">
-        {config.groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-      </select>
+      <span className="muted">显示分组（可多选）</span>
+      <div className="tag-group-chips" role="group" aria-label="显示分组（可多选）">
+        {config.groups.map((g) => (
+          <button
+            type="button"
+            key={g.id}
+            className={`tag-group-chip${isGroupActive(config, g.id) ? " active" : ""}`}
+            aria-pressed={isGroupActive(config, g.id)}
+            onClick={() => onConfigChange(toggleActiveGroup(config, g.id))}
+          >{g.name}</button>
+        ))}
+      </div>
     </div>
-    <div className="branch-list">{shown.map((tag) => <div key={tag.name} className={`branch-item${selected === tag.name ? " selected" : ""}`} onClick={() => setSelected(tag.name)}><span>{tag.name}{tag.subject ? ` · ${tag.subject}` : ""}</span><span className="branch-oid">{tag.oid.slice(0, 7)}</span></div>)}{shown.length === 0 && <div className="panel-hint">（该分组无标签）</div>}</div>
+    <div className="branch-list">{shown.map((tag) => <div key={tag.name} className={`branch-item${selected === tag.name ? " selected" : ""}`} onClick={() => setSelected(tag.name)}><span title={config.aliases[tag.name] ? `${displayName(config, tag.name)}（原标签 ${tag.name}）` : tag.name}>{displayName(config, tag.name)}{config.aliases[tag.name] && <span className="muted"> ({tag.name})</span>}{tag.subject ? ` · ${tag.subject}` : ""}</span><span className="branch-oid">{tag.oid.slice(0, 7)}</span></div>)}{shown.length === 0 && <div className="panel-hint">（所选分组无标签）</div>}</div>
     <div className="branch-actions">
       {selected && <select value={config.assignments[selected] ?? DEFAULT_GROUP_ID} onChange={(e) => onConfigChange(setTagGroup(config, selected, e.target.value))} aria-label="选中标签的分组" title="把选中标签移到分组">
         {config.groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
       </select>}
-      <button className="danger-button" disabled={busy || !selected} onClick={async () => { if (await confirm({ title: `删除标签 ${selected}？`, body: "只删除本地标签，不影响远程标签。", danger: true, confirmLabel: "删除标签" })) void run(() => api.deleteTag(repoPath, selected!), `已删除标签 ${selected}`); }}>删除选中…</button>
+      <button className="danger-button" disabled={busy || !selected} onClick={async () => { if (await confirm({ title: `删除标签 ${displayName(config, selected!)}？`, body: `只删除本地标签${config.aliases[selected!] ? ` ${selected}（显示名 ${config.aliases[selected!]}）` : ""}，不影响远程标签。`, danger: true, confirmLabel: "删除标签" })) { const deleted = selected!; void run(() => api.deleteTag(repoPath, deleted), `已删除标签 ${deleted}`).then((ok) => { if (ok) { setSelected(null); onConfigChange(forgetTag(config, deleted)); } }); } }}>删除选中…</button>
     </div>
     <div className="branch-create tag-create"><input data-autofocus placeholder="标签名" value={name} onChange={(e) => setName(e.target.value)} /><input placeholder="目标 sha（空 = HEAD）" value={target} onChange={(e) => setTarget(e.target.value)} /><input placeholder="附注信息（空 = 轻量标签）" value={tagMessage} onChange={(e) => setTagMessage(e.target.value)} /><button className="primary" disabled={busy || !name.trim()} onClick={create}>新建</button></div>
   </Dialog>;

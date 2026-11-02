@@ -14,12 +14,13 @@ export type RevisionAction = "reset" | "diff" | "cherry-pick" | "revert" | "reba
 interface Props {
   revisions: Revision[];
   selectedOids: string[];
+  tagAliases: Record<string, string>;
   onSelect: (oid: string, additive: boolean) => void;
   onContextAction: (action: RevisionAction, rev: Revision) => void;
   loading: boolean;
 }
 
-export default function RevisionGrid({ revisions, selectedOids, onSelect, onContextAction, loading }: Props) {
+export default function RevisionGrid({ revisions, selectedOids, tagAliases, onSelect, onContextAction, loading }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -123,7 +124,7 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
                 setMenu({ x: rect.left + 24, y: rect.bottom, rev });
               }}
             >
-              <span className="rev-refs">{rev.refs.map((ref, j) => <span key={j} className={`ref-badge ref-${ref.kind}`}>{ref.name}</span>)}</span>
+              <span className="rev-refs">{rev.refs.map((ref, j) => <span key={j} className={`ref-badge ref-${ref.kind}`} title={ref.kind === "tag" && tagAliases[ref.name] ? `显示名 ${tagAliases[ref.name]}（原标签 ${ref.name}）` : ref.name}>{ref.kind === "tag" ? tagAliases[ref.name] ?? ref.name : ref.name}</span>)}</span>
               <span className="rev-subject" title={rev.subject}>{rev.subject}</span>
               <span className="rev-author" title={rev.authorName}>{rev.authorName}</span>
               <span className="rev-date">{formatDate(rev.authorTime)}</span>

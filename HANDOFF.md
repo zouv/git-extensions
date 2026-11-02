@@ -2,22 +2,22 @@
 
 ## 状态快照
 
-- 最近更新：2026-11-02。无进行中任务。
+- 最近更新：2026-11-02。无进行中任务；`dist/release` 待关闭便携版后重建（见「待验收」）。
 - 远程已关联并推送：origin = https://github.com/zouv/git-extensions，main + v0.2.0 + v0.3.0 已推送。
 - 0.3.0 已发布：提交 856dca9；GitHub Release v0.3.0 含 NSIS / MSI 安装包与 SHA256SUMS-v0.3.0.txt（发布说明与校验文件在本机 .runtime/）。
-- `package.bat` 已对齐 sc-code：构建前 snapshot、构建后 collect，把本次新生成的安装包 + `unpack/` 便携目录 + `Git.Extensions_<版本>_x64-unpack.zip` + SHA256SUMS.txt 发布到 `dist/release/`；完整流程与「重复 collect 拒绝旧包」均已验证。
+- `package.bat` 已对齐 sc-code：构建前 snapshot、构建后 collect，产物（安装包 + unpack + zip + SHA256SUMS）发布到 `dist/release/`；前端构建输出在 `.runtime/dist/`。
 
 ## 待验收
 
-1. **顶部栏 GUI**：拖动空白移动窗口、双击最大化/还原、最小化/最大化/关闭按钮、边缘缩放、应用图标菜单、分组入口菜单。
-2. **标签分组 GUI**：新建/重命名/删除组（含「移入 Default」与「同时删标签」两种勾选）、切组后 TagDialog 与 LeftPanel 只显示该组、未分组归 Default、Pin 图标缩写与配色、多仓库配置隔离。
-3. **拖拽**：仓库页签排序、Pin 组图标排序，Pin 顺序刷新后保持。
-4. （遗留）完整 Windows GUI 工作流验收；150% / 200% DPI、macOS 实机或 CI；上游界面端到端性能对比。
-5. （遗留）0.2.0 Release 资产上传（安装包在 src-tauri/target/release/bundle/，SHA256SUMS 与 release-notes 已备）。
+1. **顶部栏与拖拽 GUI**：拖动空白移动窗口、双击最大化/还原、最小化/最大化/关闭、边缘缩放、应用图标菜单；仓库页签排序、Pin 图标排序（Pin 顺序刷新后保持）。
+2. **分组多选 GUI**：分组入口菜单与 Pin 图标菜单可多选、标签栏显示并集、「显示全部组 / 仅显示 Default」；Pin 图标左键切换、右键菜单；新建/重命名/删除组（两种勾选）、未分组归 Default、多仓库配置隔离。
+3. **标签别名 GUI**：管理界面逐标签更换分组、编辑显示名；左侧右键「设置显示名…」；标签树 / 标签管理 / 提交图徽标 / 提交详情显示别名，Git 操作仍用真实名；旧单组配置自动迁移。
+4. **重建 dist/release**：关闭正在运行的 `dist/release/unpack/git-extensions.exe`（PID 45852）后重跑 `package.bat` 或 `node scripts/copy-bundle.mjs collect`；当前 dist/release 只剩旧 unpack，安装包与 zip 未重建。
+5. （遗留）完整 Windows GUI 工作流、150% / 200% DPI、macOS 实机或 CI；0.2.0 Release 资产上传（安装包在 bundle/，SHA256SUMS 与 release-notes 已备）。
 
 ## 验证边界
 
-- 本轮：前端 tsc + vite build 通过；23 个 Node 单测全过（含新增 tag-groups 6 项）；cargo test 全过（61 项）；dev 模式启动无报错、日志流正常。
+- 本轮：tsc + vite build 通过；25 个 Node 单测全过（tag-groups 8 项）；cargo test 全过（6 + 21 + 14 + 14）。前置打包验证：tauri build 成功，collect 因运行中的便携版占用目录失败（非代码问题）。
 - 环境限制：GUI 截图 / 自动化（CopyFromScreen 句柄无效、GetCursorPos 拒绝访问）不可用，顶部栏与分组的实际交互未实测，需人工验收。
 - 仅临时仓库做破坏性 Git 回归，真实大仓库仅只读测量。
 - 安装包未代码签名。应用写互斥不能消除外部 Git 竞态，HEAD 备份不包含未提交内容。

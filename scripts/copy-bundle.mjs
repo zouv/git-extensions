@@ -182,42 +182,76 @@ async function listUnpackFiles(dir) {
   return files.sort();
 }
 
+async function pathExists(target) {
+  try {
+    await stat(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function collect() {
   const version = await readVersion();
   const exeName = await readExeName();
   const installers = await selectFreshInstallers(version);
 
-  // 重建产物目录，保证 dist/release 只包含本次构建结果。
+  // 不直接删除 dist/release：先整体重命名隔离，避免正在运行的 unpack\exe 锁住删除，
+  // 也避免删除一半后失败导致发布目录残缺。发布成功后旧目录尽力删除，仍被占用则保留并警告。
+  const quarantine = `${outDir}.old-${process.pid}`;
   try {
-    await rm(outDir, { recursive: true, force: true });
-    await mkdir(outDir, { recursive: true });
+    for (const name of await readdir(dirname(outDir))) {
+      if (!name.startsWith("release.old-")) continue;
+      try { await rm(join(dirname(outDir), name), { recursive: true, force: true }); } catch { /* 仍在运行，下次再清 */ }
+    }
+    if (await pathExists(quarantine)) await rm(quarantine, { recursive: true, force: true });
+    if (await pathExists(outDir)) await rename(outDir, quarantine);
   } catch (error) {
     throw new Error(
       `Cannot replace ${outDir}: close any running Git Extensions instance from dist/release, then retry. (${error.code || error.message})`,
     );
   }
 
-  for (const { source, name } of installers) {
-    await copyAtomic(source, join(outDir, name));
-    console.log(`[PACKAGE] ${name}`);
+  try {
+    await mkdir(outDir, { recursive: true });
+
+    for (const { source, name } of installers) {
+      await copyAtomic(source, join(outDir, name));
+      console.log(`[PACKAGE] ${name}`);
+    }
+
+    const { unpackDir, zipPath, zipName } = await writeUnpack(version, exeName);
+    const unpackFiles = await listUnpackFiles(unpackDir);
+    await verifyZip(zipPath, unpackFiles);
+    console.log(`[UNPACK] ${relative(root, unpackDir)}`);
+    console.log(`[ARCHIVE] ${zipName}`);
+
+    const checksumLines = [];
+    for (const name of [...installers.map((item) => item.name), zipName].sort()) {
+      const file = join(outDir, name);
+      const info = await stat(file);
+      if (!info.isFile() || info.size === 0) throw new Error(`Missing finished package: ${name}`);
+      checksumLines.push(`${sha256(await readFile(file))} *${name}`);
+    }
+    await writeFile(join(outDir, "SHA256SUMS.txt"), `${checksumLines.join("\n")}\n`);
+  } catch (error) {
+    // 发布失败：丢弃半成品并恢复上一版发布目录。
+    try { await rm(outDir, { recursive: true, force: true }); } catch { /* 半成品可能被占用，保留隔离目录 */ }
+    if (await pathExists(quarantine)) {
+      try { await rename(quarantine, outDir); } catch { /* 旧目录仍被占用，保留原样 */ }
+    }
+    throw error;
   }
 
-  const { unpackDir, zipPath, zipName } = await writeUnpack(version, exeName);
-  const unpackFiles = await listUnpackFiles(unpackDir);
-  await verifyZip(zipPath, unpackFiles);
-  console.log(`[UNPACK] ${relative(root, unpackDir)}`);
-  console.log(`[ARCHIVE] ${zipName}`);
-
-  const checksumLines = [];
-  for (const name of [...installers.map((item) => item.name), zipName].sort()) {
-    const file = join(outDir, name);
-    const info = await stat(file);
-    if (!info.isFile() || info.size === 0) throw new Error(`Missing finished package: ${name}`);
-    checksumLines.push(`${sha256(await readFile(file))} *${name}`);
-  }
-  await writeFile(join(outDir, "SHA256SUMS.txt"), `${checksumLines.join("\n")}\n`);
   // 发布成功后刷新快照：同一批产物不会被重复 collect 当作「新包」再次发布。
   await writeFile(snapshotFile, `${JSON.stringify(await installerSnapshot(), null, 2)}\n`);
+  if (await pathExists(quarantine)) {
+    try {
+      await rm(quarantine, { recursive: true, force: true });
+    } catch {
+      console.warn(`[WARN] Previous dist/release is still in use; left at ${basename(quarantine)}`);
+    }
+  }
   console.log(`[OK] ${installers.length} installer(s) + unpack + zip published to dist/release/`);
 }
 
