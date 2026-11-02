@@ -1,8 +1,24 @@
 /** 仓库页签分组：全局 UI 配置，按仓库路径记录组与显示名，不改动任何仓库数据。 */
+export const GROUP_COLOR_PRESETS = [
+  { label: "蓝色", value: "#3370ff" },
+  { label: "绿色", value: "#34c759" },
+  { label: "橙色", value: "#ff8800" },
+  { label: "红色", value: "#f54a45" },
+  { label: "紫色", value: "#7f3bf5" },
+  { label: "青色", value: "#14c0ff" },
+  { label: "蓝绿色", value: "#00d6b9" },
+  { label: "黄色", value: "#ffc60a" },
+  { label: "粉色", value: "#ff66a1" },
+  { label: "灰色", value: "#646a73" },
+] as const;
+export type RepoGroupColor = (typeof GROUP_COLOR_PRESETS)[number]["value"];
+export const DEFAULT_GROUP_COLOR: RepoGroupColor = "#646a73";
+
 export interface RepoGroup {
   id: string;
   name: string;
   pinned: boolean;
+  color: RepoGroupColor;
 }
 
 export interface RepoGroupConfig {
@@ -23,8 +39,19 @@ const MAX_GROUPS = 64;
 const MAX_NAME = 40;
 const MAX_ALIAS = 40;
 
-export function defaultGroup(): RepoGroup {
-  return { id: DEFAULT_GROUP_ID, name: DEFAULT_GROUP_NAME, pinned: false };
+export function isRepoGroupColor(value: unknown): value is RepoGroupColor {
+  return typeof value === "string" && GROUP_COLOR_PRESETS.some((preset) => preset.value === value);
+}
+
+/** 旧配置没有颜色时按组 ID 稳定补色，沿用初版头像的哈希规则。 */
+export function fallbackGroupColor(id: string): RepoGroupColor {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return GROUP_COLOR_PRESETS[Math.abs(hash) % GROUP_COLOR_PRESETS.length].value;
+}
+
+export function defaultGroup(color: RepoGroupColor = DEFAULT_GROUP_COLOR): RepoGroup {
+  return { id: DEFAULT_GROUP_ID, name: DEFAULT_GROUP_NAME, pinned: false, color };
 }
 
 export function emptyConfig(): RepoGroupConfig {
@@ -36,14 +63,25 @@ function validGroup(value: unknown): RepoGroup | null {
   const raw = value as Partial<RepoGroup>;
   if (typeof raw.id !== "string" || !raw.id || raw.id === DEFAULT_GROUP_ID) return null;
   if (typeof raw.name !== "string" || !raw.name.trim()) return null;
-  return { id: raw.id, name: raw.name.trim().slice(0, MAX_NAME), pinned: raw.pinned === true };
+  return {
+    id: raw.id,
+    name: raw.name.trim().slice(0, MAX_NAME),
+    pinned: raw.pinned === true,
+    color: isRepoGroupColor(raw.color) ? raw.color : fallbackGroupColor(raw.id),
+  };
 }
 
 /** localStorage 可能被手工修改：白名单校验，Default 强制存在且不可 Pin。 */
 export function sanitizeConfig(value: unknown): RepoGroupConfig {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return emptyConfig();
   const raw = value as Partial<RepoGroupConfig>;
-  const groups: RepoGroup[] = [defaultGroup()];
+  let defaultColor = DEFAULT_GROUP_COLOR;
+  if (Array.isArray(raw.groups)) {
+    const rawDefault = raw.groups.find((item) => typeof item === "object" && item !== null
+      && (item as Partial<RepoGroup>).id === DEFAULT_GROUP_ID) as Partial<RepoGroup> | undefined;
+    if (rawDefault && isRepoGroupColor(rawDefault.color)) defaultColor = rawDefault.color;
+  }
+  const groups: RepoGroup[] = [defaultGroup(defaultColor)];
   const ids = new Set<string>([DEFAULT_GROUP_ID]);
   const names = new Set<string>([DEFAULT_GROUP_NAME.toLowerCase()]);
   if (Array.isArray(raw.groups)) {
@@ -174,7 +212,14 @@ export function createGroup(config: RepoGroupConfig, name: string): RepoGroupCon
   if (!trimmed || config.groups.length >= MAX_GROUPS) return config;
   if (config.groups.some((g) => g.name.toLowerCase() === trimmed.toLowerCase())) return config;
   const id = `g-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-  return { ...config, groups: [...config.groups, { id, name: trimmed, pinned: false }] };
+  const usedColors = new Set(config.groups.map((group) => group.color));
+  const color = GROUP_COLOR_PRESETS.find((preset) => !usedColors.has(preset.value))?.value ?? fallbackGroupColor(id);
+  return { ...config, groups: [...config.groups, { id, name: trimmed, pinned: false, color }] };
+}
+
+export function setGroupColor(config: RepoGroupConfig, groupId: string, color: string): RepoGroupConfig {
+  if (!isRepoGroupColor(color) || !groupById(config, groupId)) return config;
+  return { ...config, groups: config.groups.map((g) => g.id === groupId ? { ...g, color } : g) };
 }
 
 export function renameGroup(config: RepoGroupConfig, groupId: string, name: string): RepoGroupConfig {

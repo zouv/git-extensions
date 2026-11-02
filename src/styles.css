@@ -47,9 +47,10 @@ kbd { font: 11px Consolas, monospace; }
 .title-app-icon { width: 40px; display: flex; align-items: center; justify-content: center; border: 0; background: transparent; padding: 0; border-radius: 0; }
 .title-app-icon:hover { background: var(--hover); }
 .title-app-icon img { display: block; pointer-events: none; }
-.title-group-button { align-self: center; width: 30px; height: 28px; margin-left: 2px; }
+.title-group-cluster { display: flex; align-items: center; align-self: center; height: 30px; margin-left: 2px; padding: 0 2px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; flex: 0 0 auto; }
+.title-group-button { width: 28px; height: 26px; margin: 0; }
 .title-group-button.has-group { color: var(--accent); }
-.title-pinned { display: flex; align-items: center; gap: 2px; padding: 0 4px; flex: 0 0 auto; }
+.title-pinned { display: flex; align-items: center; gap: 2px; margin-left: 2px; padding-left: 4px; border-left: 1px solid var(--border); flex: 0 0 auto; }
 .title-pin { border: 0; background: transparent; padding: 3px; border-radius: 5px; cursor: default; }
 .title-pin:hover { background: var(--hover); }
 .title-pin.active { background: var(--selected); box-shadow: inset 0 0 0 1px var(--accent); }
@@ -64,6 +65,7 @@ kbd { font: 11px Consolas, monospace; }
 .repository-tabs { display: flex; align-items: stretch; flex: 1; min-width: 0; }
 .repository-tab-scroll { display: flex; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; min-width: 0; flex: 1; }
 .repository-tab { position: relative; display: flex; align-items: center; gap: 7px; min-width: 160px; max-width: 240px; padding: 0 7px 0 12px; color: var(--muted); border-right: 1px solid var(--border); cursor: default; user-select: none; }
+.repository-tab::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--repo-group-color); pointer-events: none; }
 .repository-tab:hover { background: var(--surface); }
 .repository-tab.active { color: var(--fg); background: var(--surface); box-shadow: inset 0 2px var(--accent); }
 .repository-tab.dragging { opacity: .45; }
@@ -294,14 +296,28 @@ kbd { font: 11px Consolas, monospace; }
 .context-item:focus, .context-item:hover:not(:disabled) { background: var(--selected); color: #fff; outline: none; }
 .context-item.danger { color: #ff9aa2; }
 .context-item .menu-check { flex: 0 0 16px; display: inline-flex; color: var(--accent); }
+.context-item .menu-color { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
+.context-item-row { display: flex; align-items: center; gap: 2px; }
+.context-item-row .context-item { flex: 1; min-width: 0; }
+.context-item-action { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 28px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--muted); }
+.context-item-action:hover:not(:disabled), .context-item-action:focus { background: var(--selected); color: #fff; outline: none; }
+.context-item-action.checked { color: var(--accent); background: var(--selected); }
+.context-item-action:disabled { opacity: .35; }
 .menu-separator { height: 1px; background: var(--border); margin: 4px; }
 
 /* 仓库页签分组管理 */
 .group-manager-list { display: flex; flex-direction: column; gap: 2px; max-height: 32vh; overflow-y: auto; }
 .group-manager-row { display: flex; align-items: center; gap: 10px; padding: 5px 6px; border-radius: 4px; }
 .group-manager-row:hover { background: var(--hover); }
-.group-manager-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.group-manager-actions { display: flex; gap: 2px; }
+.group-manager-name { flex: 1; min-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-manager-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.group-color-picker { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.group-color-swatch { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 4px; color: #fff; }
+.group-color-swatch.selected { border-color: #fff; box-shadow: 0 0 0 1px #11151b; }
+.group-color-swatch svg { filter: drop-shadow(0 1px 1px #000); }
+.group-color-swatch:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.group-pin-button { height: 26px; display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--muted); font-size: 11px; }
+.group-pin-button.pinned { color: var(--accent); border-color: var(--accent); background: var(--selected); }
 .group-rename-input { flex: 1; min-width: 0; }
 .group-assign-list { display: flex; flex-direction: column; gap: 2px; max-height: 26vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; padding: 4px; }
 .group-assign-row { display: flex; align-items: center; gap: 8px; padding: 2px 4px; }

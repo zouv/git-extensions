@@ -200,7 +200,12 @@ function AppShell() {
       if (!ok) return;
     }
     allowCloseRef.current = true;
-    await getCurrentWindow().close();
+    try {
+      await getCurrentWindow().close();
+    } catch (error) {
+      allowCloseRef.current = false;
+      notify(activePath ?? "", "error", "无法关闭窗口", String(error));
+    }
   }, [activePath, confirm, notify]);
 
   // 兜底：系统途径关窗（Alt+F4 等）同样拦截；确认后放行避免循环。

@@ -1,5 +1,8 @@
 import { useState } from "react";
+import type { CSSProperties } from "react";
 import type { RepoInfo } from "../types";
+import { displayRepoName, groupById, groupForRepo } from "../repoGroups";
+import type { RepoGroupConfig } from "../repoGroups";
 import type { IconName } from "../ui/Icon";
 import Icon from "../ui/Icon";
 import ContextMenu from "../ui/ContextMenu";
@@ -11,7 +14,7 @@ interface Props {
   repos: RepoInfo[];
   activePath: string | null;
   meta: Record<string, SessionMeta>;
-  aliases: Record<string, string>;
+  repoGroups: RepoGroupConfig;
   onSetAlias: (path: string, alias: string) => void;
   onActivate: (path: string) => void;
   onClose: (path: string) => void;
@@ -28,7 +31,7 @@ export default function RepositoryTabs(props: Props) {
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [aliasTarget, setAliasTarget] = useState<RepoInfo | null>(null);
   const [aliasValue, setAliasValue] = useState("");
-  const label = (repo: RepoInfo) => props.aliases[repo.path] ?? repo.name;
+  const label = (repo: RepoInfo) => displayRepoName(props.repoGroups, repo);
 
   const drop = (targetPath: string) => {
     if (dragPath && dragPath !== targetPath) props.onReorder(dragPath, targetPath);
@@ -37,10 +40,13 @@ export default function RepositoryTabs(props: Props) {
   };
 
   return (
-    <div className="repository-tabs">
-      <div className="repository-tab-scroll" role="tablist" aria-label="打开的仓库">
+    <div className="repository-tabs" data-tauri-drag-region>
+      <div className="repository-tab-scroll" role="tablist" aria-label="打开的仓库" data-tauri-drag-region>
         {props.repos.map((repo) => {
           const state = props.meta[repo.path];
+          const group = groupById(props.repoGroups, groupForRepo(props.repoGroups, repo.path))!;
+          const style = { "--repo-group-color": group.color } as CSSProperties;
+          const pathTitle = props.repoGroups.aliases[repo.path] ? `${label(repo)}（${repo.path}）` : repo.path;
           return (
             <div
               className={`repository-tab${repo.path === props.activePath ? " active" : ""}${dragPath === repo.path ? " dragging" : ""}${dropTarget === repo.path && dragPath !== repo.path ? " drop-target" : ""}`}
@@ -48,7 +54,8 @@ export default function RepositoryTabs(props: Props) {
               role="tab"
               aria-selected={repo.path === props.activePath}
               tabIndex={repo.path === props.activePath ? 0 : -1}
-              title={props.aliases[repo.path] ? `${label(repo)}（${repo.path}）` : repo.path}
+              title={`${pathTitle} · 分组：${group.name}`}
+              style={style}
               draggable
               onDragStart={() => setDragPath(repo.path)}
               onDragEnd={() => { setDragPath(null); setDropTarget(null); }}
@@ -71,7 +78,7 @@ export default function RepositoryTabs(props: Props) {
       <button className="icon-button repository-add" title="打开仓库 (Ctrl+O)" aria-label="打开仓库" onClick={props.onOpen}><Icon name="plus" /></button>
       {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={[
         { id: "open", label: "打开仓库…", icon: "plus" as IconName, onSelect: props.onOpen },
-        { id: "alias", label: "设置页签显示名…", icon: "edit" as IconName, onSelect: () => { setAliasValue(props.aliases[menu.repo.path] ?? ""); setAliasTarget(menu.repo); } },
+        { id: "alias", label: "设置页签显示名…", icon: "edit" as IconName, onSelect: () => { setAliasValue(props.repoGroups.aliases[menu.repo.path] ?? ""); setAliasTarget(menu.repo); } },
         { id: "sep-alias", separator: true },
         { id: "close", label: "关闭", icon: "close" as IconName, disabled: props.meta[menu.repo.path]?.busy, title: props.meta[menu.repo.path]?.busy ? "操作进行中" : undefined, onSelect: () => props.onClose(menu.repo.path) },
         { id: "close-others", label: "关闭其它", disabled: props.repos.length < 2, onSelect: () => props.onCloseOthers(menu.repo.path) },
@@ -85,7 +92,7 @@ export default function RepositoryTabs(props: Props) {
           onClose={() => setAliasTarget(null)}
           footer={<>
             <button onClick={() => setAliasTarget(null)}>取消</button>
-            <button disabled={!props.aliases[aliasTarget.path]} onClick={() => { props.onSetAlias(aliasTarget.path, ""); setAliasTarget(null); }}>恢复仓库名</button>
+            <button disabled={!props.repoGroups.aliases[aliasTarget.path]} onClick={() => { props.onSetAlias(aliasTarget.path, ""); setAliasTarget(null); }}>恢复仓库名</button>
             <button className="primary" onClick={() => { props.onSetAlias(aliasTarget.path, aliasValue); setAliasTarget(null); }}>保存</button>
           </>}
         >

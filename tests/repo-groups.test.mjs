@@ -6,10 +6,11 @@ import ts from "typescript";
 const source = await readFile(new URL("../src/repoGroups.ts", import.meta.url), "utf8");
 const url = "data:text/javascript;base64," + Buffer.from(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText).toString("base64");
 const {
-  DEFAULT_GROUP_ID, emptyConfig, sanitizeConfig, groupForRepo, visibleRepos, reposInGroup,
+  DEFAULT_GROUP_ID, DEFAULT_GROUP_COLOR, GROUP_COLOR_PRESETS, emptyConfig, sanitizeConfig,
+  groupForRepo, groupById, visibleRepos, reposInGroup,
   toggleActiveGroup, setActiveGroups, ensureGroupActive, primaryGroupId, setRepoGroup,
   createGroup, renameGroup, deleteGroup, togglePin, pinnedGroups, reorderPinned,
-  displayRepoName, setRepoAlias,
+  displayRepoName, setRepoAlias, fallbackGroupColor, setGroupColor,
 } = await import(url);
 
 const repo = (name) => ({ path: `/repos/${name}`, name });
@@ -115,6 +116,63 @@ test("仓库页签别名：设置 / 覆盖 / 清空恢复仓库名", () => {
   c = setRepoAlias(c, "/repos/a", "");
   assert.equal(displayRepoName(c, repo("a")), "a", "清空恢复仓库名");
 });
+
+test("组颜色：新组优先使用未占预设色，修改与既有操作保持颜色", () => {
+  let c = emptyConfig();
+  assert.equal(c.groups[0].color, DEFAULT_GROUP_COLOR);
+  c = createGroup(c, "Work");
+  c = createGroup(c, "Personal");
+  const [work, personal] = [c.groups[1], c.groups[2]];
+  assert.equal(work.color, GROUP_COLOR_PRESETS[0].value);
+  assert.equal(personal.color, GROUP_COLOR_PRESETS[1].value);
+  const nextColor = GROUP_COLOR_PRESETS[4].value;
+  c = setGroupColor(c, work.id, nextColor);
+  assert.equal(groupById(c, work.id).color, nextColor);
+  assert.equal(setGroupColor(c, work.id, "red; background: url(x)"), c, "非法颜色拒绝");
+  assert.equal(setGroupColor(c, "ghost", nextColor), c, "未知组忽略");
+  c = renameGroup(c, work.id, "Client");
+  c = togglePin(c, work.id);
+  c = reorderPinned(c, [work.id]);
+  assert.equal(groupById(c, work.id).color, nextColor, "重命名 / Pin / 排序不改色");
+  c = setGroupColor(c, DEFAULT_GROUP_ID, GROUP_COLOR_PRESETS[8].value);
+  assert.equal(c.groups[0].color, GROUP_COLOR_PRESETS[8].value, "Default 也可自定义颜色");
+  assert.equal(c.groups[0].pinned, false);
+});
+
+test("旧配置稳定补色，Default 只继承合法颜色且固定名称与不可 Pin", () => {
+  const legacy = {
+    groups: [
+      { id: "g-stable", name: "Work", pinned: true },
+      { id: "g-invalid", name: "Bad", color: "var(--attack)" },
+    ],
+  };
+  const first = sanitizeConfig(legacy);
+  const second = sanitizeConfig(legacy);
+  assert.deepEqual(first, second);
+  assert.equal(groupById(first, "g-stable").color, fallbackGroupColor("g-stable"));
+  assert.equal(groupById(first, "g-invalid").color, fallbackGroupColor("g-invalid"));
+  const custom = sanitizeConfig({
+    groups: [{ id: DEFAULT_GROUP_ID, name: "Hacked", pinned: true, color: GROUP_COLOR_PRESETS[0].value }],
+  });
+  assert.equal(custom.groups[0].name, "Default");
+  assert.equal(custom.groups[0].pinned, false);
+  assert.equal(custom.groups[0].color, GROUP_COLOR_PRESETS[0].value);
+});
+
+test("多选切换只改变可见性，不改变仓库所属组及其颜色", () => {
+  let c = createGroup(emptyConfig(), "Work");
+  const id = c.groups[1].id;
+  const color = c.groups[1].color;
+  c = setRepoGroup(c, "/repos/a", id);
+  c = setActiveGroups(c, [DEFAULT_GROUP_ID, id]);
+  assert.deepEqual(visibleRepos(c, repos).map((r) => r.name), ["a", "b", "c", "d"]);
+  assert.equal(groupForRepo(c, "/repos/a"), id);
+  assert.equal(groupById(c, groupForRepo(c, "/repos/a")).color, color);
+  c = setActiveGroups(c, [id]);
+  assert.deepEqual(visibleRepos(c, repos).map((r) => r.name), ["a"]);
+  assert.equal(groupById(c, groupForRepo(c, "/repos/a")).color, color);
+});
+
 
 test("localStorage 脏数据白名单校验", () => {
   const dirty = {

@@ -2,8 +2,8 @@ import { useRef, useState } from "react";
 import type { RepoInfo } from "../types";
 import type { RepoGroupConfig } from "../repoGroups";
 import {
-  DEFAULT_GROUP_ID, createGroup, deleteGroup, displayRepoName, groupById,
-  renameGroup, reposInGroup, setRepoAlias, setRepoGroup, togglePin,
+  DEFAULT_GROUP_ID, GROUP_COLOR_PRESETS, createGroup, deleteGroup, displayRepoName, groupById,
+  renameGroup, reposInGroup, setGroupColor, setRepoAlias, setRepoGroup, togglePin,
 } from "../repoGroups";
 import Dialog from "../ui/Dialog";
 import Icon from "../ui/Icon";
@@ -72,7 +72,7 @@ export default function RepoGroupsDialog({ config, repos, onChange, onClose }: P
             const isDefault = group.id === DEFAULT_GROUP_ID;
             return (
               <div className="group-manager-row" key={group.id}>
-                <GroupAvatar id={group.id} name={group.name} size={26} />
+                <GroupAvatar id={group.id} name={group.name} color={group.color} size={26} />
                 {renaming === group.id ? (
                   <input
                     data-autofocus
@@ -86,9 +86,32 @@ export default function RepoGroupsDialog({ config, repos, onChange, onClose }: P
                   <span className="group-manager-name" title={group.name}>{group.name}{isDefault && <span className="muted">（未分组仓库页签）</span>}</span>
                 )}
                 <span className="tree-count" title={`当前打开的页签 ${members.length} 个`}>{members.length}</span>
+                <div className="group-color-picker" role="group" aria-label={`${group.name} 的颜色`}>
+                  {GROUP_COLOR_PRESETS.map((preset) => (
+                    <button
+                      key={preset.value}
+                      className={`group-color-swatch${group.color === preset.value ? " selected" : ""}`}
+                      style={{ background: preset.value }}
+                      title={preset.label}
+                      aria-label={`将分组 ${group.name} 设为${preset.label}`}
+                      aria-pressed={group.color === preset.value}
+                      onClick={() => onChange(setGroupColor(config, group.id, preset.value))}
+                    >
+                      {group.color === preset.value && <Icon name="check" size={11} />}
+                    </button>
+                  ))}
+                </div>
                 <div className="group-manager-actions">
                   {!isDefault && <>
-                    <button className="icon-button" title={group.pinned ? "取消 Pin" : "Pin 到顶部栏"} onClick={() => onChange(togglePin(config, group.id))}><Icon name="pin" size={14} /></button>
+                    <button
+                      className={`group-pin-button${group.pinned ? " pinned" : ""}`}
+                      title={group.pinned ? "取消 Pin" : "Pin 到顶部栏"}
+                      aria-pressed={group.pinned}
+                      onClick={() => onChange(togglePin(config, group.id))}
+                    >
+                      <Icon name="pin" size={14} />
+                      <span>{group.pinned ? "已 Pin" : "Pin"}</span>
+                    </button>
                     <button className="icon-button" title="重命名" onClick={() => { setRenaming(group.id); setRenameValue(group.name); }}><Icon name="edit" size={14} /></button>
                     <button className="icon-button danger-button" title="删除分组" onClick={() => beginDelete(group.id)}><Icon name="trash" size={14} /></button>
                   </>}

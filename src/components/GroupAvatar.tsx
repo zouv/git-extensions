@@ -1,10 +1,7 @@
-/** 组名 → 飞书群聊风格缩写图标：英文取单词首字母（≤2），中文取前 2 字，按组 id 哈希配色。 */
+import { fallbackGroupColor } from "../repoGroups";
+import type { RepoGroupColor } from "../repoGroups";
 
-const PALETTE = [
-  "#3370ff", "#34c759", "#ff8800", "#f54a45", "#7f3bf5",
-  "#14c0ff", "#00d6b9", "#ffc60a", "#ff66a1", "#646a73",
-];
-
+/** 组名 → 飞书群聊风格缩写图标：英文取单词首字母（≤2），中文取前 2 字。 */
 export function groupAbbreviation(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) return "?";
@@ -21,17 +18,17 @@ export function groupAbbreviation(name: string): string {
   return chars.slice(0, 2).join("").toUpperCase();
 }
 
-export function groupColor(id: string): string {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
-  return PALETTE[Math.abs(hash) % PALETTE.length];
+function textColor(background: string): string {
+  const [r, g, b] = [1, 3, 5].map((start) => Number.parseInt(background.slice(start, start + 2), 16));
+  return (r * 299 + g * 587 + b * 114) / 1000 > 150 ? "#11151b" : "#fff";
 }
 
-export default function GroupAvatar({ id, name, size = 22, active = false }: { id: string; name: string; size?: number; active?: boolean }) {
+export default function GroupAvatar({ id, name, color, size = 22, active = false }: { id: string; name: string; color?: RepoGroupColor; size?: number; active?: boolean }) {
+  const background = color ?? fallbackGroupColor(id);
   return (
     <span
       className={`group-avatar${active ? " active" : ""}`}
-      style={{ width: size, height: size, background: groupColor(id), fontSize: Math.max(9, Math.round(size * 0.42)) }}
+      style={{ width: size, height: size, background, color: textColor(background), fontSize: Math.max(9, Math.round(size * 0.42)) }}
       aria-hidden="true"
     >
       {groupAbbreviation(name)}

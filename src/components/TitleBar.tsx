@@ -4,7 +4,7 @@ import type { RepoInfo } from "../types";
 import type { RepoGroupConfig } from "../repoGroups";
 import {
   DEFAULT_GROUP_ID, isGroupActive, pinnedGroups, reorderPinned, setActiveGroups,
-  toggleActiveGroup,
+  toggleActiveGroup, togglePin,
 } from "../repoGroups";
 import type { SessionMeta } from "./RepositoryTabs";
 import RepositoryTabs from "./RepositoryTabs";
@@ -65,7 +65,15 @@ export default function TitleBar(props: Props) {
     ...config.groups.map((g) => ({
       id: `switch-${g.id}`,
       label: g.name,
+      color: g.color,
       checked: isGroupActive(config, g.id),
+      trailingAction: {
+        icon: "pin" as const,
+        label: g.id === DEFAULT_GROUP_ID ? "Default 不可 Pin" : g.pinned ? `取消 Pin 分组 ${g.name}` : `Pin 分组 ${g.name} 到顶部栏`,
+        checked: g.pinned,
+        disabled: g.id === DEFAULT_GROUP_ID,
+        onSelect: () => props.onRepoGroupsChange(togglePin(config, g.id)),
+      },
       onSelect: () => props.onRepoGroupsChange(toggleActiveGroup(config, g.id)),
     })),
     { id: "sep-quick", separator: true },
@@ -99,48 +107,50 @@ export default function TitleBar(props: Props) {
         <img src={appIcon} width={20} height={20} alt="" draggable={false} />
       </button>
 
-      <button
-        ref={groupBtn}
-        className={`icon-button title-group-button${config && !onlyDefault ? " has-group" : ""}`}
-        title="仓库页签分组（可多选）"
-        aria-label="仓库页签分组"
-        onClick={() => openMenu(setGroupMenu, groupBtn.current)}
-      >
-        <Icon name="group" size={17} />
-      </button>
+      <div className="title-group-cluster">
+        <button
+          ref={groupBtn}
+          className={`icon-button title-group-button${config && !onlyDefault ? " has-group" : ""}`}
+          title="仓库页签分组（可多选）"
+          aria-label="仓库页签分组"
+          onClick={() => openMenu(setGroupMenu, groupBtn.current)}
+        >
+          <Icon name="group" size={17} />
+        </button>
 
-      {pinned.length > 0 && (
-        <div className="title-pinned" role="group" aria-label="已 Pin 的仓库页签分组">
-          {pinned.map((g) => (
-            <button
-              key={g.id}
-              className={`title-pin${isGroupActive(config, g.id) ? " active" : ""}${dragPin === g.id ? " dragging" : ""}`}
-              title={`${g.name}（左键切换显示，右键分组菜单，可拖拽排序）`}
-              aria-label={`分组 ${g.name}`}
-              aria-pressed={isGroupActive(config, g.id)}
-              draggable
-              onDragStart={() => setDragPin(g.id)}
-              onDragEnd={() => setDragPin(null)}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => dropPin(g.id)}
-              onClick={() => props.onRepoGroupsChange(toggleActiveGroup(config, g.id))}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                const r = e.currentTarget.getBoundingClientRect();
-                setGroupMenu({ x: r.left, y: r.bottom + 2 });
-              }}
-            >
-              <GroupAvatar id={g.id} name={g.name} size={22} active={isGroupActive(config, g.id)} />
-            </button>
-          ))}
-        </div>
-      )}
+        {pinned.length > 0 && (
+          <div className="title-pinned" role="group" aria-label="已 Pin 的仓库页签分组">
+            {pinned.map((g) => (
+              <button
+                key={g.id}
+                className={`title-pin${isGroupActive(config, g.id) ? " active" : ""}${dragPin === g.id ? " dragging" : ""}`}
+                title={`${g.name}（左键切换显示，右键分组菜单，可拖拽排序）`}
+                aria-label={`分组 ${g.name}`}
+                aria-pressed={isGroupActive(config, g.id)}
+                draggable
+                onDragStart={() => setDragPin(g.id)}
+                onDragEnd={() => setDragPin(null)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => dropPin(g.id)}
+                onClick={() => props.onRepoGroupsChange(toggleActiveGroup(config, g.id))}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setGroupMenu({ x: r.left, y: r.bottom + 2 });
+                }}
+              >
+                <GroupAvatar id={g.id} name={g.name} color={g.color} size={22} active={isGroupActive(config, g.id)} />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       <RepositoryTabs
         repos={props.repos}
         activePath={props.activePath}
         meta={props.meta}
-        aliases={config.aliases}
+        repoGroups={config}
         onSetAlias={props.onSetRepoAlias}
         onActivate={props.onActivate}
         onClose={props.onClose}

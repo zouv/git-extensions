@@ -2,16 +2,26 @@ import { useLayoutEffect, useRef } from "react";
 import type { IconName } from "./Icon";
 import Icon from "./Icon";
 
+export interface MenuTrailingAction {
+  icon: IconName;
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}
+
 export interface MenuItem {
   id: string;
   label?: string;
   icon?: IconName;
+  color?: string;
   shortcut?: string;
   danger?: boolean;
   disabled?: boolean;
   checked?: boolean;
   title?: string;
   separator?: boolean;
+  trailingAction?: MenuTrailingAction;
   onSelect?: () => void;
 }
 
@@ -73,25 +83,46 @@ export default function ContextMenu({ x, y, items, onClose, ariaLabel = "上下�
 
   return (
     <div className="context-menu" ref={ref} style={{ left: x, top: y }} role="menu" aria-label={ariaLabel} onContextMenu={(e) => e.preventDefault()}>
-      {items.map((item) => item.separator ? (
-        <div className="menu-separator" role="separator" key={item.id} />
-      ) : (
-        <button
-          type="button"
-          role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
-          aria-checked={item.checked === undefined ? undefined : item.checked}
-          className={`context-item${item.danger ? " danger" : ""}`}
-          key={item.id}
-          disabled={item.disabled}
-          title={item.title}
-          onClick={() => { onClose(); item.onSelect?.(); }}
-        >
-          {item.checked !== undefined && <span className="menu-check">{item.checked ? <Icon name="check" size={14} /> : null}</span>}
-          {item.icon && <Icon name={item.icon} />}
-          <span>{item.label}</span>
-          {item.shortcut && <kbd>{item.shortcut}</kbd>}
-        </button>
-      ))}
+      {items.map((item) => {
+        if (item.separator) return <div className="menu-separator" role="separator" key={item.id} />;
+        const main = (
+          <button
+            type="button"
+            role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+            aria-checked={item.checked === undefined ? undefined : item.checked}
+            className={`context-item${item.danger ? " danger" : ""}`}
+            key={item.id}
+            disabled={item.disabled}
+            title={item.title}
+            onClick={() => { onClose(); item.onSelect?.(); }}
+          >
+            {item.checked !== undefined && <span className="menu-check">{item.checked ? <Icon name="check" size={14} /> : null}</span>}
+            {item.color && <span className="menu-color" style={{ background: item.color }} aria-hidden="true" />}
+            {item.icon && <Icon name={item.icon} />}
+            <span>{item.label}</span>
+            {item.shortcut && <kbd>{item.shortcut}</kbd>}
+          </button>
+        );
+        if (!item.trailingAction) return main;
+        const action = item.trailingAction;
+        return (
+          <div className="context-item-row" role="none" key={item.id}>
+            {main}
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={action.checked}
+              aria-label={action.label}
+              className={`context-item-action${action.checked ? " checked" : ""}`}
+              disabled={action.disabled}
+              title={action.label}
+              onClick={() => { onClose(); action.onSelect(); }}
+            >
+              <Icon name={action.icon} size={14} />
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }
