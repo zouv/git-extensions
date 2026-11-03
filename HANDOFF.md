@@ -2,9 +2,9 @@
 
 ## 状态快照
 
-- 最近更新：2026-11-03。无进行中任务；0.5.0 已完成代码 / 自动测试与版本号升级，准备打包上传（发布后更新本行）。见「待验收」1–4。
-- 远程已关联并推送：origin = https://github.com/zouv/git-extensions。
-- 0.5.0 发布产物将保存在 `.runtime/release-0.5.0/`；0.4.0 及更早版本细节见 CHANGELOG / git log。
+- 最近更新：2026-11-03。无进行中任务；0.5.0 已完成代码、自动测试、打包与 GitHub Release 上传（v0.5.0，tag 指向 d6bc4a1）。GUI 验收见「待验收」1–4。
+- 远程已关联并推送：origin = https://github.com/zouv/git-extensions，main + v0.5.0 已推送。
+- 0.5.0 发布：GitHub Release v0.5.0（https://github.com/zouv/git-extensions/releases/tag/v0.5.0）含 NSIS / MSI、便携 zip 与 SHA256 校验；发布说明在 `.runtime/release-v0.5.0-notes.md`，上传副本在 `.runtime/release-0.5.0/`，标准 `dist/release/` 已更新为 0.5.0。
 
 ## 待验收
 
@@ -16,7 +16,7 @@
 
 ## 验证边界
 
-- 本轮：`test.bat` 全过（41 个 Node 单测，新增 diff-model 4 项；tsc + vite build；cargo test 6 + 21 + 14 + 15，新增 worktree 列表用例），`sh check-docs.sh` 通过。`package.bat` 占用检测与强制关闭已实测；0.5.0 打包与 Release 上传待执行，完成后核对三个产物 SHA256 与远端资产。GUI 交互需按「待验收」1–4 人工确认。
+- 本轮：`pnpm test` 41 个 Node 单测（含 diff-model 4 项）与 `pnpm build` 通过；`cargo test --release` 6 + 21 + 14 + 15 全过（含 worktree 列表用例）；`sh check-docs.sh` 通过。`package.bat` 完成 0.5.0 打包，GitHub Release v0.5.0 的 NSIS / MSI / 便携 zip / SHA256SUMS 四个资产已上传并核对，本地 SHA256 校验通过。GUI 交互仍需按「待验收」1–4 人工确认。
 - 环境限制：GUI 截图 / WebView UIA 不可用，自定义关闭按钮的鼠标点击与分组视觉交互需人工验收；窗口关闭消息链路、进程退出与启动子系统已自动验证。
 - 仅临时仓库做破坏性 Git 回归，真实大仓库仅只读测量。
 - 安装包未代码签名。应用写互斥不能消除外部 Git 竞态，HEAD 备份不包含未提交内容。
