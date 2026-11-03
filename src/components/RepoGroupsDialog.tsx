@@ -1,6 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RepoInfo } from "../types";
-import type { RepoGroupConfig } from "../repoGroups";
+import type { RepoGroupColor, RepoGroupConfig } from "../repoGroups";
 import {
   DEFAULT_GROUP_ID, GROUP_COLOR_PRESETS, createGroup, deleteGroup, displayRepoName, groupById,
   renameGroup, reposInGroup, setGroupColor, setRepoAlias, setRepoGroup, togglePin,
@@ -14,6 +14,102 @@ interface Props {
   repos: RepoInfo[];
   onChange: (next: RepoGroupConfig) => void;
   onClose: () => void;
+}
+
+const COLOR_POPOVER_WIDTH = 150;
+const COLOR_POPOVER_HEIGHT = 66;
+
+/** 颜色入口只显示当前色块，点击后弹出色板；弹层用 fixed 定位避免被弹窗滚动区裁切。 */
+function GroupColorPicker({ color, groupName, onSelect }: {
+  color: RepoGroupColor;
+  groupName: string;
+  onSelect: (color: RepoGroupColor) => void;
+}) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ left: 0, top: 0 });
+
+  const toggle = () => {
+    if (!open && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - COLOR_POPOVER_WIDTH - 8));
+      const below = rect.bottom + 4;
+      const top = below + COLOR_POPOVER_HEIGHT <= window.innerHeight ? below : rect.top - COLOR_POPOVER_HEIGHT - 4;
+      setPosition({ left, top: Math.max(8, top) });
+    }
+    setOpen((value) => !value);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const pointerdown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (popoverRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+    };
+    const hide = () => setOpen(false);
+    document.addEventListener("pointerdown", pointerdown);
+    // window 捕获阶段先于 Dialog 的 document 捕获，Esc 只关闭色板，不关闭整个弹窗。
+    window.addEventListener("keydown", keydown, true);
+    window.addEventListener("resize", hide);
+    window.addEventListener("scroll", hide, true);
+    return () => {
+      document.removeEventListener("pointerdown", pointerdown);
+      window.removeEventListener("keydown", keydown, true);
+      window.removeEventListener("resize", hide);
+      window.removeEventListener("scroll", hide, true);
+    };
+  }, [open]);
+
+  return (
+    <span className="group-color-trigger">
+      <button
+        ref={triggerRef}
+        type="button"
+        className="group-color-current"
+        style={{ background: color }}
+        title="选择分组颜色"
+        aria-label={`分组 ${groupName} 的颜色`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={toggle}
+      >
+        <Icon name="chevron-down" size={11} />
+      </button>
+      {open && (
+        <div
+          ref={popoverRef}
+          className="group-color-popover"
+          style={{ left: position.left, top: position.top }}
+          role="listbox"
+          aria-label={`分组 ${groupName} 的颜色`}
+        >
+          {GROUP_COLOR_PRESETS.map((preset) => (
+            <button
+              key={preset.value}
+              type="button"
+              role="option"
+              aria-selected={color === preset.value}
+              className={`group-color-swatch${color === preset.value ? " selected" : ""}`}
+              style={{ background: preset.value }}
+              title={preset.label}
+              aria-label={preset.label}
+              onClick={() => { onSelect(preset.value); setOpen(false); }}
+            >
+              {color === preset.value && <Icon name="check" size={11} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
 }
 
 /** 仓库页签分组管理器：组的 CRUD / Pin，以及逐页签更换分组与编辑显示名。 */
@@ -86,21 +182,11 @@ export default function RepoGroupsDialog({ config, repos, onChange, onClose }: P
                   <span className="group-manager-name" title={group.name}>{group.name}{isDefault && <span className="muted">（未分组仓库页签）</span>}</span>
                 )}
                 <span className="tree-count" title={`当前打开的页签 ${members.length} 个`}>{members.length}</span>
-                <div className="group-color-picker" role="group" aria-label={`${group.name} 的颜色`}>
-                  {GROUP_COLOR_PRESETS.map((preset) => (
-                    <button
-                      key={preset.value}
-                      className={`group-color-swatch${group.color === preset.value ? " selected" : ""}`}
-                      style={{ background: preset.value }}
-                      title={preset.label}
-                      aria-label={`将分组 ${group.name} 设为${preset.label}`}
-                      aria-pressed={group.color === preset.value}
-                      onClick={() => onChange(setGroupColor(config, group.id, preset.value))}
-                    >
-                      {group.color === preset.value && <Icon name="check" size={11} />}
-                    </button>
-                  ))}
-                </div>
+                <GroupColorPicker
+                  color={group.color}
+                  groupName={group.name}
+                  onSelect={(next) => onChange(setGroupColor(config, group.id, next))}
+                />
                 <div className="group-manager-actions">
                   {!isDefault && <>
                     <button

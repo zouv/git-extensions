@@ -3,7 +3,7 @@ import { api, nextLogRequestId, onLogBatch } from "./api";
 import { hasSessionDrafts } from "./viewState";
 import { useRepoBusy } from "./useRepoBusy";
 import { getRepoOperation } from "./repoOperations";
-import type { AheadBehind, BranchInfo, CommitDetail, ContainedInfo, FileDiff, ConflictDraft, RebaseDraft, OperationState, RepoInfo, Revision, StatusSnapshot, TagInfo } from "./types";
+import type { AheadBehind, BranchInfo, CommitDetail, ContainedInfo, FileDiff, ConflictDraft, RebaseDraft, OperationState, RepoInfo, Revision, StatusSnapshot, SubmoduleInfo, TagInfo, WorktreeInfo } from "./types";
 import type { AppSettings } from "./settings";
 import { loadLayout, resetLayout, saveLayout } from "./settings";
 import type { SessionMeta } from "./components/RepositoryTabs";
@@ -60,6 +60,8 @@ export default function RepoWorkspace(props: Props) {
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [aheadBehind, setAheadBehind] = useState<AheadBehind | null>(null);
   const [tags, setTags] = useState<TagInfo[]>([]);
+  const [submodules, setSubmodules] = useState<SubmoduleInfo[]>([]);
+  const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
   const [operation, setOperation] = useState<OperationState | null>(null);
   const [workspace, setWorkspace] = useState<Workspace>("history");
   const [task, setTask] = useState<Task>(null);
@@ -177,12 +179,14 @@ export default function RepoWorkspace(props: Props) {
           const next = queue.requested; queue.requested = null;
           const id = auxSequence.current;
           try {
-            const [snapshot, state, refs, ahead, tagRefs, info] = await Promise.all([
+            const [snapshot, state, refs, ahead, tagRefs, info, moduleRefs, worktreeRefs] = await Promise.all([
               api.getStatus(repo.path), api.getOperationState(repo.path),
               next === "all" ? api.getBranches(repo.path) : Promise.resolve(null),
               next === "all" ? api.getAheadBehind(repo.path) : Promise.resolve(null),
               next === "all" ? api.tagList(repo.path) : Promise.resolve(null),
               next === "all" ? api.openRepo(repo.path) : Promise.resolve(null),
+              next === "all" ? api.submoduleList(repo.path).catch(() => null) : Promise.resolve(null),
+              next === "all" ? api.worktreeList(repo.path).catch(() => null) : Promise.resolve(null),
             ]);
             if (id !== auxSequence.current) continue;
             setStatus(snapshot); setOperation(state); setWorktreeVersion((n) => n + 1);
@@ -193,6 +197,7 @@ export default function RepoWorkspace(props: Props) {
               setAheadBehind(ahead);
             }
             if (tagRefs) setTags(tagRefs); if (info) setRepoInfo(info);
+            if (moduleRefs) setSubmodules(moduleRefs); if (worktreeRefs) setWorktrees(worktreeRefs);
           } catch (e) { if (id === auxSequence.current) setMessage(String(e)); }
         }
       } finally { queue.running = false; }
@@ -448,11 +453,13 @@ export default function RepoWorkspace(props: Props) {
         onBranches={() => { setBranchStart(undefined); setShowBranches(true); }} onStash={() => setShowStash(true)} onTags={() => { setTagTarget(undefined); setShowTags(true); }} onSubmodules={() => setShowSubmodules(true)} onSettings={props.onSettings} onRecovery={() => setShowRecovery(true)}
         onCompare={() => openCompare(compareBase ?? selectedOids[0] ?? "HEAD", "HEAD")} onRemote={runRemote} />
       <div className="workspace-body">
-        {layout.showLeft && <LeftPanel branches={branches} tags={tags} activeRef={leftRef} workspace={workspace} changeCount={changeCount} width={layout.leftWidth} conflictCount={operation?.conflicts.length ?? 0}
+        {layout.showLeft && <LeftPanel branches={branches} tags={tags} submodules={submodules} worktrees={worktrees} activeRef={leftRef} workspace={workspace} changeCount={changeCount} width={layout.leftWidth} conflictCount={operation?.conflicts.length ?? 0}
           onWorkspace={(next) => { void switchWorkspace(next); }} onFilter={setLeftRef} onCheckout={(name) => void runAction(() => api.checkoutBranch(repo.path, name), `已切换到 ${name}`)} onCompare={(ref) => openCompare("HEAD", ref)}
           onNewBranch={(start) => { setBranchStart(start); setShowBranches(true); }} onDeleteBranch={deleteBranch}
           onDeleteTag={(name) => { void confirm({ title: `删除标签 ${name}？`, body: "只删除本地标签。", danger: true, confirmLabel: "删除标签" }).then((ok) => { if (ok) void runAction(() => api.deleteTag(repo.path, name), `已删除标签 ${name}`); }); }}
-          onStash={() => setShowStash(true)} onSubmodules={() => setShowSubmodules(true)} />}
+          onStash={() => setShowStash(true)} onSubmodules={() => setShowSubmodules(true)}
+          onCopyPath={(path) => { void navigator.clipboard?.writeText(path).then(() => setMessage("已复制路径")); }}
+          onRevealPath={(path) => { void api.revealPath(path).then(() => setMessage("已在文件管理器中显示")).catch((e) => setMessage(String(e))); }} />}
         {layout.showLeft && <SplitHandle direction="vertical" label="调整导航宽度" onResize={(delta) => setLayout((prev) => ({ ...prev, leftWidth: Math.min(360, Math.max(160, prev.leftWidth + delta)) }))} onReset={() => setLayout((prev) => ({ ...prev, leftWidth: 224 }))} />}
         <div className={`content-area${verticalInspector ? " horizontal" : " vertical"}`}>
           <main className="workspace-main" style={{ display: maximized ? "none" : undefined }}>

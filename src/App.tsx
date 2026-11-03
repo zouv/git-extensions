@@ -13,6 +13,7 @@ import Dialog from "./ui/Dialog";
 import Icon from "./ui/Icon";
 import { ConfirmProvider, useConfirm } from "./ui/Confirm";
 import { loadSettings, saveSettings } from "./settings";
+import { loadOpenRepos, pickActivePath, restoreCandidates, saveOpenRepos } from "./openRepos";
 import type { RepoGroupConfig } from "./repoGroups";
 import {
   DEFAULT_GROUP_ID, ensureGroupActive, groupForRepo, loadRepoGroups, primaryGroupId,
@@ -45,16 +46,33 @@ function AppShell() {
   const [showSettings, setShowSettings] = useState(false);
   const [showOpen, setShowOpen] = useState(false);
   const [openPath, setOpenPath] = useState("");
+  const [openInsertAfter, setOpenInsertAfter] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [meta, setMeta] = useState<Record<string, SessionMeta>>({});
   const [repoGroups, setRepoGroups] = useState<RepoGroupConfig>(loadRepoGroups);
   const [showGroupManager, setShowGroupManager] = useState(false);
+  const [sessionRestored, setSessionRestored] = useState(false);
+  const [restoring, setRestoring] = useState(() => {
+    if (TEST_REPO) return false;
+    const stored = loadOpenRepos();
+    if (stored !== null) return stored.length > 0;
+    try { return localStorage.getItem(LAST_REPO_KEY) !== null; } catch { return false; }
+  });
+  const [mountedPaths, setMountedPaths] = useState<string[]>([]);
   const noticeId = useRef(0);
+  const restoreStartedRef = useRef(false);
+  const activePathRef = useRef<string | null>(null);
+  activePathRef.current = activePath;
   const confirm = useConfirm();
 
   useEffect(() => { if (!TEST_REPO) saveSettings(settings); }, [settings]);
   useEffect(() => { if (!TEST_REPO) saveRepoGroups(repoGroups); }, [repoGroups]);
+  // 恢复完成前不能用空数组覆盖上次的页签列表。
+  useEffect(() => {
+    if (TEST_REPO || !sessionRestored) return;
+    saveOpenRepos(repos.map((repo) => repo.path));
+  }, [repos, sessionRestored]);
 
   const notify = useCallback((repoPath: string, kind: Notice["kind"], message: string, details?: string, repoName?: string) => {
     const id = ++noticeId.current;
@@ -65,12 +83,26 @@ function AppShell() {
   const openRepo = useCallback(async (path: string) => {
     const trimmed = path.trim();
     if (!trimmed || opening) return;
+    const insertAfter = openInsertAfter;
     setOpening(true);
     try {
       const info = await api.openRepo(trimmed);
-      setRepos((prev) => prev.some((r) => r.path === info.path) ? prev : [...prev, info]);
-      // 新仓库归入当前可见的组；重新打开已有仓库时确保其所在组处于选中状态。
+      const alreadyOpen = repos.some((repo) => repo.path === info.path);
+      setRepos((prev) => {
+        if (prev.some((r) => r.path === info.path)) return prev;
+        if (!insertAfter) return [...prev, info];
+        const index = prev.findIndex((r) => r.path === insertAfter);
+        if (index < 0) return [...prev, info];
+        const next = [...prev];
+        next.splice(index + 1, 0, info);
+        return next;
+      });
+      // 新仓库归入当前可见的组；「在右侧打开」时归入锚点页签的组，保证相邻可见。
       setRepoGroups((prev) => {
+        if (insertAfter && !alreadyOpen) {
+          const anchorGroup = groupForRepo(prev, insertAfter);
+          return ensureGroupActive(setRepoGroup(prev, info.path, anchorGroup), anchorGroup);
+        }
         if (!Object.prototype.hasOwnProperty.call(prev.assignments, info.path)) {
           const target = prev.activeGroupIds.includes(DEFAULT_GROUP_ID) ? DEFAULT_GROUP_ID : primaryGroupId(prev);
           return setRepoGroup(prev, info.path, target);
@@ -86,19 +118,106 @@ function AppShell() {
       });
       setShowOpen(false);
       setOpenPath("");
+      setOpenInsertAfter(null);
     } catch (e) {
       notify(trimmed, "error", "无法打开仓库", String(e), "打开仓库");
     } finally { setOpening(false); }
-  }, [notify, opening]);
+  }, [notify, opening, openInsertAfter, repos]);
 
+  const beginOpen = useCallback((prefill = "") => {
+    setOpenInsertAfter(null);
+    setOpenPath(prefill);
+    setShowOpen(true);
+  }, []);
+
+  const beginOpenRightOf = useCallback((path: string) => {
+    setOpenInsertAfter(path);
+    setOpenPath("");
+    setShowOpen(true);
+  }, []);
+
+  // 启动恢复上次打开的全部仓库页签；只取 RepoInfo，Git 数据等页签激活后再加载。
   useEffect(() => {
-    const last = localStorage.getItem(LAST_REPO_KEY);
-    if (TEST_REPO || last) void openRepo(TEST_REPO || last!);
-    // 启动只恢复一个仓库，避免多个大仓库同时加载。
+    if (restoreStartedRef.current) return;
+    restoreStartedRef.current = true;
+
+    if (TEST_REPO) {
+      setSessionRestored(true);
+      void openRepo(TEST_REPO);
+      return;
+    }
+
+    const stored = loadOpenRepos();
+    let last: string | null = null;
+    try { last = localStorage.getItem(LAST_REPO_KEY); } catch { /* localStorage 不可用 */ }
+    const candidates = restoreCandidates(stored, last);
+    if (candidates.length === 0) {
+      if (activePathRef.current === null) rememberActive(null);
+      setSessionRestored(true);
+      setRestoring(false);
+      return;
+    }
+
+    void (async () => {
+      const restored: RepoInfo[] = [];
+      const failed: { path: string; error: string }[] = [];
+      for (const path of candidates) {
+        try {
+          const info = await api.openRepo(path);
+          if (!restored.some((repo) => repo.path === info.path)) restored.push(info);
+        } catch (error) {
+          failed.push({ path, error: String(error) });
+        }
+      }
+      const target = pickActivePath(restored.map((repo) => repo.path), last);
+      if (restored.length > 0) {
+        setRepos((prev) => {
+          if (prev.length === 0) return restored;
+          const merged = new Map(restored.map((repo) => [repo.path, repo] as const));
+          for (const repo of prev) if (!merged.has(repo.path)) merged.set(repo.path, repo);
+          return [...merged.values()];
+        });
+        // 恢复期间用户已手动打开并激活仓库时，不覆盖其活动页签。
+        if (activePathRef.current === null && target) {
+          setActivePath(target);
+          rememberActive(target);
+          setRepoGroups((prev) => ensureGroupActive(prev, groupForRepo(prev, target)));
+        }
+      } else if (activePathRef.current === null) {
+        rememberActive(null);
+      }
+      // 先更新页签，再解锁持久化，避免用旧列表覆盖保存值。
+      setSessionRestored(true);
+      setRestoring(false);
+      if (failed.length > 0) {
+        notify(failed[0].path, "error", `${failed.length} 个仓库页签无法恢复，已跳过`,
+          failed.map(({ path, error }) => `${path}\n${error}`).join("\n\n"), "启动恢复");
+      }
+    })().catch((error) => {
+      setSessionRestored(true);
+      setRestoring(false);
+      notify("", "error", "恢复仓库页签失败", String(error), "启动恢复");
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const shownRepos = useMemo(() => visibleRepos(repoGroups, repos), [repoGroups, repos]);
+  // 恢复的页签先只挂载活动仓库，其余页签首次激活时才挂载并加载 Git 数据。
+  const mounted = useMemo(
+    () => new Set([...mountedPaths, ...(activePath ? [activePath] : [])]),
+    [mountedPaths, activePath],
+  );
+  useEffect(() => {
+    if (!activePath) return;
+    setMountedPaths((prev) => prev.includes(activePath) ? prev : [...prev, activePath]);
+  }, [activePath]);
+  useEffect(() => {
+    setMountedPaths((prev) => {
+      const open = new Set(repos.map((repo) => repo.path));
+      const next = prev.filter((path) => open.has(path));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [repos]);
   // 切换分组后若当前活动仓库被隐藏，自动切到该组第一个可见页签；空组则清空活动页签。
   useEffect(() => {
     if (activePath && shownRepos.some((repo) => repo.path === activePath)) return;
@@ -144,8 +263,7 @@ function AppShell() {
       if (!mod) return;
       if (event.key.toLowerCase() === "o") {
         event.preventDefault();
-        setOpenPath(activePath ?? "");
-        setShowOpen(true);
+        beginOpen(activePath ?? "");
       } else if (event.key.toLowerCase() === "w" && activePath) {
         event.preventDefault();
         void closeRepo(activePath);
@@ -162,7 +280,7 @@ function AppShell() {
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [activePath, closeRepo, repos]);
+  }, [activePath, beginOpen, closeRepo, repos]);
 
   const updateMeta = useCallback((path: string, value: SessionMeta) => {
     setMeta((prev) => {
@@ -174,15 +292,17 @@ function AppShell() {
 
   const updateRepoGroups = useCallback((next: RepoGroupConfig) => setRepoGroups(next), []);
 
-  const reorderRepos = useCallback((fromPath: string, toPath: string) => {
+  // 页签栏可能只显示部分分组；只重排可见页签占用的槽位，隐藏页签保持原位。
+  const reorderRepos = useCallback((orderedVisiblePaths: string[]) => {
     setRepos((prev) => {
-      const from = prev.findIndex((r) => r.path === fromPath);
-      const to = prev.findIndex((r) => r.path === toPath);
-      if (from < 0 || to < 0 || from === to) return prev;
-      const next = [...prev];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return next;
+      const visible = new Set(orderedVisiblePaths);
+      const currentVisible = prev.filter((repo) => visible.has(repo.path));
+      if (currentVisible.length !== orderedVisiblePaths.length) return prev;
+      if (orderedVisiblePaths.some((path) => !currentVisible.some((repo) => repo.path === path))) return prev;
+      const byPath = new Map(prev.map((repo) => [repo.path, repo]));
+      const queue = [...orderedVisiblePaths];
+      const next = prev.map((repo) => visible.has(repo.path) ? byPath.get(queue.shift()!)! : repo);
+      return next.some((repo, index) => repo !== prev[index]) ? next : prev;
     });
   }, []);
 
@@ -234,7 +354,8 @@ function AppShell() {
         onActivate={(path) => { setActivePath(path); rememberActive(path); }}
         onClose={(path) => void closeRepo(path)}
         onCloseOthers={(path) => closeOthers(path)}
-        onOpen={() => { setOpenPath(""); setShowOpen(true); }}
+        onOpen={() => beginOpen()}
+        onOpenRightOf={beginOpenRightOf}
         onSettings={() => setShowSettings(true)}
         onCopyPath={(path) => { void navigator.clipboard?.writeText(path).then(() => notify(path, "success", "已复制仓库路径")); }}
         onReveal={(path) => { void api.revealPath(path).catch((e) => notify(path, "error", "无法打开文件管理器", String(e))); }}
@@ -244,34 +365,39 @@ function AppShell() {
         onManageGroups={() => setShowGroupManager(true)}
         onCloseWindow={() => void closeWindow()}
       />
-      {repos.map((repo) => (
+      {repos.filter((repo) => mounted.has(repo.path)).map((repo) => (
         <div className={`repo-host${repo.path === activePath ? " active" : ""}`} key={repo.path} aria-hidden={repo.path !== activePath}>
           <RepoWorkspace
             repo={repo}
             active={repo.path === activePath}
             settings={settings}
-            onOpen={() => { setOpenPath(repo.path); setShowOpen(true); }}
+            onOpen={() => beginOpen(repo.path)}
             onSettings={() => setShowSettings(true)}
             onNotify={(kind, message, details) => notify(repo.path, kind, message, details, repo.name)}
             onMeta={(value) => updateMeta(repo.path, value)}
           />
         </div>
       ))}
+      {restoring && repos.length === 0 && <div className="welcome-screen">
+        <Icon name="history" size={42} />
+        <h1>正在恢复上次打开的仓库…</h1>
+        <p>仅加载当前活动页签，其余页签切换时再读取数据。</p>
+      </div>}
       {repos.length > 0 && shownRepos.length === 0 && <div className="welcome-screen">
         <Icon name="group" size={42} />
         <h1>当前分组没有仓库页签</h1>
         <p>切换分组或在「管理分组…」中把仓库页签移入当前组。</p>
         <button onClick={() => setShowGroupManager(true)}><Icon name="group" />管理分组</button>
       </div>}
-      {repos.length === 0 && <div className="welcome-screen">
+      {repos.length === 0 && !restoring && <div className="welcome-screen">
         <Icon name="branch" size={42} />
         <h1>Git Extensions</h1>
         <p>打开一个本地 Git 仓库，开始查看历史或提交变更。</p>
-        <button className="primary" onClick={() => setShowOpen(true)}><Icon name="plus" />打开仓库</button>
+        <button className="primary" onClick={() => beginOpen()}><Icon name="plus" />打开仓库</button>
       </div>}
       {showGroupManager && <RepoGroupsDialog config={repoGroups} repos={repos} onChange={updateRepoGroups} onClose={() => setShowGroupManager(false)} />}
-      {showOpen && <Dialog title="打开 Git 仓库" onClose={() => { if (!opening) setShowOpen(false); }} busy={opening} footer={<>
-        <button disabled={opening} onClick={() => setShowOpen(false)}>取消</button>
+      {showOpen && <Dialog title="打开 Git 仓库" onClose={() => { if (!opening) { setShowOpen(false); setOpenInsertAfter(null); } }} busy={opening} footer={<>
+        <button disabled={opening} onClick={() => { setShowOpen(false); setOpenInsertAfter(null); }}>取消</button>
         <button className="primary" disabled={opening || !openPath.trim()} onClick={() => void openRepo(openPath)}>{opening ? "打开中…" : "打开"}</button>
       </>}>
         <label className="field-label">仓库路径<input data-autofocus className="repo-path-input" placeholder="C:\path\to\project" value={openPath} onChange={(e) => setOpenPath(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void openRepo(openPath); }} /></label>

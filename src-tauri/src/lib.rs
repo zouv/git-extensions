@@ -48,6 +48,7 @@ pub fn run() {
             git::commands::delete_tag,
             git::commands::submodule_list,
             git::commands::submodule_update,
+            git::commands::worktree_list,
             git::commands::discard_files,
             git::commands::delete_untracked_files,
             git::commands::save_resolved_file,

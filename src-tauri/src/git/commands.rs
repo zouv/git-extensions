@@ -320,6 +320,11 @@ pub async fn submodule_list(path: String) -> GitResult<Vec<super::cli::Submodule
 }
 
 #[tauri::command]
+pub async fn worktree_list(path: String) -> GitResult<Vec<super::repo::WorktreeInfo>> {
+    super::operations::run_read(move || super::repo::worktree_list(path)).await
+}
+
+#[tauri::command]
 pub async fn get_contained_in(path: String, oid: String) -> GitResult<super::cli::ContainedInfo> {
     super::operations::run_read(move || super::cli::get_contained_in(path, oid)).await
 }

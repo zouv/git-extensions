@@ -164,7 +164,7 @@ export default function ChangesPanel(props: Props) {
       </div>
       <SplitHandle direction="vertical" label="调整变更文件列表宽度" onResize={(delta) => props.onWidth(Math.min(720, Math.max(300, props.width + delta)))} onReset={() => props.onWidth(420)} />
       <div className="changes-preview">
-        {preview ? previewError ? <div className="empty-state" role="alert">{previewError}</div> : preview.file ? <DiffView files={[preview.file]} highlightEnabled={props.highlightEnabled} onFileAction={props.onFileAction} /> : <div className="empty-state"><span className="spinner" /><span>diff 加载中…</span></div> : <div className="empty-state"><Icon name="file" size={28} /><strong>选择一个文件</strong><span>查看工作区或暂存区差异</span></div>}
+        {preview ? previewError ? <div className="empty-state" role="alert">{previewError}</div> : preview.file ? <DiffView files={[preview.file]} highlightEnabled={props.highlightEnabled} onFileAction={props.onFileAction} showFileHeader={false} /> : <div className="empty-state"><span className="spinner" /><span>diff 加载中…</span></div> : <div className="empty-state"><Icon name="file" size={28} /><strong>选择一个文件</strong><span>查看工作区或暂存区差异</span></div>}
       </div>
       {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={[
         ...(menu.entry.status !== "conflicted" ? [{ id: "stage", label: menu.side === "staged" ? "取消暂存" : "暂存", onSelect: () => stagePaths(menu.side, [menu.entry.path]) }] : [{ id: "resolve", label: "解决冲突", icon: "conflict" as const, onSelect: props.onOpenConflict }]),

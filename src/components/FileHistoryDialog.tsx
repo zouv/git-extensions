@@ -82,7 +82,7 @@ export default function FileHistoryDialog({ repoPath, file, highlightEnabled, on
             ))}
             {entries.length === 0 && <div className="panel-hint">（无历史记录）</div>}
           </div>
-          <div className="history-diff">{diffError ? <div className="inline-error" role="alert">{diffError}</div> : diffLoading ? <div className="panel-hint" role="status">正在读取该版本的文件差异…</div> : diff ? <DiffView files={[diff]} highlightEnabled={highlightEnabled} /> : <div className="panel-hint">选择提交查看该文件的 diff</div>}</div>
+          <div className="history-diff">{diffError ? <div className="inline-error" role="alert">{diffError}</div> : diffLoading ? <div className="panel-hint" role="status">正在读取该版本的文件差异…</div> : diff ? <DiffView files={[diff]} highlightEnabled={highlightEnabled} showFileHeader={false} /> : <div className="panel-hint">选择提交查看该文件的 diff</div>}</div>
         </>
       )}
     </Dialog>

@@ -583,3 +583,21 @@ fn system_commands_reject_paths_outside_repository_before_launching() {
     assert!(git_extensions_lib::system::open_path(t.path(), "../outside".into()).is_err());
     assert!(git_extensions_lib::system::reveal_path(t.path(), Some("../outside".into())).is_err());
 }
+
+#[test]
+fn worktree_list_reports_linked_worktrees() {
+    let t = TempRepo::new("worktrees");
+    t.add_commit("a.txt", "a\n", "root");
+    let linked = t.root.join("linked-wt");
+    git2::Repository::open(&t.root)
+        .unwrap()
+        .worktree("linked-wt", &linked, None)
+        .unwrap();
+    assert!(linked.exists());
+
+    let worktrees = git::repo::worktree_list(t.path()).unwrap();
+    assert_eq!(worktrees.len(), 1);
+    assert_eq!(worktrees[0].name, "linked-wt");
+    assert!(!worktrees[0].locked);
+    assert!(Path::new(&worktrees[0].path).exists());
+}

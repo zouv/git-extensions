@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getVersion } from "@tauri-apps/api/app";
 import type { RepoInfo } from "../types";
 import type { RepoGroupConfig } from "../repoGroups";
 import {
-  DEFAULT_GROUP_ID, isGroupActive, pinnedGroups, reorderPinned, setActiveGroups,
+  DEFAULT_GROUP_ID, isGroupActive, pinnedGroups, reorderPinned,
   toggleActiveGroup, togglePin,
 } from "../repoGroups";
 import type { SessionMeta } from "./RepositoryTabs";
 import RepositoryTabs from "./RepositoryTabs";
 import ContextMenu from "../ui/ContextMenu";
 import type { MenuItem } from "../ui/ContextMenu";
+import Dialog from "../ui/Dialog";
 import Icon from "../ui/Icon";
 import GroupAvatar from "./GroupAvatar";
 import appIcon from "../../src-tauri/icons/32x32.png";
@@ -23,10 +25,11 @@ interface Props {
   onClose: (path: string) => void;
   onCloseOthers: (path: string) => void;
   onOpen: () => void;
+  onOpenRightOf: (path: string) => void;
   onSettings: () => void;
   onCopyPath: (path: string) => void;
   onReveal: (path: string) => void;
-  onReorderRepo: (fromPath: string, toPath: string) => void;
+  onReorderRepo: (orderedPaths: string[]) => void;
   onRepoGroupsChange: (next: RepoGroupConfig) => void;
   onSetRepoAlias: (path: string, alias: string) => void;
   onManageGroups: () => void;
@@ -40,6 +43,8 @@ export default function TitleBar(props: Props) {
   const [appMenu, setAppMenu] = useState<{ x: number; y: number } | null>(null);
   const [groupMenu, setGroupMenu] = useState<{ x: number; y: number } | null>(null);
   const [maximized, setMaximized] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [version, setVersion] = useState("");
   const [dragPin, setDragPin] = useState<string | null>(null);
   const appBtn = useRef<HTMLButtonElement>(null);
   const groupBtn = useRef<HTMLButtonElement>(null);
@@ -49,6 +54,12 @@ export default function TitleBar(props: Props) {
     void win.isMaximized().then((v) => { if (!disposed) setMaximized(v); });
     const unlisten = win.onResized(() => { void win.isMaximized().then((v) => { if (!disposed) setMaximized(v); }); });
     return () => { disposed = true; void unlisten.then((f) => f()); };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    void getVersion().then((value) => { if (alive) setVersion(value); }).catch(() => { /* 版本读取失败时显示占位符 */ });
+    return () => { alive = false; };
   }, []);
 
   const config = props.repoGroups;
@@ -76,9 +87,6 @@ export default function TitleBar(props: Props) {
       },
       onSelect: () => props.onRepoGroupsChange(toggleActiveGroup(config, g.id)),
     })),
-    { id: "sep-quick", separator: true },
-    { id: "show-all", label: "显示全部组", icon: "group" as const, onSelect: () => props.onRepoGroupsChange(setActiveGroups(config, config.groups.map((g) => g.id))) },
-    { id: "show-default", label: "仅显示 Default", onSelect: () => props.onRepoGroupsChange(setActiveGroups(config, [DEFAULT_GROUP_ID])) },
     { id: "sep-manage", separator: true },
     { id: "manage", label: "管理分组…", icon: "group" as const, onSelect: props.onManageGroups },
   ];
@@ -102,7 +110,15 @@ export default function TitleBar(props: Props) {
         className="title-app-icon"
         title="Git Extensions 菜单"
         aria-label="应用菜单"
-        onClick={() => openMenu(setAppMenu, appBtn.current)}
+        aria-haspopup="menu"
+        aria-expanded={!!appMenu}
+        onPointerDown={(event) => { if (appMenu) event.stopPropagation(); }}
+        onClick={() => { if (appMenu) setAppMenu(null); else openMenu(setAppMenu, appBtn.current); }}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowDown") return;
+          event.preventDefault();
+          openMenu(setAppMenu, appBtn.current);
+        }}
       >
         <img src={appIcon} width={20} height={20} alt="" draggable={false} />
       </button>
@@ -113,7 +129,10 @@ export default function TitleBar(props: Props) {
           className={`icon-button title-group-button${config && !onlyDefault ? " has-group" : ""}`}
           title="仓库页签分组（可多选）"
           aria-label="仓库页签分组"
-          onClick={() => openMenu(setGroupMenu, groupBtn.current)}
+          aria-haspopup="menu"
+          aria-expanded={!!groupMenu}
+          onPointerDown={(event) => { if (groupMenu) event.stopPropagation(); }}
+          onClick={() => { if (groupMenu) setGroupMenu(null); else openMenu(setGroupMenu, groupBtn.current); }}
         >
           <Icon name="group" size={17} />
         </button>
@@ -156,9 +175,11 @@ export default function TitleBar(props: Props) {
         onClose={props.onClose}
         onCloseOthers={props.onCloseOthers}
         onOpen={props.onOpen}
+        onOpenRightOf={props.onOpenRightOf}
         onCopyPath={props.onCopyPath}
         onReveal={props.onReveal}
         onReorder={props.onReorderRepo}
+        onBlankContextMenu={(x, y) => setAppMenu({ x, y })}
       />
 
       <div className="title-window-controls">
@@ -169,12 +190,28 @@ export default function TitleBar(props: Props) {
 
       {appMenu && (
         <ContextMenu x={appMenu.x} y={appMenu.y} onClose={() => setAppMenu(null)} ariaLabel="应用菜单" items={[
-          { id: "open", label: "打开仓库…", icon: "plus", onSelect: props.onOpen },
-          { id: "settings", label: "设置", icon: "settings", onSelect: props.onSettings },
+          { id: "open", label: "打开仓库…", icon: "plus", shortcut: "Ctrl+O", onSelect: props.onOpen },
+          { id: "settings", label: "设置…", icon: "settings", shortcut: "Ctrl+,", onSelect: props.onSettings },
+          { id: "sep-app", separator: true },
+          { id: "about", label: "关于 Git Extensions…", onSelect: () => setAboutOpen(true) },
+          { id: "sep-exit", separator: true },
+          { id: "close-window", label: "关闭窗口", shortcut: "Alt+F4", danger: true, onSelect: props.onCloseWindow },
         ]} />
       )}
       {groupMenu && (
         <ContextMenu x={groupMenu.x} y={groupMenu.y} onClose={() => setGroupMenu(null)} ariaLabel="仓库页签分组" items={groupMenuItems} />
+      )}
+      {aboutOpen && (
+        <Dialog title="关于 Git Extensions" onClose={() => setAboutOpen(false)} footer={<button className="primary" onClick={() => setAboutOpen(false)}>关闭</button>}>
+          <div className="about-app">
+            <img src={appIcon} width={48} height={48} alt="" />
+            <div>
+              <h4>Git Extensions</h4>
+              <p className="panel-hint">版本 {version || "—"}</p>
+            </div>
+          </div>
+          <p className="panel-hint">本地 Git 仓库浏览与操作工具，基于 Tauri 2、Rust 与 React 构建。</p>
+        </Dialog>
       )}
     </div>
   );

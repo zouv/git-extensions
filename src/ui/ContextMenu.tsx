@@ -33,13 +33,16 @@ interface Props {
   ariaLabel?: string;
 }
 
-/** 统一右键菜单：视口内定位、焦点循环和完整键盘操作。 */
+/** 统一右键菜单：视口内定位、焦点循环、关闭后恢复触发元素焦点。 */
 export default function ContextMenu({ x, y, items, onClose, ariaLabel = "上下文菜单" }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
     const rect = el.getBoundingClientRect();
     const left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
     const top = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
@@ -51,7 +54,7 @@ export default function ContextMenu({ x, y, items, onClose, ariaLabel = "上下�
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (!["ArrowDown", "ArrowUp", "Home", "End", "Tab"].includes(event.key)) return;
@@ -66,9 +69,9 @@ export default function ContextMenu({ x, y, items, onClose, ariaLabel = "上下�
       buttons[next]?.focus();
     };
     const pointerdown = (event: PointerEvent) => {
-      if (!el.contains(event.target as Node)) onClose();
+      if (!el.contains(event.target as Node)) onCloseRef.current();
     };
-    const close = () => onClose();
+    const close = () => onCloseRef.current();
     document.addEventListener("keydown", keydown, true);
     document.addEventListener("pointerdown", pointerdown);
     window.addEventListener("blur", close);
@@ -78,8 +81,9 @@ export default function ContextMenu({ x, y, items, onClose, ariaLabel = "上下�
       document.removeEventListener("pointerdown", pointerdown);
       window.removeEventListener("blur", close);
       window.removeEventListener("resize", close);
+      if (previousFocus?.isConnected) previousFocus.focus();
     };
-  }, [onClose, x, y]);
+  }, [x, y]);
 
   return (
     <div className="context-menu" ref={ref} style={{ left: x, top: y }} role="menu" aria-label={ariaLabel} onContextMenu={(e) => e.preventDefault()}>

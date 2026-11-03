@@ -14,6 +14,7 @@ import type {
   StashInfo,
   StatusSnapshot,
   SubmoduleInfo,
+  WorktreeInfo,
   TagInfo,
   CompareResult,
   OperationState,
@@ -92,6 +93,7 @@ export const api = {
   deleteTag: (path: string, name: string) => writeInvoke<string>("delete_tag", { path, name }),
   submoduleList: (path: string) => invoke<SubmoduleInfo[]>("submodule_list", { path }),
   submoduleUpdate: (path: string) => writeInvoke<string>("submodule_update", { path }),
+  worktreeList: (path: string) => invoke<WorktreeInfo[]>("worktree_list", { path }),
   blameFile: (path: string, file: string, oid?: string) =>
     invoke<BlameLine[]>("blame_file", { path, file, oid }),
   fileLog: (path: string, file: string, maxCount?: number) =>

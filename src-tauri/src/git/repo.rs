@@ -22,6 +22,36 @@ pub struct BranchInfo {
     pub oid: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeInfo {
+    pub name: String,
+    pub path: String,
+    pub locked: bool,
+}
+
+/// 列出当前仓库的 linked worktree；主工作区不在 git2 的 worktrees 列表中。
+pub fn worktree_list(path: String) -> GitResult<Vec<WorktreeInfo>> {
+    let repo = open(&path)?;
+    let mut worktrees = Vec::new();
+    for name in repo.worktrees()?.iter().flatten() {
+        let Ok(worktree) = repo.find_worktree(name) else {
+            continue;
+        };
+        let locked = matches!(
+            worktree.is_locked(),
+            Ok(git2::WorktreeLockStatus::Locked(_))
+        );
+        worktrees.push(WorktreeInfo {
+            name: name.to_string(),
+            path: worktree.path().to_string_lossy().into_owned(),
+            locked,
+        });
+    }
+    worktrees.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(worktrees)
+}
+
 pub fn open_repo(path: String) -> GitResult<RepoInfo> {
     let repo = open(&path)?;
     let workdir = repo

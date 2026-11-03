@@ -100,6 +100,12 @@ export interface SubmoduleInfo {
   status: string;
 }
 
+export interface WorktreeInfo {
+  name: string;
+  path: string;
+  locked: boolean;
+}
+
 export interface BlameLine {
   oid: string;
   shortId: string;

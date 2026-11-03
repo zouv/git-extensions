@@ -8,6 +8,7 @@ import {
   copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -69,7 +70,95 @@ async function readSnapshot() {
   }
 }
 
+const psQuote = (value) => `'${value.replaceAll("'", "''")}'`;
+const sleep = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+
+/**
+ * 列出可执行文件位于指定目录下的运行中进程（Windows）。
+ * 最常见的情况是从 dist/release/unpack 启动的便携版锁住了发布目录。
+ * 无法查询时返回空数组，后续重命名仍会给出明确的失败信息。
+ */
+function findProcessesUnder(roots) {
+  if (process.platform !== "win32" || roots.length === 0) return [];
+  const script = [
+    `$roots = @(${roots.map(psQuote).join(",")})`,
+    "$result = Get-CimInstance Win32_Process | ForEach-Object {",
+    "  $path = $_.ExecutablePath",
+    "  if (-not $path) { return }",
+    "  foreach ($root in $roots) {",
+    "    if ($path -ieq $root -or $path.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {",
+    "      [pscustomobject]@{ ProcessId = $_.ProcessId; Name = $_.Name; ExecutablePath = $path }",
+    "      break",
+    "    }",
+    "  }",
+    "}",
+    "if ($result) { $result | ConvertTo-Json -Compress }",
+  ].join("\n");
+  try {
+    const output = execFileSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (!output) return [];
+    const parsed = JSON.parse(output);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    return [];
+  }
+}
+
+/** 打包 / 发布前检查目标目录是否被运行中的进程占用；交互确认后强制关闭。 */
+async function ensurePathsUnlocked(roots, purpose) {
+  const processes = findProcessesUnder(roots);
+  if (processes.length === 0) return;
+
+  console.warn("[WARN] 以下运行中的进程占用了打包目标目录：");
+  for (const item of processes) {
+    console.warn(`  PID ${String(item.ProcessId).padEnd(6)} ${item.Name}  ${item.ExecutablePath}`);
+  }
+  console.warn("强制关闭会丢失这些实例中未保存的界面草稿。");
+
+  if (process.env.GIT_EXTENSIONS_FORCE_CLOSE !== "1") {
+    if (!(process.stdin.isTTY && process.stdout.isTTY)) {
+      throw new Error(
+        "无法交互确认是否强制关闭。请先关闭上述进程后重试；" +
+          "或在确认可强制关闭时设置 GIT_EXTENSIONS_FORCE_CLOSE=1。",
+      );
+    }
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    let answer = "";
+    try {
+      answer = await rl.question(`是否强制关闭这些进程并继续${purpose}？[y/N] `);
+    } finally {
+      rl.close();
+    }
+    if (!/^y(es)?$/i.test(answer.trim())) {
+      throw new Error("已取消：请先关闭占用打包目标的进程后重试。");
+    }
+  }
+
+  let closed = 0;
+  for (const item of processes) {
+    try {
+      execFileSync("taskkill", ["/PID", String(item.ProcessId), "/T", "/F"], { stdio: "ignore" });
+      closed += 1;
+    } catch {
+      // 进程可能已退出或需要更高权限；下方复查会给出结果。
+    }
+  }
+  await sleep(800);
+  const remaining = findProcessesUnder(roots);
+  if (remaining.length > 0) {
+    throw new Error(
+      `仍有 ${remaining.length} 个进程未能关闭（可能需要管理员权限）：` +
+        remaining.map((item) => `${item.Name}(${item.ProcessId})`).join("、"),
+    );
+  }
+  console.log(`[OK] 已关闭 ${closed} 个占用进程，继续${purpose}`);
+}
+
 async function createSnapshot() {
+  await ensurePathsUnlocked([outDir, buildRoot], "打包");
   await mkdir(dirname(snapshotFile), { recursive: true });
   const snapshot = await installerSnapshot();
   await writeFile(snapshotFile, `${JSON.stringify(snapshot, null, 2)}\n`);
@@ -192,6 +281,7 @@ async function pathExists(target) {
 }
 
 async function collect() {
+  await ensurePathsUnlocked([outDir], "发布打包产物");
   const version = await readVersion();
   const exeName = await readExeName();
   const installers = await selectFreshInstallers(version);
@@ -208,7 +298,9 @@ async function collect() {
     if (await pathExists(outDir)) await rename(outDir, quarantine);
   } catch (error) {
     throw new Error(
-      `Cannot replace ${outDir}: close any running Git Extensions instance from dist/release, then retry. (${error.code || error.message})`,
+      `无法替换 ${outDir}：请先关闭从该目录运行的 Git Extensions 实例；` +
+        `若已关闭，请检查是否有终端 / 资源管理器停留在该目录，或稍后重试（杀毒软件可能短暂占用文件和目录）。` +
+        `(${error.code || error.message})`,
     );
   }
 
