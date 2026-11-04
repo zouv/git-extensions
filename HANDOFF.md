@@ -2,8 +2,8 @@
 
 ## 状态快照
 
-- 最近更新：2026-11-04。进行中：资源管理器轻量窗口改造（单实例多窗口、文件级 View changelog）；代码与构建已完成，待真实 GUI 验收；当前在 main 开发。
-- 远程已关联并推送：origin = https://github.com/zouv/git-extensions，main + v0.5.0 已推送。
+- 最近更新：2026-11-04。0.6.0 已发布：GitHub Release v0.6.0（https://github.com/zouv/git-extensions/releases/tag/v0.6.0）包含 NSIS / MSI、便携 zip 与 SHA256 校验；当前在 main 开发。
+- 远程已关联并推送：origin = https://github.com/zouv/git-extensions，main、v0.6.0 标签与 Release 已推送。
 
 ## 当前任务
 
@@ -18,17 +18,19 @@
 - [x] Clone / Create / Commit / Changes / Pull 输出 / Push / Stash / Branch / Checkout / Difftool / Patch 轻量 Host。
 - [x] 文件右键菜单、`resolve_explorer_target`、目录 / 文件范围 `scoped_history`、changelog Reset / Rebase / Cherry-pick / Revert。
 - [x] 完整自动回归、文档检查和最终 release 构建。
+- [x] 0.6.0 打包、GitHub Release 上传与产物 SHA256 校验。
 - [ ] 真实 GUI 验收文件菜单、轻量窗口、主窗口复用与关闭 / 冲突反馈。
 
 ## 下一步
 
-1. 用新构建保存一次系统集成设置，验证文件右键菜单与各轻量窗口。
+1. 用 0.6.0 发布版保存一次系统集成设置，验证文件右键菜单与各轻量窗口。
 2. 验证 Open repository / Settings 不新开窗口；关闭最后窗口进程退出；冲突后转主窗口。
 
 ## 验证状态
 
 - 本轮 `test.bat` 已通过：Node 62/62、Rust 91/91（36 + 5 + 21 + 14 + 15），前端生产构建通过；`cargo fmt --check`、`git diff --check` 与 `sh check-docs.sh` 通过。
-- 0.6.0 `package.bat` 已通过：`dist/release/` 已更新为 NSIS 0.6.0（3.08 MiB）、MSI 0.6.0（5.23 MiB）、unpack 目录、便携 zip（4.2 MiB）与 SHA256SUMS；三个产物 SHA256 校验通过。GitHub Release 上传待完成。
+- 0.6.0 `package.bat` 已通过：`dist/release/` 已更新为 NSIS 0.6.0（3.08 MiB）、MSI 0.6.0（5.23 MiB）、unpack 目录、便携 zip（4.2 MiB）与 SHA256SUMS；本地校验通过。
+- GitHub Release v0.6.0 已创建并上传 4 个资产；重新下载后按发布版 SHA256SUMS 校验三个二进制产物全部 OK。`dist/release/` 与 GitHub 资产名存在空格 / 点的差异，Release 内校验文件已按 GitHub 资产名生成。
 - release 实机冒烟：正常启动、Commit、View changelog、Clone、Pull 均以单进程窗口打开；Open repository / Settings 复用主窗口；轻量首启后可再创建主窗口。文件菜单注册与各动作成功 / 失败仍需用户验收。
 
 ## 待验收
