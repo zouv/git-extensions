@@ -3,6 +3,50 @@ use super::{cli, operations::run_blocking, rebase};
 use crate::error::GitResult;
 
 #[tauri::command]
+pub async fn clone_repository(path: String, url: String) -> GitResult<String> {
+    run_blocking(move || cli::clone_repository(path, url)).await
+}
+
+#[tauri::command]
+pub async fn create_repository(path: String) -> GitResult<String> {
+    run_blocking(move || cli::create_repository(path)).await
+}
+
+#[tauri::command]
+pub async fn checkout_revision(path: String, oid: String) -> GitResult<String> {
+    run_blocking(move || cli::checkout_revision(path, oid)).await
+}
+
+#[tauri::command]
+pub async fn open_difftool(path: String, file: String, staged: bool) -> GitResult<String> {
+    run_blocking(move || cli::open_difftool(path, file, staged)).await
+}
+
+#[tauri::command]
+pub async fn apply_patch(
+    path: String,
+    patch_path: String,
+    expected_patch_oid: String,
+) -> GitResult<String> {
+    run_blocking(move || cli::apply_patch(path, patch_path, expected_patch_oid)).await
+}
+
+#[tauri::command]
+pub async fn resolve_revision(path: String, revision: String) -> GitResult<String> {
+    super::operations::run_read(move || cli::resolve_revision(path, revision)).await
+}
+
+#[tauri::command]
+pub async fn list_tracked_files(path: String) -> GitResult<Vec<String>> {
+    super::operations::run_read(move || super::repo::list_tracked_files(path)).await
+}
+
+#[tauri::command]
+pub async fn preview_patch(path: String, patch_path: String) -> GitResult<cli::PatchPreview> {
+    super::operations::run_read(move || cli::preview_patch(path, patch_path)).await
+}
+
+#[tauri::command]
 pub async fn stage_files(path: String, paths: Vec<String>) -> GitResult<String> {
     run_blocking(move || cli::stage_files(path, paths)).await
 }
@@ -44,6 +88,29 @@ pub async fn fetch(path: String, remote: Option<String>) -> GitResult<String> {
 #[tauri::command]
 pub async fn pull(path: String) -> GitResult<String> {
     run_blocking(move || cli::pull(path)).await
+}
+
+#[tauri::command]
+pub async fn pull_with_output(path: String) -> GitResult<cli::CommandOutput> {
+    run_blocking(move || cli::pull_with_output(path)).await
+}
+
+#[tauri::command]
+pub async fn resolve_explorer_target(path: String) -> GitResult<super::repo::ExplorerTarget> {
+    super::operations::run_read(move || super::repo::resolve_explorer_target(path)).await
+}
+
+#[tauri::command]
+pub async fn scoped_history(
+    path: String,
+    file: Option<String>,
+    follow: bool,
+    max_count: Option<u32>,
+) -> GitResult<Vec<super::history::ScopedHistoryEntry>> {
+    super::operations::run_read(move || {
+        super::history::scoped_history(path, file, follow, max_count)
+    })
+    .await
 }
 
 #[tauri::command]

@@ -124,6 +124,32 @@ export interface FileLogEntry {
   subject: string;
 }
 
+export interface ScopedHistoryEntry {
+  oid: string;
+  shortId: string;
+  authorName: string;
+  authorTime: number;
+  subject: string;
+}
+
+export interface ExplorerTarget {
+  repo: RepoInfo;
+  scope: "repository" | "directory" | "file";
+  relativePath: string | null;
+}
+
+export interface CommandOutput {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+}
+
+export type WindowRole = "main" | "explorer";
+export interface WindowBootstrap {
+  kind: WindowRole;
+  requests: LaunchRequest[];
+}
+
 export interface CompareResult {
   baseOid: string;
   targetOid: string;
@@ -192,3 +218,13 @@ export interface RecoveryEntry { oid: string; label: string; time: number; backu
 
 export interface ConflictDraft { file: ConflictFile; result: string; resolveAsDeletion: boolean }
 export interface RebaseDraft { plan: RebasePlan; entries: RebaseTodoEntry[]; dirty: boolean }
+
+export type ExplorerAction = "clone" | "create-repository" | "commit" | "open-repository" | "pull" | "push" | "view-stash" | "view-changes" | "checkout-branch" | "checkout-revision" | "create-branch" | "open-with-difftool" | "file-history" | "reset-file-changes" | "add-files" | "apply-patch" | "settings";
+export type ExplorerMenuPlacement = "top" | "cascade" | "hidden";
+export type ExplorerMenuPlacements = Record<ExplorerAction, ExplorerMenuPlacement>;
+export interface ExplorerMenuItem { action: ExplorerAction; placement: ExplorerMenuPlacement }
+export interface LaunchRequest { action: ExplorerAction; path: string | null }
+export type WorkspaceLaunchAction = Exclude<ExplorerAction, "clone" | "create-repository" | "open-repository" | "settings">;
+export interface WorkspaceLaunchRequest { id: number; action: WorkspaceLaunchAction }
+export interface ExplorerIntegrationInfo { supported: boolean }
+export interface PatchPreview { patchOid: string; summary: string }

@@ -22,6 +22,8 @@ import type {
   RebasePlan,
   PushInfo,
   ResetMode, ResetPreview, ResetResult, RecoveryEntry,
+  ExplorerIntegrationInfo, LaunchRequest, PatchPreview, ExplorerMenuItem,
+  WindowBootstrap, ExplorerTarget, ScopedHistoryEntry, CommandOutput,
 } from "./types";
 
 // 只合并仍在途的同参数读取，不缓存工作区结果。
@@ -73,6 +75,7 @@ export const api = {
   getAheadBehind: (path: string) => invoke<AheadBehind | null>("get_ahead_behind", { path }),
   fetch: (path: string, remote?: string) => writeInvoke<string>("fetch", { path, remote }),
   pull: (path: string) => writeInvoke<string>("pull", { path }),
+  pullWithOutput: (path: string) => writeInvoke<CommandOutput>("pull_with_output", { path }),
   getPushInfo: (path: string) => invoke<PushInfo>("get_push_info", { path }),
   push: (path: string, remote?: string, branch?: string, preview?: PushInfo) =>
     writeInvoke<string>("push", { path, remote, branch, expectedHead: preview?.headOid, expectedBranch: preview?.branchRef }),
@@ -120,6 +123,26 @@ export const api = {
     invoke<RebasePlan>("prepare_interactive_rebase", { path, oid }),
   startInteractiveRebase: (path: string, plan: RebasePlan) =>
     writeInvoke<string>("start_interactive_rebase", { path, plan }),
+  getWindowBootstrap: () => invoke<WindowBootstrap>("get_window_bootstrap", {}),
+  takePendingLaunches: () => invoke<LaunchRequest[]>("take_pending_launches", {}),
+  showCurrentWindow: () => invoke<void>("show_current_window", {}),
+  focusMainWindow: () => invoke<void>("focus_main_window", {}),
+  openRepositoryInMain: (path: string) => invoke<void>("open_repository_in_main", { path }),
+  resolveExplorerTarget: (path: string) => invoke<ExplorerTarget>("resolve_explorer_target", { path }),
+  scopedHistory: (path: string, file: string | null, follow: boolean, maxCount = 500) =>
+    invoke<ScopedHistoryEntry[]>("scoped_history", { path, file, follow, maxCount }),
+  getExplorerIntegrationInfo: () => invoke<ExplorerIntegrationInfo>("get_explorer_integration_info", {}),
+  setExplorerContextMenuEnabled: (enabled: boolean, items: ExplorerMenuItem[], alwaysShowAllCommands: boolean) =>
+    invoke<void>("set_explorer_context_menu_enabled", { enabled, items, alwaysShowAllCommands }),
+  cloneRepository: (path: string, url: string) => writeInvoke<string>("clone_repository", { path, url }),
+  createRepository: (path: string) => writeInvoke<string>("create_repository", { path }),
+  resolveRevision: (path: string, revision: string) => invoke<string>("resolve_revision", { path, revision }),
+  checkoutRevision: (path: string, oid: string) => writeInvoke<string>("checkout_revision", { path, oid }),
+  openDifftool: (path: string, file: string, staged: boolean) => invoke<string>("open_difftool", { path, file, staged }),
+  listTrackedFiles: (path: string) => invoke<string[]>("list_tracked_files", { path }),
+  previewPatch: (path: string, patchPath: string) => invoke<PatchPreview>("preview_patch", { path, patchPath }),
+  applyPatch: (path: string, patchPath: string, expectedPatchOid: string) =>
+    writeInvoke<string>("apply_patch", { path, patchPath, expectedPatchOid }),
 };
 
 let logRequestId = 0;

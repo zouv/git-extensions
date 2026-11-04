@@ -1,14 +1,42 @@
 pub mod error;
 pub mod git;
+pub mod launch;
 pub mod system;
+pub mod window_host;
+
+use std::ffi::OsString;
 
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
+pub fn run(launch_request: Option<launch::LaunchRequest>) {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            let request =
+                launch::parse_launch_request(argv.into_iter().skip(1).map(OsString::from));
+            match request {
+                Ok(Some(request)) => window_host::route_request(app, request),
+                Ok(None) => window_host::queue_main_request(app, None),
+                Err(error) => {
+                    eprintln!("invalid Explorer launch arguments from second instance: {error}")
+                }
+            }
+        }))
+        .manage(window_host::LaunchState::default())
+        .setup(move |app| {
+            window_host::initialize(app.handle(), launch_request);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             git::commands::open_repo,
+            git::commands::clone_repository,
+            git::commands::create_repository,
+            git::commands::resolve_revision,
+            git::commands::checkout_revision,
+            git::commands::open_difftool,
+            git::commands::list_tracked_files,
+            git::commands::preview_patch,
+            git::commands::apply_patch,
             git::commands::get_branches,
             git::commands::get_ahead_behind,
             git::log::start_log,
@@ -34,6 +62,9 @@ pub fn run() {
             git::commands::delete_branch,
             git::commands::fetch,
             git::commands::pull,
+            git::commands::pull_with_output,
+            git::commands::resolve_explorer_target,
+            git::commands::scoped_history,
             git::commands::push,
             git::commands::stash_list,
             git::commands::stash_push,
@@ -63,13 +94,19 @@ pub fn run() {
             git::commands::start_interactive_rebase,
             system::open_path,
             system::reveal_path,
+            system::get_explorer_integration_info,
+            system::set_explorer_context_menu_enabled,
+            window_host::get_window_bootstrap,
+            window_host::take_pending_launches,
+            window_host::show_current_window,
+            window_host::focus_main_window,
+            window_host::open_repository_in_main,
             git::commands::blame_file,
             git::commands::file_log,
         ])
         .on_window_event(|window, event| {
-            // 主窗口销毁后显式结束命令循环，避免 WebView / 后台线程留下无窗口进程。
             if matches!(event, tauri::WindowEvent::Destroyed) {
-                window.app_handle().exit(0);
+                window_host::window_destroyed(window.app_handle(), window.label());
             }
         })
         .run(tauri::generate_context!())

@@ -12,6 +12,24 @@
 
 ## [未发布]
 
+## [0.6.0] - 2026-11-04
+
+### 新增
+- Windows 资源管理器菜单扩展到文件夹、文件夹背景和文件；文件菜单不显示 Clone / Create new repository。应用改为单实例多窗口：轻量动作打开独立任务窗口，Open repository / Settings 聚焦已有主窗口。
+- 新增 Clone、在独立非空目录创建仓库、切换到指定 revision、外部 difftool 及 Apply patch 工作流；补丁先检查并核对文件快照，确认后仅应用到工作区。
+- Commit、View changes、Add files、Reset file changes、Pull、Push、View stash、Checkout / Create branch、Checkout revision、Open with difftool、Apply patch 均提供独立轻量窗口，不再加载主应用的页签、导航和提交图。
+- 新增 Pull 结果窗口，分别显示 stdout / stderr 与退出码；冲突时可转到主窗口继续处理。
+- File history 统一为 View changelog：仓库根查看当前分支，子目录按目录过滤，文件按文件过滤；支持查看提交文件与差异，并可 Reset、Rebase、Cherry-pick 或 Revert。
+
+### 变更
+- 设置弹窗改为固定外框的左侧分类、右侧独立滚动面板，分为常规、界面、系统集成与快捷键；资源管理器菜单默认关闭，系统注册失败时保留设置草稿与错误。
+- 系统集成页可逐项把命令设为顶级、Git Extensions 二级菜单或隐藏，支持把未隐藏命令全部展开到顶级并实时预览菜单结构；保存后主动通知 Explorer 刷新菜单缓存。
+
+### 修复
+- 重启后恢复窗口上次的普通尺寸、位置和最大化状态，并修正显示器变化后的离屏窗口。
+- 修复 Windows 资源管理器中 Git Extensions 项无法展开二级菜单的问题；重新保存启用配置会迁移旧注册结构，禁用会清理旧菜单项。
+- 修复旧菜单使用 `(默认值)` 保存命令标题时，系统集成保存报「拒绝访问」：迁移现在清理旧标签，并在额外数据或子键仍需保留时留下空祖先键，不再删除非空父键。
+
 ---
 
 ## [0.5.0] - 2026-11-03

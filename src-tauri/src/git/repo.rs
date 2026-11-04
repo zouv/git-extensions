@@ -1,7 +1,9 @@
+use std::path::Path;
+
 use serde::Serialize;
 
 use super::open;
-use crate::error::GitResult;
+use crate::error::{GitError, GitResult};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,8 +54,35 @@ pub fn worktree_list(path: String) -> GitResult<Vec<WorktreeInfo>> {
     Ok(worktrees)
 }
 
+/// index 中的普通 tracked 文件；排除 gitlink 与冲突 stage 重复项。
+pub fn list_tracked_files(path: String) -> GitResult<Vec<String>> {
+    let repo = open(&path)?;
+    let index = repo.index()?;
+    let mut files: Vec<String> = index
+        .iter()
+        .filter(|entry| {
+            ((entry.flags >> 12) & 0x3) == 0
+                && matches!(
+                    entry.mode,
+                    mode if mode == u32::from(git2::FileMode::Blob)
+                        || mode == u32::from(git2::FileMode::BlobGroupWritable)
+                        || mode == u32::from(git2::FileMode::BlobExecutable)
+                        || mode == u32::from(git2::FileMode::Link)
+                )
+        })
+        .map(|entry| String::from_utf8_lossy(&entry.path).replace('\\', "/"))
+        .collect();
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
 pub fn open_repo(path: String) -> GitResult<RepoInfo> {
     let repo = open(&path)?;
+    repo_info(&repo)
+}
+
+fn repo_info(repo: &git2::Repository) -> GitResult<RepoInfo> {
     let workdir = repo
         .workdir()
         .map(|p| p.to_path_buf())
@@ -76,6 +105,74 @@ pub fn open_repo(path: String) -> GitResult<RepoInfo> {
             .and_then(|h| h.target())
             .map(|oid| oid.to_string()),
         is_empty: repo.is_empty()?,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerTarget {
+    pub repo: RepoInfo,
+    /// repository | directory | file
+    pub scope: String,
+    /// 仓库根下的 POSIX 相对路径；仓库根自身为 None。
+    pub relative_path: Option<String>,
+}
+
+/// Explorer 传入的可能是仓库子目录或普通文件。先找到实际工作区，再保留
+/// 用户选中的范围，避免前端只拿到仓库根后丢失“当前目录/当前文件”语义。
+pub fn resolve_explorer_target(path: String) -> GitResult<ExplorerTarget> {
+    if path.trim().is_empty() || path.contains('\0') {
+        return Err(GitError::InvalidInput("Explorer path is empty".into()));
+    }
+    let selected = Path::new(&path).canonicalize().map_err(|error| {
+        GitError::InvalidInput(format!("cannot resolve Explorer path {path}: {error}"))
+    })?;
+    let metadata = std::fs::metadata(&selected)?;
+    let discovery_root = if metadata.is_dir() {
+        selected.as_path()
+    } else if metadata.is_file() {
+        selected
+            .parent()
+            .ok_or_else(|| GitError::InvalidInput("Explorer file has no parent".into()))?
+    } else {
+        return Err(GitError::InvalidInput(
+            "Explorer path is not a regular file or directory".into(),
+        ));
+    };
+    let repo = open(&discovery_root.to_string_lossy())?;
+    let root = repo
+        .workdir()
+        .ok_or_else(|| GitError::InvalidInput("bare repository has no worktree".into()))?
+        .canonicalize()?;
+    let git_dir = repo.path().canonicalize()?;
+    if !selected.starts_with(&root) || selected.starts_with(&git_dir) {
+        return Err(GitError::InvalidInput(
+            "Explorer path is outside the repository worktree".into(),
+        ));
+    }
+    let info = repo_info(&repo)?;
+    let relative = selected
+        .strip_prefix(&root)
+        .ok()
+        .filter(|path| !path.as_os_str().is_empty());
+    let relative_path = relative
+        .map(|path| {
+            path.to_str()
+                .map(|path| path.replace('\\', "/"))
+                .ok_or_else(|| GitError::InvalidInput("Explorer path is not valid Unicode".into()))
+        })
+        .transpose()?;
+    let scope = if metadata.is_file() {
+        "file"
+    } else if relative_path.is_some() {
+        "directory"
+    } else {
+        "repository"
+    };
+    Ok(ExplorerTarget {
+        repo: info,
+        scope: scope.into(),
+        relative_path,
     })
 }
 

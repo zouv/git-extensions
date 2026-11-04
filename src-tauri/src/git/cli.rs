@@ -1,4 +1,6 @@
 use std::ffi::OsStr;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use git2::RepositoryState;
@@ -6,7 +8,7 @@ use serde::Serialize;
 
 use super::{
     open,
-    operations::{acquire_write, WriteLease},
+    operations::{acquire_target_write, acquire_write, WriteLease},
     resolve_worktree_path, validate_relative_path,
 };
 use crate::error::{GitError, GitResult};
@@ -18,40 +20,106 @@ pub(crate) fn run_git(repo_path: &str, args: &[String]) -> GitResult<String> {
     run_git_with_env(repo_path, args, &[])
 }
 
-/// 与 run_git 相同，但允许为 Git 及其 hooks 设置受控环境变量。
-pub(crate) fn run_git_with_env(
-    repo_path: &str,
-    args: &[String],
-    envs: &[(&str, &OsStr)],
-) -> GitResult<String> {
+fn git_command(repo_path: &str, args: &[String], envs: &[(&str, &OsStr)]) -> Command {
     let mut cmd = Command::new("git");
     cmd.arg("-C")
         .arg(repo_path)
         // 所有用户文件参数都按字面值解释，禁用 glob 和 pathspec magic。
         .arg("--literal-pathspecs")
         .args(args)
-        .envs(envs.iter().copied())
-        .stdin(Stdio::null());
+        .envs(envs.iter().copied());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    let output = cmd.output()?;
+    cmd
+}
+
+fn command_failure_details(output: &std::process::Output) -> String {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    match (stdout.trim().is_empty(), stderr.trim().is_empty()) {
+        (false, false) => format!("{}\n{}", stdout.trim(), stderr.trim()),
+        (false, true) => stdout.trim().to_string(),
+        (true, false) => stderr.trim().to_string(),
+        (true, true) => format!("git exited with status {}", output.status),
+    }
+}
+
+fn git_output(output: std::process::Output) -> GitResult<String> {
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let details = match (stdout.trim().is_empty(), stderr.trim().is_empty()) {
-            (false, false) => format!("{}\n{}", stdout.trim(), stderr.trim()),
-            (false, true) => stdout.trim().to_string(),
-            (true, false) => stderr.trim().to_string(),
-            (true, true) => format!("git exited with status {}", output.status),
-        };
-        Err(GitError::Cli(details))
+        Err(GitError::Cli(command_failure_details(&output)))
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: Option<i32>,
+}
+
+fn capture_git(repo_path: &str, args: &[String]) -> GitResult<CommandOutput> {
+    let output = git_command(repo_path, args, &[])
+        .stdin(Stdio::null())
+        .output()?;
+    if !output.status.success() {
+        return Err(GitError::Cli(command_failure_details(&output)));
+    }
+    Ok(CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        exit_code: output.status.code(),
+    })
+}
+
+/// 与 run_git 相同，但允许为 Git 及其 hooks 设置受控环境变量。
+pub(crate) fn run_git_with_env(
+    repo_path: &str,
+    args: &[String],
+    envs: &[(&str, &OsStr)],
+) -> GitResult<String> {
+    let output = git_command(repo_path, args, envs)
+        .stdin(Stdio::null())
+        .output()?;
+    git_output(output)
+}
+
+/// 将确定的字节写入 Git stdin；并发写出 stdout/stderr，避免大 patch 管道互等。
+pub(crate) fn run_git_with_stdin(
+    repo_path: &str,
+    args: &[String],
+    input: &[u8],
+) -> GitResult<String> {
+    let mut child = git_command(repo_path, args, &[])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| GitError::Cli("cannot open git stdin".into()))?;
+    let (output, written) = std::thread::scope(|scope| {
+        let writer = scope.spawn(move || stdin.write_all(input));
+        let output = child.wait_with_output();
+        let written = writer.join();
+        (output, written)
+    });
+    let output = output?;
+    match written {
+        Ok(Ok(())) => {}
+        // Git 校验失败提前退出时，BrokenPipe 的真实原因在 stderr 中。
+        Ok(Err(error)) if error.kind() == std::io::ErrorKind::BrokenPipe => {}
+        Ok(Err(error)) => return Err(error.into()),
+        Err(_) => return Err(GitError::Cli("git stdin writer failed".into())),
+    }
+    git_output(output)
 }
 
 /// 分支/标签名与 revision 是不同类型的输入，不能直接当 CLI 选项拼接。
@@ -78,6 +146,252 @@ fn commit_argument(repo: &git2::Repository, value: &str) -> GitResult<String> {
         .peel_to_commit()?
         .id()
         .to_string())
+}
+
+struct NewRepositoryTarget {
+    parent: PathBuf,
+    target: PathBuf,
+}
+
+fn validate_new_target(path: &str, require_empty: bool) -> GitResult<NewRepositoryTarget> {
+    if path.trim().is_empty() || path.contains('\0') {
+        return Err(GitError::InvalidInput("target path is empty".into()));
+    }
+    let target = Path::new(path);
+    if !target.is_absolute() {
+        return Err(GitError::InvalidInput(
+            "target path must be absolute".into(),
+        ));
+    }
+    let name = target
+        .file_name()
+        .ok_or_else(|| GitError::InvalidInput("invalid target path".into()))?;
+    let parent = target
+        .parent()
+        .ok_or_else(|| GitError::InvalidInput("target parent directory is missing".into()))?
+        .canonicalize()?;
+    if !parent.is_dir() {
+        return Err(GitError::InvalidInput(
+            "target parent is not a directory".into(),
+        ));
+    }
+    let target = match std::fs::symlink_metadata(target) {
+        Ok(metadata) => {
+            if !metadata.is_dir() {
+                return Err(GitError::InvalidInput(
+                    "clone/init target must be a directory".into(),
+                ));
+            }
+            if require_empty && std::fs::read_dir(target)?.next().is_some() {
+                return Err(GitError::InvalidInput(
+                    "clone target directory is not empty".into(),
+                ));
+            }
+            target.canonicalize()?
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => parent.join(name),
+        Err(error) => return Err(error.into()),
+    };
+    Ok(NewRepositoryTarget { parent, target })
+}
+
+fn path_string(path: &Path) -> String {
+    let value = path.to_string_lossy().into_owned();
+    #[cfg(windows)]
+    {
+        // Git for Windows 不接受 Rust canonicalize 返回的 verbatim 工作区路径。
+        if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{rest}");
+        }
+        if let Some(rest) = value.strip_prefix(r"\\?\") {
+            return rest.to_string();
+        }
+    }
+    value
+}
+
+pub fn clone_repository(path: String, url: String) -> GitResult<String> {
+    let _write = acquire_target_write(&path)?;
+    if url.trim().is_empty() || url.starts_with('-') || url.contains(['\0', '\n', '\r']) {
+        return Err(GitError::InvalidInput("invalid clone URL".into()));
+    }
+    let target = validate_new_target(&path, true)?;
+    run_git(
+        &path_string(&target.parent),
+        &[
+            "clone".into(),
+            "--".into(),
+            url,
+            path_string(&target.target),
+        ],
+    )?;
+    Ok(path_string(&target.target.canonicalize()?))
+}
+
+pub fn create_repository(path: String) -> GitResult<String> {
+    let _write = acquire_target_write(&path)?;
+    let target = validate_new_target(&path, false)?;
+    let discovery_start = if target.target.exists() {
+        &target.target
+    } else {
+        &target.parent
+    };
+    match git2::Repository::discover(discovery_start) {
+        Ok(_) => {
+            return Err(GitError::InvalidInput(
+                "target is already inside a Git repository".into(),
+            ))
+        }
+        Err(error) if error.code() == git2::ErrorCode::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    run_git(
+        &path_string(&target.parent),
+        &["init".into(), "--".into(), path_string(&target.target)],
+    )?;
+    Ok(path_string(&target.target.canonicalize()?))
+}
+
+pub fn resolve_revision(path: String, revision: String) -> GitResult<String> {
+    commit_argument(&open(&path)?, &revision)
+}
+
+fn full_commit_oid(repo: &git2::Repository, value: &str) -> GitResult<String> {
+    if value.len() != 40 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(GitError::InvalidInput(
+            "checkout requires a full commit OID".into(),
+        ));
+    }
+    let oid = git2::Oid::from_str(value)
+        .map_err(|_| GitError::InvalidInput("invalid full commit OID".into()))?;
+    repo.find_commit(oid)?;
+    Ok(oid.to_string())
+}
+
+pub fn checkout_revision(path: String, oid: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let repo = open(&path)?;
+    let oid = full_commit_oid(&repo, &oid)?;
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| GitError::InvalidInput("bare repository has no worktree".into()))?;
+    run_git(
+        &path_string(workdir),
+        &["switch".into(), "--detach".into(), "--".into(), oid],
+    )
+}
+
+pub fn open_difftool(path: String, file: String, staged: bool) -> GitResult<String> {
+    let file = validate_relative_path(&file)?;
+    let repo = open(&path)?;
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| GitError::InvalidInput("bare repository has no worktree".into()))?;
+    let mut args = vec!["difftool".into(), "--no-prompt".into()];
+    if staged {
+        args.push("--cached".into());
+    }
+    args.push("--".into());
+    args.push(file.to_string_lossy().replace('\\', "/"));
+    run_git(&path_string(workdir), &args)
+}
+
+const MAX_PATCH_BYTES: u64 = 16 * 1024 * 1024;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchPreview {
+    pub patch_oid: String,
+    pub summary: String,
+}
+
+fn read_patch_file(patch_path: &str) -> GitResult<Vec<u8>> {
+    if patch_path.trim().is_empty() || patch_path.contains('\0') {
+        return Err(GitError::InvalidInput("patch path is empty".into()));
+    }
+    let path = Path::new(patch_path);
+    if !path.is_absolute() {
+        return Err(GitError::InvalidInput(
+            "patch path must be an absolute user-selected file".into(),
+        ));
+    }
+    let file = std::fs::File::open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(GitError::InvalidInput(
+            "patch path must select a regular file".into(),
+        ));
+    }
+    if metadata.len() > MAX_PATCH_BYTES {
+        return Err(GitError::InvalidInput(
+            "patch file exceeds 16 MiB limit".into(),
+        ));
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(MAX_PATCH_BYTES + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_PATCH_BYTES {
+        return Err(GitError::InvalidInput(
+            "patch file exceeds 16 MiB limit".into(),
+        ));
+    }
+    Ok(bytes)
+}
+
+fn hash_patch(repo_path: &str, bytes: &[u8]) -> GitResult<String> {
+    let output = run_git_with_stdin(repo_path, &["hash-object".into(), "--stdin".into()], bytes)?;
+    let oid = output.trim();
+    if oid.len() != 40 || git2::Oid::from_str(oid).is_err() {
+        return Err(GitError::Cli("git returned an invalid patch OID".into()));
+    }
+    Ok(oid.to_string())
+}
+
+fn check_patch(repo_path: &str, bytes: &[u8]) -> GitResult<()> {
+    run_git_with_stdin(
+        repo_path,
+        &["apply".into(), "--check".into(), "-".into()],
+        bytes,
+    )?;
+    Ok(())
+}
+
+pub fn preview_patch(path: String, patch_path: String) -> GitResult<PatchPreview> {
+    let repo = open(&path)?;
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| GitError::InvalidInput("bare repository has no worktree".into()))?;
+    let repo_path = path_string(workdir);
+    let bytes = read_patch_file(&patch_path)?;
+    let patch_oid = hash_patch(&repo_path, &bytes)?;
+    check_patch(&repo_path, &bytes)?;
+    let summary = run_git_with_stdin(
+        &repo_path,
+        &["apply".into(), "--stat".into(), "-".into()],
+        &bytes,
+    )?;
+    Ok(PatchPreview { patch_oid, summary })
+}
+
+pub fn apply_patch(
+    path: String,
+    patch_path: String,
+    expected_patch_oid: String,
+) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let repo = open(&path)?;
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| GitError::InvalidInput("bare repository has no worktree".into()))?;
+    let repo_path = path_string(workdir);
+    let bytes = read_patch_file(&patch_path)?;
+    let actual_oid = hash_patch(&repo_path, &bytes)?;
+    if actual_oid != expected_patch_oid {
+        return Err(GitError::InvalidInput(
+            "patch file changed; preview it again before applying".into(),
+        ));
+    }
+    check_patch(&repo_path, &bytes)?;
+    run_git_with_stdin(&repo_path, &["apply".into(), "-".into()], &bytes)
 }
 
 fn local_branch(repo: &git2::Repository) -> GitResult<String> {
@@ -308,6 +622,12 @@ pub fn fetch(path: String, remote: Option<String>) -> GitResult<String> {
 pub fn pull(path: String) -> GitResult<String> {
     let _write = acquire_write(&path)?;
     run_git(&path, &["pull".to_string()])
+}
+
+/// Pull 的工作流窗口需要分别展示 stdout / stderr；失败仍沿用统一原始错误。
+pub fn pull_with_output(path: String) -> GitResult<CommandOutput> {
+    let _write = acquire_write(&path)?;
+    capture_git(&path, &["pull".to_string()])
 }
 
 pub fn push(

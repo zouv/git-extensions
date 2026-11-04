@@ -84,6 +84,8 @@ test("全部正式写 API 都经过共享调度", async () => {
     ["createTag", [path, "v1"]], ["deleteTag", [path, "v1"]], ["submoduleUpdate", [path]],
     ["saveResolvedFile", [path, "a", "resolved"]], ["continueOperation", [path]], ["abortOperation", [path]],
     ["discardFiles", [path, ["a"]]], ["deleteUntrackedFiles", [path, ["a"]]], ["startInteractiveRebase", [path, { branch: "refs/heads/main", entries: [] }]],
+    ["cloneRepository", [path, "https://example.com/repo.git"]], ["createRepository", [path]],
+    ["checkoutRevision", [path, "abc"]], ["applyPatch", [path, "change.patch", "patch-oid"]],
   ];
   for (const [name, args] of writes) {
     const gate = deferred(); let invocations = 0;
@@ -93,6 +95,36 @@ test("全部正式写 API 都经过共享调度", async () => {
     await assert.rejects(api.commit(path, "duplicate"), /正在执行/);
     assert.equal(invocations, 1, name);
     gate.resolve(); await pending; assert.equal(getRepoOperation(path), null, name);
+  }
+});
+
+test("新增资源管理器能力完整传递 IPC 命令与参数", async () => {
+  const received = [];
+  setInvoke((command, args) => { received.push([command, args]); return Promise.resolve(null); });
+  const cases = [
+    [() => api.getWindowBootstrap(), "get_window_bootstrap", {}],
+    [() => api.takePendingLaunches(), "take_pending_launches", {}],
+    [() => api.showCurrentWindow(), "show_current_window", {}],
+    [() => api.focusMainWindow(), "focus_main_window", {}],
+    [() => api.openRepositoryInMain("C:\\repo"), "open_repository_in_main", { path: "C:\\repo" }],
+    [() => api.resolveExplorerTarget("C:\\repo\\dir\\file.txt"), "resolve_explorer_target", { path: "C:\\repo\\dir\\file.txt" }],
+    [() => api.scopedHistory("C:\\repo", "dir", false), "scoped_history", { path: "C:\\repo", file: "dir", follow: false, maxCount: 500 }],
+    [() => api.pullWithOutput("C:\\repo"), "pull_with_output", { path: "C:\\repo" }],
+    [() => api.getExplorerIntegrationInfo(), "get_explorer_integration_info", {}],
+    [() => api.setExplorerContextMenuEnabled(true, [{ action: "pull", placement: "top" }], true), "set_explorer_context_menu_enabled", { enabled: true, items: [{ action: "pull", placement: "top" }], alwaysShowAllCommands: true }],
+    [() => api.cloneRepository("C:\\parent\\repo", "https://example.com/repo.git"), "clone_repository", { path: "C:\\parent\\repo", url: "https://example.com/repo.git" }],
+    [() => api.createRepository("C:\\repo"), "create_repository", { path: "C:\\repo" }],
+    [() => api.resolveRevision("C:\\repo", "HEAD~1"), "resolve_revision", { path: "C:\\repo", revision: "HEAD~1" }],
+    [() => api.checkoutRevision("C:\\repo", "abc"), "checkout_revision", { path: "C:\\repo", oid: "abc" }],
+    [() => api.openDifftool("C:\\repo", "dir/a.txt", true), "open_difftool", { path: "C:\\repo", file: "dir/a.txt", staged: true }],
+    [() => api.listTrackedFiles("C:\\repo"), "list_tracked_files", { path: "C:\\repo" }],
+    [() => api.previewPatch("C:\\repo", "C:\\change.patch"), "preview_patch", { path: "C:\\repo", patchPath: "C:\\change.patch" }],
+    [() => api.applyPatch("C:\\repo", "C:\\change.patch", "patch-oid"), "apply_patch", { path: "C:\\repo", patchPath: "C:\\change.patch", expectedPatchOid: "patch-oid" }],
+  ];
+  for (const [invokeApi, command, args] of cases) {
+    const before = received.length;
+    await invokeApi();
+    assert.deepEqual(received[before], [command, args]);
   }
 });
 

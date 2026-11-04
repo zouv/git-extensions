@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { availableMonitors, getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
+import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 import { api } from "./api";
 import { getRepoOperation } from "./repoOperations";
-import type { RepoInfo } from "./types";
+import type { RepoInfo, LaunchRequest, WorkspaceLaunchRequest } from "./types";
+import { workspaceLaunch as makeWorkspaceLaunch } from "./launchAction";
+import { explorerMenuItems } from "./explorerMenu";
 import RepoWorkspace from "./RepoWorkspace";
 import TitleBar from "./components/TitleBar";
 import type { SessionMeta } from "./components/RepositoryTabs";
@@ -13,6 +17,8 @@ import Dialog from "./ui/Dialog";
 import Icon from "./ui/Icon";
 import { ConfirmProvider, useConfirm } from "./ui/Confirm";
 import { loadSettings, saveSettings } from "./settings";
+import { fitWindowState, loadWindowState, saveWindowState } from "./windowState";
+import type { WindowState } from "./windowState";
 import { loadOpenRepos, pickActivePath, restoreCandidates, saveOpenRepos } from "./openRepos";
 import type { RepoGroupConfig } from "./repoGroups";
 import {
@@ -20,6 +26,8 @@ import {
   saveRepoGroups, setRepoAlias, setRepoGroup, visibleRepos,
 } from "./repoGroups";
 import RepoGroupsDialog from "./components/RepoGroupsDialog";
+import CloneDialog from "./components/CloneDialog";
+import CreateRepositoryDialog from "./components/CreateRepositoryDialog";
 
 const LAST_REPO_KEY = "git-extensions.lastRepo";
 const RECENT_REPOS_KEY = "git-extensions.recentRepos.v2";
@@ -38,12 +46,17 @@ function recentRepos(): string[] {
   } catch { return []; }
 }
 
-function AppShell() {
+function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] }) {
   const [repos, setRepos] = useState<RepoInfo[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
   const [recent, setRecent] = useState<string[]>(() => TEST_REPO ? [] : recentRepos());
   const [settings, setSettings] = useState(loadSettings);
   const [showSettings, setShowSettings] = useState(false);
+  const [explorerIntegrationSupported, setExplorerIntegrationSupported] = useState(false);
+  const [cloneParent, setCloneParent] = useState<string | null>(null);
+  const [createRepositoryPath, setCreateRepositoryPath] = useState<string | null>(null);
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
+  const [workspaceLaunch, setWorkspaceLaunch] = useState<(WorkspaceLaunchRequest & { path: string }) | null>(null);
   const [showOpen, setShowOpen] = useState(false);
   const [openPath, setOpenPath] = useState("");
   const [openInsertAfter, setOpenInsertAfter] = useState<string | null>(null);
@@ -62,9 +75,93 @@ function AppShell() {
   const [mountedPaths, setMountedPaths] = useState<string[]>([]);
   const noticeId = useRef(0);
   const restoreStartedRef = useRef(false);
+  const launchQueueRef = useRef<LaunchRequest[]>(initialLaunches);
+  const launchProcessingRef = useRef(false);
+  const [launchTick, setLaunchTick] = useState(0);
+  const launchActionIdRef = useRef(0);
   const activePathRef = useRef<string | null>(null);
   activePathRef.current = activePath;
   const confirm = useConfirm();
+  const windowStateRef = useRef<WindowState | null>(null);
+  const windowReadyRef = useRef<Promise<void> | null>(null);
+  const windowSaveTimerRef = useRef<number | null>(null);
+
+  const flushWindowState = useCallback(async () => {
+    if (windowSaveTimerRef.current !== null) {
+      window.clearTimeout(windowSaveTimerRef.current);
+      windowSaveTimerRef.current = null;
+    }
+    if (TEST_REPO) return;
+    const appWindow = getCurrentWindow();
+    if (await appWindow.isMinimized()) return;
+    if (await appWindow.isMaximized()) {
+      if (windowStateRef.current) {
+        windowStateRef.current = { ...windowStateRef.current, maximized: true };
+        saveWindowState(windowStateRef.current);
+      }
+      return;
+    }
+    const [size, position] = await Promise.all([appWindow.innerSize(), appWindow.outerPosition()]);
+    windowStateRef.current = {
+      x: position.x, y: position.y, width: size.width, height: size.height, maximized: false,
+    };
+    saveWindowState(windowStateRef.current);
+  }, []);
+
+  // 原生窗口先隐藏，恢复普通 bounds 后再最大化，避免启动时跳回默认尺寸。
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+    if (!windowReadyRef.current) {
+      windowReadyRef.current = (async () => {
+        try {
+          const saved = TEST_REPO ? null : loadWindowState();
+          if (saved) {
+            const monitors = await availableMonitors();
+            const fitted = fitWindowState(saved, monitors.map((monitor) => ({
+              x: monitor.workArea.position.x, y: monitor.workArea.position.y,
+              width: monitor.workArea.size.width, height: monitor.workArea.size.height,
+            })));
+            windowStateRef.current = fitted;
+            await appWindow.setSize(new PhysicalSize(fitted.width, fitted.height));
+            await appWindow.setPosition(new PhysicalPosition(fitted.x, fitted.y));
+            if (fitted.maximized) await appWindow.maximize();
+          } else {
+            const [size, position] = await Promise.all([appWindow.innerSize(), appWindow.outerPosition()]);
+            windowStateRef.current = {
+              x: position.x, y: position.y, width: size.width, height: size.height, maximized: false,
+            };
+          }
+        } catch {
+          // 几何恢复失败不应阻止应用启动。
+        } finally {
+          try { await appWindow.show(); } catch { /* 保留现有窗口错误处理 */ }
+        }
+      })();
+    }
+
+    let disposed = false;
+    let unlisteners: (() => void)[] = [];
+    const scheduleSave = () => {
+      if (windowSaveTimerRef.current !== null) window.clearTimeout(windowSaveTimerRef.current);
+      windowSaveTimerRef.current = window.setTimeout(() => {
+        void flushWindowState().catch(() => { /* 下次移动、缩放或关闭时重试 */ });
+      }, 200);
+    };
+    void windowReadyRef.current.then(async () => {
+      if (disposed) return;
+      const listeners = await Promise.all([appWindow.onMoved(scheduleSave), appWindow.onResized(scheduleSave)]);
+      if (disposed) listeners.forEach((unlisten) => unlisten());
+      else unlisteners = listeners;
+    }).catch(() => { /* 不阻断仓库界面 */ });
+    return () => {
+      disposed = true;
+      unlisteners.forEach((unlisten) => unlisten());
+      if (windowSaveTimerRef.current !== null) {
+        window.clearTimeout(windowSaveTimerRef.current);
+        windowSaveTimerRef.current = null;
+      }
+    };
+  }, [flushWindowState]);
 
   useEffect(() => { if (!TEST_REPO) saveSettings(settings); }, [settings]);
   useEffect(() => { if (!TEST_REPO) saveRepoGroups(repoGroups); }, [repoGroups]);
@@ -80,9 +177,9 @@ function AppShell() {
     if (kind === "success") window.setTimeout(() => setNotices((prev) => prev.filter((n) => n.id !== id)), 4000);
   }, []);
 
-  const openRepo = useCallback(async (path: string) => {
+  const openRepo = useCallback(async (path: string): Promise<RepoInfo | null> => {
     const trimmed = path.trim();
-    if (!trimmed || opening) return;
+    if (!trimmed || opening) return null;
     const insertAfter = openInsertAfter;
     setOpening(true);
     try {
@@ -119,8 +216,10 @@ function AppShell() {
       setShowOpen(false);
       setOpenPath("");
       setOpenInsertAfter(null);
+      return info;
     } catch (e) {
       notify(trimmed, "error", "无法打开仓库", String(e), "打开仓库");
+      return null;
     } finally { setOpening(false); }
   }, [notify, opening, openInsertAfter, repos]);
 
@@ -135,6 +234,81 @@ function AppShell() {
     setOpenPath("");
     setShowOpen(true);
   }, []);
+
+  useEffect(() => {
+    if (TEST_REPO) return;
+    let alive = true;
+    api.getExplorerIntegrationInfo().then((info) => { if (alive) setExplorerIntegrationSupported(info.supported); })
+      .catch((error) => notify("", "error", "无法读取系统集成能力", String(error)));
+    return () => { alive = false; };
+  }, [notify]);
+
+  useEffect(() => {
+    let alive = true;
+    let unlisten: (() => void) | null = null;
+    const drain = async () => {
+      try {
+        const next = await api.takePendingLaunches();
+        if (!alive || next.length === 0) return;
+        launchQueueRef.current.push(...next);
+        setLaunchTick((value) => value + 1);
+      } catch (error) {
+        if (alive) notify("", "error", "无法读取主窗口启动请求", String(error));
+      }
+    };
+    void (async () => {
+      const dispose = await listen("main-launch-available", () => { void drain(); });
+      if (!alive) { dispose(); return; }
+      unlisten = dispose;
+      // 先订阅再排空，避免请求恰好落在“排空后、订阅前”的窗口期。
+      await drain();
+    })().catch((error) => {
+      if (alive) notify("", "error", "无法订阅主窗口启动请求", String(error));
+    });
+    return () => { alive = false; unlisten?.(); };
+  }, [notify]);
+
+  useEffect(() => {
+    if (!sessionRestored || opening || launchProcessingRef.current) return;
+    const request = launchQueueRef.current.shift();
+    if (!request) return;
+    launchProcessingRef.current = true;
+    setLaunchTick((value) => value + 1);
+    void (async () => {
+      if (request.action === "settings") { setShowSettings(true); return; }
+      if (request.action === "clone") { setCloneParent(request.path); return; }
+      if (request.action === "create-repository") { setCreateRepositoryPath(request.path); return; }
+      if (!request.path) throw new Error("启动动作缺少目录参数");
+      const info = await openRepo(request.path);
+      if (!info) {
+        if (request.action === "open-repository") beginOpen(request.path);
+        return;
+      }
+      const launch = makeWorkspaceLaunch(request, info.path, ++launchActionIdRef.current);
+      if (launch) setWorkspaceLaunch(launch);
+    })().catch((error) => notify("", "error", "无法处理资源管理器启动动作", String(error)))
+      .finally(() => {
+        launchProcessingRef.current = false;
+        setLaunchTick((value) => value + 1);
+      });
+  }, [beginOpen, notify, openRepo, opening, sessionRestored, launchTick]);
+
+  const saveSettingsDialog = useCallback(async (next: typeof settings) => {
+    const explorerChanged = next.explorerContextMenuEnabled !== settings.explorerContextMenuEnabled
+      || next.explorerAlwaysShowAllCommands !== settings.explorerAlwaysShowAllCommands
+      || JSON.stringify(next.explorerContextMenuPlacements) !== JSON.stringify(settings.explorerContextMenuPlacements);
+    if ((next.explorerContextMenuEnabled || settings.explorerContextMenuEnabled)
+      && (next.explorerContextMenuEnabled || explorerChanged)) {
+      if (TEST_REPO) throw new Error("测试模式不允许修改资源管理器菜单");
+      await api.setExplorerContextMenuEnabled(
+        next.explorerContextMenuEnabled,
+        explorerMenuItems(next.explorerContextMenuPlacements),
+        next.explorerAlwaysShowAllCommands,
+      );
+    }
+    setSettings(next);
+    setShowSettings(false);
+  }, [settings]);
 
   // 启动恢复上次打开的全部仓库页签；只取 RepoInfo，Git 数据等页签激活后再加载。
   useEffect(() => {
@@ -313,12 +487,13 @@ function AppShell() {
   const closeWindow = useCallback(async () => {
     const entries = Object.entries(metaRef.current);
     const anyDirty = entries.some(([, m]) => m.dirty);
-    const anyBusy = entries.some(([, m]) => m.busy);
+    const anyBusy = lifecycleBusy || entries.some(([, m]) => m.busy);
     if (anyBusy && !anyDirty) { notify(activePath ?? "", "info", "有仓库操作进行中，完成后才能关闭窗口"); return; }
     if (anyDirty || anyBusy) {
       const ok = await confirm({ title: "关闭应用？", body: "有仓库存在未保存草稿或正在执行的操作。关闭窗口会丢弃界面草稿（不会删除仓库），进行中的 Git 写操作可能在后台完成。", confirmLabel: "退出", danger: true });
       if (!ok) return;
     }
+    try { await flushWindowState(); } catch { /* 状态保存失败不阻止退出 */ }
     allowCloseRef.current = true;
     try {
       await getCurrentWindow().close();
@@ -326,16 +501,14 @@ function AppShell() {
       allowCloseRef.current = false;
       notify(activePath ?? "", "error", "无法关闭窗口", String(error));
     }
-  }, [activePath, confirm, notify]);
+  }, [activePath, confirm, notify, lifecycleBusy, flushWindowState]);
 
   // 兜底：系统途径关窗（Alt+F4 等）同样拦截；确认后放行避免循环。
   useEffect(() => {
     let guarding = false;
     const unlisten = getCurrentWindow().onCloseRequested((event) => {
       if (allowCloseRef.current) return;
-      const entries = Object.entries(metaRef.current);
-      const needConfirm = entries.some(([, m]) => m.dirty || m.busy);
-      if (!needConfirm) return;
+      // Tauri 会在异步处理器结束后自动 destroy；所有系统关闭都先拦截再统一保存状态。
       event.preventDefault();
       if (guarding) return;
       guarding = true;
@@ -375,6 +548,8 @@ function AppShell() {
             onSettings={() => setShowSettings(true)}
             onNotify={(kind, message, details) => notify(repo.path, kind, message, details, repo.name)}
             onMeta={(value) => updateMeta(repo.path, value)}
+            launchAction={workspaceLaunch?.path === repo.path ? workspaceLaunch : null}
+            onLaunchActionConsumed={() => setWorkspaceLaunch((current) => current?.path === repo.path ? null : current)}
           />
         </div>
       ))}
@@ -403,12 +578,14 @@ function AppShell() {
         <label className="field-label">仓库路径<input data-autofocus className="repo-path-input" placeholder="C:\path\to\project" value={openPath} onChange={(e) => setOpenPath(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void openRepo(openPath); }} /></label>
         {recent.length > 0 && <div className="recent-repos"><div className="section-label">最近打开</div>{recent.map((path) => <button key={path} onClick={() => setOpenPath(path)} title={path}><Icon name="history" /><span>{path}</span></button>)}</div>}
       </Dialog>}
-      {showSettings && <SettingsDialog settings={settings} onSave={(next) => { setSettings(next); setShowSettings(false); }} onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsDialog settings={settings} explorerIntegrationSupported={!TEST_REPO && explorerIntegrationSupported} onSave={saveSettingsDialog} onClose={() => setShowSettings(false)} />}
+      {cloneParent !== null && <CloneDialog initialParent={cloneParent} onOpen={openRepo} onClose={() => setCloneParent(null)} onBusyChange={setLifecycleBusy} />}
+      {createRepositoryPath !== null && <CreateRepositoryDialog initialPath={createRepositoryPath} onOpen={openRepo} onClose={() => setCreateRepositoryPath(null)} onBusyChange={setLifecycleBusy} />}
       <NotificationCenter notices={notices} onDismiss={(id) => setNotices((prev) => prev.filter((n) => n.id !== id))} onClear={() => setNotices([])} />
     </div>
   );
 }
 
-export default function App() {
-  return <ConfirmProvider><AppShell /></ConfirmProvider>;
+export default function App({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] }) {
+  return <ConfirmProvider><AppShell initialLaunches={initialLaunches} /></ConfirmProvider>;
 }

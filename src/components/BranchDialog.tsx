@@ -9,12 +9,13 @@ interface Props {
   repoPath: string;
   branches: BranchInfo[];
   initialStartPoint?: string;
+  initialMode?: "checkout" | "create";
   onClose: () => void;
   onChanged: () => void;
   setMessage: (msg: string) => void;
 }
 
-export default function BranchDialog({ repoPath, branches, initialStartPoint, onClose, onChanged, setMessage }: Props) {
+export default function BranchDialog({ repoPath, branches, initialStartPoint, initialMode = "checkout", onClose, onChanged, setMessage }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [force, setForce] = useState(false);
@@ -38,7 +39,7 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, on
 
   return (
     <Dialog title="分支管理" onClose={onClose} busy={busy} footer={<button onClick={onClose} disabled={busy}>关闭</button>}>
-      <div className="branch-list">
+      <div className="branch-list" data-autofocus={initialMode === "checkout" ? "" : undefined} tabIndex={-1}>
         {branches.map((branch) => <div key={branch.name} className={`branch-item${selected === branch.name ? " selected" : ""}${branch.isRemote ? " remote" : ""}`} onClick={() => setSelected(branch.name)} onDoubleClick={() => { if (!branch.isRemote && !branch.isHead) void run(() => api.checkoutBranch(repoPath, branch.name), `已切换到 ${branch.name}`); }}>
           <span className={branch.isHead ? "branch-head" : ""}>{branch.isHead ? "● " : ""}{branch.name}</span><span className="branch-oid">{branch.oid.slice(0, 7)}</span>
         </div>)}
@@ -49,7 +50,7 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, on
         <label className="force-label"><input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />强制删除</label>
       </div>
       <div className="branch-create">
-        <input data-autofocus placeholder="新分支名" value={newName} onChange={(e) => setNewName(e.target.value)} />
+        <input data-autofocus={initialMode === "create" ? "" : undefined} placeholder="新分支名" value={newName} onChange={(e) => setNewName(e.target.value)} />
         <span className="muted">基于 {initialStartPoint ?? "HEAD"}</span>
         <button className="primary" disabled={busy || !newName.trim()} onClick={() => void run(() => api.createBranch(repoPath, newName.trim(), initialStartPoint), `已创建 ${newName.trim()}`)}>新建分支</button>
       </div>

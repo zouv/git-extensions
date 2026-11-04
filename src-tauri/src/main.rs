@@ -8,5 +8,12 @@ fn main() {
         }
         return;
     }
-    git_extensions_lib::run()
+    let launch_request = match git_extensions_lib::launch::parse_process_launch_request() {
+        Ok(request) => request,
+        Err(error) => {
+            eprintln!("invalid Explorer launch arguments: {error}");
+            std::process::exit(2);
+        }
+    };
+    git_extensions_lib::run(launch_request)
 }

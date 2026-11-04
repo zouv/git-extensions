@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 use super::open;
@@ -12,6 +12,7 @@ fn writes() -> &'static Mutex<HashSet<PathBuf>> {
     WRITES.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
+#[derive(Debug)]
 pub(crate) struct WriteLease {
     key: PathBuf,
 }
@@ -25,11 +26,7 @@ impl Drop for WriteLease {
     }
 }
 
-/// 覆盖整个校验和执行阶段；路径别名与 linked worktree 按 common Git dir 互斥。
-/// 拒绝而不是排队：不能在分支/HEAD 改变后悄悄执行旧的用户意图。
-pub(crate) fn acquire_write(path: &str) -> GitResult<WriteLease> {
-    let repo = open(path)?;
-    let key = repo.commondir().canonicalize()?;
+fn acquire_write_key(key: PathBuf) -> GitResult<WriteLease> {
     let mut active = writes().lock().unwrap_or_else(|e| e.into_inner());
     if !active.insert(key.clone()) {
         return Err(GitError::InvalidInput(
@@ -37,6 +34,40 @@ pub(crate) fn acquire_write(path: &str) -> GitResult<WriteLease> {
         ));
     }
     Ok(WriteLease { key })
+}
+
+/// 覆盖整个校验和执行阶段；路径别名与 linked worktree 按 common Git dir 互斥。
+/// 拒绝而不是排队：不能在分支/HEAD 改变后悄悄执行旧的用户意图。
+pub(crate) fn acquire_write(path: &str) -> GitResult<WriteLease> {
+    let repo = open(path)?;
+    let key = repo.commondir().canonicalize()?;
+    acquire_write_key(key)
+}
+
+/// clone/init 尚不能打开目标仓库，以规范化目标工作区未来的 .git 路径互斥。
+pub(crate) fn acquire_target_write(path: &str) -> GitResult<WriteLease> {
+    if path.trim().is_empty() || path.contains('\0') {
+        return Err(GitError::InvalidInput("target path is empty".into()));
+    }
+    let target = Path::new(path);
+    if !target.is_absolute() {
+        return Err(GitError::InvalidInput(
+            "target path must be absolute".into(),
+        ));
+    }
+    let name = target
+        .file_name()
+        .ok_or_else(|| GitError::InvalidInput("invalid target path".into()))?;
+    let parent = target
+        .parent()
+        .ok_or_else(|| GitError::InvalidInput("target parent directory is missing".into()))?
+        .canonicalize()?;
+    let target = match std::fs::symlink_metadata(target) {
+        Ok(_) => target.canonicalize()?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => parent.join(name),
+        Err(error) => return Err(error.into()),
+    };
+    acquire_write_key(target.join(".git"))
 }
 
 /// Tauri IPC 只做调度；Git/文件 I/O 和 hooks 在 blocking pool 中执行。
@@ -104,6 +135,29 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
         Arc,
     };
+    #[test]
+    fn target_write_lease_is_nonblocking_and_releases_for_path_aliases() {
+        let root = std::env::temp_dir().join(format!("ge-target-lease-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).unwrap();
+        let target = root.join("future-repository");
+        let first = acquire_target_write(target.to_str().unwrap()).unwrap();
+        let alias = root.join(".").join("future-repository");
+        let blocked = acquire_target_write(alias.to_str().unwrap());
+        assert!(blocked.unwrap_err().to_string().contains("already running"));
+        drop(first);
+        let second = acquire_target_write(target.to_str().unwrap()).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        let existing_alias = acquire_target_write(target.to_str().unwrap());
+        assert!(existing_alias
+            .unwrap_err()
+            .to_string()
+            .contains("already running"));
+        drop(second);
+        drop(acquire_target_write(target.to_str().unwrap()).unwrap());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn reads_are_bounded_and_errors_or_panics_release_permits() {
         let active = Arc::new(AtomicUsize::new(0));

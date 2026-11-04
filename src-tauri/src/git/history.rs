@@ -135,7 +135,63 @@ pub struct FileLogEntry {
     pub subject: String,
 }
 
-/// 单文件提交历史（--follow 跟踪改名）。git2 不支持按路径过滤 revwalk，走 CLI。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScopedHistoryEntry {
+    pub oid: String,
+    pub short_id: String,
+    pub author_name: String,
+    pub author_time: i64,
+    pub subject: String,
+}
+
+/// 当前分支的历史，可按目录或不跟随改名的文件过滤。仓库作用域沿用
+/// `HEAD`，不混入其它分支；文件作用域保留 `--follow` 以跨改名追溯。
+pub fn scoped_history(
+    path: String,
+    file: Option<String>,
+    follow: bool,
+    max_count: Option<u32>,
+) -> GitResult<Vec<ScopedHistoryEntry>> {
+    let max = max_count.unwrap_or(500).clamp(1, 5000).to_string();
+    let mut args = vec!["log".to_string()];
+    if follow && file.is_some() {
+        args.push("--follow".into());
+    }
+    args.extend([
+        "--format=%x00%H%x00%an%x00%at%x00%s".into(),
+        "-n".into(),
+        max,
+        "HEAD".into(),
+    ]);
+    if let Some(file) = file.as_deref() {
+        super::validate_relative_path(file)?;
+        args.extend(["--".into(), file.to_string()]);
+    }
+    let out = run_git(&path, &args)?;
+    let mut entries = Vec::new();
+    let mut fields = out.split('\0').filter(|field| !field.is_empty());
+    while let Some(oid) = fields.next() {
+        let oid = oid.trim_start_matches('\n');
+        if oid.len() != 40 || !oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            continue;
+        }
+        let (Some(author), Some(time), Some(subject)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            break;
+        };
+        entries.push(ScopedHistoryEntry {
+            oid: oid.into(),
+            short_id: oid[..7].into(),
+            author_name: author.into(),
+            author_time: time.parse().unwrap_or_default(),
+            subject: subject.trim_end_matches(['\r', '\n']).into(),
+        });
+    }
+    Ok(entries)
+}
+
 pub fn file_log(
     path: String,
     file: String,

@@ -2,7 +2,31 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::error::{GitError, GitResult};
+pub mod explorer;
+
 use crate::git::{open, validate_relative_path};
+
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub struct ExplorerIntegrationInfo {
+    pub supported: bool,
+}
+
+#[tauri::command]
+pub fn get_explorer_integration_info() -> ExplorerIntegrationInfo {
+    ExplorerIntegrationInfo {
+        supported: explorer::supported(),
+    }
+}
+
+#[tauri::command]
+pub fn set_explorer_context_menu_enabled(
+    enabled: bool,
+    items: Vec<explorer::ExplorerMenuItem>,
+    always_show_all_commands: bool,
+) -> GitResult<()> {
+    explorer::set_enabled(enabled, items, always_show_all_commands)
+        .map_err(|error| GitError::Cli(format!("Explorer integration failed: {error}")))
+}
 
 fn repository_target(repo_path: &str, target: &str) -> GitResult<(PathBuf, PathBuf)> {
     let repo = open(repo_path)?;

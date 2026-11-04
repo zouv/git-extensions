@@ -23,6 +23,9 @@ interface Props {
   onDiscard: (paths: string[], untracked: boolean) => void;
   onOpenConflict: () => void;
   onDirtyChange: (dirty: boolean) => void;
+  focusCommitSignal?: number;
+  /** Explorer 文件入口：只预选并预览该文件，不自动暂存或还原。 */
+  initialPath?: string | null;
 }
 
 type Side = "staged" | "unstaged";
@@ -41,7 +44,12 @@ export default function ChangesPanel(props: Props) {
   const [menu, setMenu] = useState<MenuTarget | null>(null);
   const [previewError, setPreviewError] = useState("");
   const previewRequest = useRef(0);
+  const commitTitleRef = useRef<HTMLInputElement>(null);
+  const initialPathApplied = useRef(false);
 
+  useEffect(() => {
+    if (props.focusCommitSignal) commitTitleRef.current?.focus();
+  }, [props.focusCommitSignal]);
   useEffect(() => {
     previewRequest.current += 1;
     setChecked((prev) => ({
@@ -73,6 +81,18 @@ export default function ChangesPanel(props: Props) {
       if (request === previewRequest.current) { setPreviewError(String(e)); props.setMessage(String(e)); }
     }
   };
+
+  useEffect(() => {
+    if (initialPathApplied.current || !props.initialPath) return;
+    const side: Side = status.staged.some((entry) => entry.path === props.initialPath) ? "staged" : "unstaged";
+    const entry = (side === "staged" ? status.staged : status.unstaged).find((item) => item.path === props.initialPath);
+    if (!entry) return;
+    initialPathApplied.current = true;
+    setChecked((prev) => ({ ...prev, [side]: new Set(prev[side]).add(entry.path) }));
+    void showPreview(side, entry.path);
+    // 仅在初次清单到达时预选；后续刷新不覆盖用户当前选择。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, props.initialPath]);
 
   const run = async (action: () => Promise<unknown>, success: string, historyChanged = false) => {
     if (busy) return;
@@ -154,7 +174,7 @@ export default function ChangesPanel(props: Props) {
         {renderList("unstaged", status.unstaged)}
         {renderList("staged", status.staged)}
         <div className="commit-box">
-          <input aria-label="提交标题" placeholder="提交标题（必填）" disabled={busy} value={title} onChange={(e) => setTitle(e.target.value)} />
+          <input ref={commitTitleRef} aria-label="提交标题" placeholder="提交标题（必填）" disabled={busy} value={title} onChange={(e) => setTitle(e.target.value)} />
           <div className="commit-title-count">{title.length > 50 ? "标题建议不超过 50 字符 · " : ""}{title.length}/50</div>
           <textarea aria-label="提交正文" placeholder="提交正文（可选）" disabled={busy} value={body} onChange={(e) => setBody(e.target.value)} rows={3} onKeyDown={(e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doCommit(); }

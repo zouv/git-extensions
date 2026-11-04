@@ -1,9 +1,15 @@
+import type { ExplorerMenuPlacements } from "./types";
+import { defaultExplorerMenuPlacements, normalizeExplorerMenuPlacements } from "./explorerMenu";
+
 export interface AppSettings {
   autoRefresh: boolean;
   pollIntervalSeconds: number;
   highlightEnabled: boolean;
   showLeftPanel: boolean;
   maxLogCount: number;
+  explorerContextMenuEnabled: boolean;
+  explorerContextMenuPlacements: ExplorerMenuPlacements;
+  explorerAlwaysShowAllCommands: boolean;
 }
 
 export type InspectorPosition = "right" | "bottom";
@@ -23,6 +29,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   highlightEnabled: true,
   showLeftPanel: true,
   maxLogCount: 100_000,
+  explorerContextMenuEnabled: false,
+  explorerContextMenuPlacements: defaultExplorerMenuPlacements(),
+  explorerAlwaysShowAllCommands: false,
 };
 
 export const DEFAULT_LAYOUT: UILayout = {
@@ -57,9 +66,12 @@ export function loadSettings(): AppSettings {
       highlightEnabled: typeof raw.highlightEnabled === "boolean" ? raw.highlightEnabled : DEFAULT_SETTINGS.highlightEnabled,
       showLeftPanel: typeof raw.showLeftPanel === "boolean" ? raw.showLeftPanel : DEFAULT_SETTINGS.showLeftPanel,
       maxLogCount: numberOption(raw.maxLogCount, LOG_LIMITS, DEFAULT_SETTINGS.maxLogCount),
+      explorerContextMenuEnabled: typeof raw.explorerContextMenuEnabled === "boolean" ? raw.explorerContextMenuEnabled : DEFAULT_SETTINGS.explorerContextMenuEnabled,
+      explorerContextMenuPlacements: normalizeExplorerMenuPlacements(raw.explorerContextMenuPlacements),
+      explorerAlwaysShowAllCommands: typeof raw.explorerAlwaysShowAllCommands === "boolean" ? raw.explorerAlwaysShowAllCommands : DEFAULT_SETTINGS.explorerAlwaysShowAllCommands,
     };
   } catch {
-    return DEFAULT_SETTINGS;
+    return { ...DEFAULT_SETTINGS, explorerContextMenuPlacements: defaultExplorerMenuPlacements() };
   }
 }
 

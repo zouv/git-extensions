@@ -40,6 +40,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | 改顶部栏 / 窗口控制 / 页签与 Pin 拖拽 | `src/components/TitleBar.tsx`、`RepositoryTabs.tsx`、`src/App.tsx`、`src/tabOrder.ts`、`src-tauri/tauri.conf.json`、`capabilities/default.json` | 后端 git 模块 | §2.2、§7 |
 | 改仓库页签分组 / Pin / 别名 | `src/repoGroups.ts`、`src/components/RepoGroupsDialog.tsx`、`GroupAvatar.tsx`、`TitleBar.tsx`、`RepositoryTabs.tsx`、`src/App.tsx` | 后端 git 模块 | §2.2、§7 |
 | 改启动恢复 / 页签持久化 | `src/App.tsx`、`src/openRepos.ts`、`tests/open-repos.test.mjs` | 后端 git 模块、其它 UI 组件 | §2.2、§3、§7 |
+| 改资源管理器菜单 / 外部启动 | [`arch/explorer.md`](./arch/explorer.md)，按分册定位源码 | 无关 Git 读路径与 Diff 组件 | 分册 §1–§5 |
 | 改对比 / 冲突 / 交互式 Rebase | `src/components/CompareView.tsx`、`ConflictCenter.tsx`、`RebasePlanner.tsx`；后端 `diff.rs`、`status.rs`、`rebase.rs` | 提交图与高亮 Worker | §2、§3、§4 |
 | 改文档 / 流程 | 对应的 `docs/` 篇章或根目录文档 | 源码 | AGENTS §5 |
 
@@ -51,7 +52,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 
 | 文件 | 职责 | 何时改它 |
 |---|---|---|
-| `src-tauri/src/lib.rs` | Tauri 命令注册、应用入口、主窗口销毁后退出进程 | 新增 / 删除 IPC 命令、改应用生命周期 |
+| `src-tauri/src/lib.rs` | Tauri 命令注册、插件与窗口生命周期；最后一个窗口销毁后退出 | 新增 / 删除 IPC 命令、改应用生命周期 |
 | `src-tauri/src/error.rs` | 统一错误类型 `GitError`（可序列化给前端） | 新增错误类别 |
 | `src-tauri/src/git/mod.rs` | `open()`：按路径 discover 打开仓库 | 改仓库打开策略 |
 | `src-tauri/src/git/repo.rs` | 仓库信息、分支列表、linked worktree 列表 | 改仓库概览 / 分支 / worktree 字段 |
@@ -62,17 +63,18 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | `src-tauri/src/git/commands.rs` / `operations.rs` | 全部 Git 读写 IPC 适配；有界后台读取与 common Git dir 写互斥 | 改写操作执行调度 |
 | `src-tauri/src/git/reset.rs` | Reset 预览、状态指纹、CLI HEAD 备份、执行与 reflog / 备份恢复列表 | 改 Reset / 恢复保护 |
 | `src-tauri/src/git/rebase.rs` | 线性计划校验、真实 `rebase -i`、内部 sequence/message editor | 改交互式 Rebase |
-| `src-tauri/src/system.rs` | 安全解析仓库内路径并调用 OS 打开 / 显示 | 改系统集成 |
-| `src-tauri/src/git/history.rs` | git2 逐行 blame、CLI `--follow` 单文件历史 | 改文件历史 / 行数上限 |
+| `src-tauri/src/system.rs` / `system/explorer.rs` | 安全解析仓库内路径并调用 OS 打开 / 显示；可选 HKCU 资源管理器菜单 | 改系统集成；菜单详见 `arch/explorer.md` |
+| `src-tauri/src/launch.rs` | 固定 Explorer 动作与受控启动参数解析 | 改外部启动协议 |
+| `src-tauri/src/window_host.rs` | 单实例请求队列、主窗口聚焦、轻量动作窗口创建与最后窗口退出 | 改外部启动 / 多窗口路由 |
+| `src-tauri/src/git/history.rs` | git2 逐行 blame、CLI `--follow` 单文件历史、目录 / 文件范围 changelog | 改文件历史 / 行数上限 |
 | `src/types.ts` | 前后端共享 TS 类型（与 Rust serde 对应） | 改任何 IPC 字段 |
 | `src/api.ts` | 在途读取去重 / writeInvoke 封装、log-batch 订阅、日期格式化 | 改 IPC 调用方式 |
 | `src/repoOperations.ts` / `useRepoBusy.ts` | 同步发布仓库级写状态与共享 busy，不排队旧写意图 | 改写状态与关闭保护 |
-| `src/settings.ts` | 行为设置、按仓库布局、localStorage 白名单校验 | 新增 / 修改设置项 |
+| `src/settings.ts` / `windowState.ts` / `explorerMenu.ts` | 行为与菜单设置、按仓库布局、窗口 bounds / 最大化状态；localStorage 白名单校验与离屏修正 | 修改对应持久化规则 |
 | `src/repoGroups.ts` | 仓库页签分组纯数据层：组 CRUD、Pin、预设颜色与白名单补色、仓库分配、多选活动组并集过滤、页签别名，全局持久化 | 改分组规则 / 颜色 / 别名 / 存储 |
 | `src/openRepos.ts` | 打开页签持久化纯数据层：有序路径白名单、缺失与显式空列表语义、恢复候选与活动页签选择 | 改启动恢复 / 页签持久化规则 |
-| `src/tabOrder.ts` | 页签拖拽排序纯函数：插入下标与按路径重排 | 改拖拽排序规则 |
-| `src/vite-env.d.ts` | Vite 客户端类型声明（`import.meta.env`） | 使用 Vite 环境变量时 |
-| `src/App.tsx` | 全局 AppShell、仓库页签与持久化恢复、最近仓库、通知与全局快捷键、仓库页签分组配置托管、窗口关闭保护 | 改跨仓库状态 / 启动恢复 |
+| `src/App.tsx` | 完整主窗口：页签恢复 / 分组、窗口状态、通知、快捷键与外部启动请求队列 | 改跨仓库状态 / 主窗口生命周期 |
+| `src/explorer/` | 单任务窗口 Host、提交 / Pull / changelog 轻量界面与原生关闭保护 | 改 Explorer 轻量工作流 |
 | `src/RepoWorkspace.tsx` | 单仓库草稿会话、分级刷新、refs / HEAD 轮询、双工作区 / 临时任务与分栏、按组过滤标签 | 改仓库内状态流 / 布局 |
 | `src/components/TitleBar.tsx` | 自绘顶部栏：应用图标菜单（打开仓库 / 设置 / 关于 / 关闭窗口）、仓库页签分组多选入口、Pin 图标（常驻页签栏入口，左键切换 / 右键菜单 / 可拖拽）、页签、窗口控制 | 改顶部栏 / 窗口行为 / 分组切换 |
 | `src/components/RepositoryTabs.tsx` / `NotificationCenter.tsx` | 多仓库页签（指针拖拽排序、悬停关闭 X、中键关闭、右键菜单、方向键切换、「+」紧随末页签且溢出时可见）与按仓库状态、可操作通知 | 改全局反馈 |
@@ -97,8 +99,9 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | `src/components/TagDialog.tsx` | 标签列表 / 新建 / 删除弹窗 | 改标签交互 |
 | `src/components/SubmoduleDialog.tsx` | 子模块状态列表与更新弹窗 | 改子模块交互 |
 | `src/components/SettingsDialog.tsx` | 行为设置编辑、快捷键帮助 | 改设置交互 |
+| `src/components/{Clone,CreateRepository,CheckoutRevision,DiffTool,ApplyPatch,TrackedFile}Dialog.tsx` | 资源管理器入口新增的仓库与文件工作流 | 改对应工作流；见 `arch/explorer.md` |
 | `src/components/Toolbar.tsx` | 工具栏、远程操作、过滤框、打开仓库弹窗 | 改工具栏 |
-| `src-tauri/tests/smoke.rs` / `workflows.rs` / `safety.rs` | 临时真实仓库测试：基础流程、文件 / 冲突、Rebase、参数 / Push 安全与写互斥 | 改命令行为时补对应用例 |
+| `src-tauri/tests/smoke.rs` / `workflows.rs` / `safety.rs` / `repository_capabilities.rs` | 临时真实仓库测试：基础流程、文件 / 冲突、Rebase、参数 / Push 安全、写互斥与新增仓库能力 | 改命令行为时补对应用例 |
 | `tests/*.test.mjs` | Node 测试：正式 TS busy / 读取去重 / 草稿 / Diff、分组、打开页签、拖拽排序规则 | 改调度 / 视图 / 存储规则 |
 | `src-tauri/examples/bench.rs` | release 日志、全量 diff / 按需首文件选中链路性能测量 | 改测量指标或核心读路径 |
 | `src/styles.css` | 全部样式（暗色主题，按注释分段） | 改外观 |
@@ -140,7 +143,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 |---|---|---|
 | 打开仓库 / 页签 / 启动恢复 | `App.tsx` 的 `openRepo`、`closeRepo`、`reorderRepos`、启动恢复 effect；`openRepos.ts` 的 `loadOpenRepos` / `restoreCandidates` / `pickActivePath` | 页签列表持久化在 `openRepos.v1`；恢复只挂载活动页签（`mountedPaths`），其余首次激活才挂载 `RepoWorkspace` 并加载 |
 | 仓库页签分组配置 | `App.tsx` 的 `updateRepoGroups`；`repoGroups.ts` 纯函数 | 全局配置（`loadRepoGroups` / `saveRepoGroups`）；`activeGroupIds` 多选、`assignments` / `aliases` 按仓库路径；`setGroupColor` 修改预设组色；App 用 `visibleRepos` 过滤页签并在活动页签被隐藏时切到组内第一个 |
-| 顶部栏 / 窗口控制 | `TitleBar.tsx`；`App.tsx` 的 `closeWindow`、`onCloseRequested` | 关闭前汇总 dirty/busy 确认；`allowCloseRef` 防循环 |
+| 顶部栏 / 窗口控制与几何 | `TitleBar.tsx`；`App.tsx` 的窗口恢复 effect、`flushWindowState`、`closeWindow`；`windowState.ts` | 先恢复普通 bounds 再最大化 / 显示；移动缩放防抖保存，系统关闭统一拦截后 flush |
 | 分组管理器 | `RepoGroupsDialog.tsx`；`App.tsx` 的 `showGroupManager` | 由 App 层渲染，列出所有打开的仓库页签 |
 | 分级刷新 / 合并 | `RepoWorkspace.tsx` 的 `refreshAll`、`refreshAux`、`refreshWorktree` | 仅工作区变化不重载日志；代际作废 + 一次 pending 合并 |
 | 在途读取去重 | `api.ts` 的 `invoke`、`pendingReads` | command + 完整参数做 key，完成 / 失败释放，不缓存结果 |
@@ -282,7 +285,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 - **文件历史路径属于对应提交**：--follow 的 rename 状态用 NUL 分隔解析，不用作者 / subject 可包含的文本哨兵；返回 filePath，查看历史 diff 使用该时期路径并从清单取得 oldPath。
 - **图标资源必须跨平台齐全**：即使 bundle 未显式引用，`generate_context!` 在非 Windows 构建也需要 PNG；`icons/` 同时保留 ICO / PNG / ICNS，并在 bundle 配置中引用。
 - **自绘顶部栏（无边框窗口）**：`tauri.conf.json` 设 `decorations: false`，Tauri 2 在 Windows 原生处理 undecorated 窗口的边缘缩放，无需自绘边框。`data-tauri-drag-region` 只作用于直接标注的元素，按钮 / 可拖拽子元素不触发窗口拖动。窗口控制需 capabilities 追加 `core:window:allow-minimize/toggle-maximize/close/destroy/start-dragging`（默认权限不含；`onCloseRequested` 放行后还会自动调用 `destroy()`）。关闭必须走 `closeWindow` 汇总确认（dirty/busy），并用 `allowCloseRef` 防止 `onCloseRequested` 拦截后再次触发自身造成循环；关闭调用失败要恢复该标记并显示错误。`main.rs` 的发布构建必须启用 `windows_subsystem = "windows"`，否则从资源管理器启动会弹出控制台；`lib.rs` 在主窗口 `Destroyed` 后显式 `exit(0)`，避免 WebView / 后台线程留下无窗口进程。Windows 无边框窗口圆角 / 阴影变化属预期。
-- **仓库页签分组是纯 UI 配置**：全局存 localStorage `git-extensions.repoGroups.v1`（`repoGroups.ts`），`assignments` / `aliases` 以仓库路径为键，配置提升到 App 层供 TitleBar / RepositoryTabs / RepoGroupsDialog 共享。Default 组强制存在、不可改名 / 删除 / Pin，未分配仓库页签归入 Default。活动组为多选 `activeGroupIds`：页签栏只显示所选组页签的并集，至少保留 Default；标题栏分组入口菜单可多选切换，Pin 图标作为常驻快捷入口（左键切换、右键菜单、可拖拽排序）。删除组只把组内页签（含已关闭仓库的分组记录）移回 Default，不关闭或删除任何仓库。管理界面可逐页签更换分组、编辑别名与选择预设颜色；组色只接受 `GROUP_COLOR_PRESETS`，旧配置按组 ID 哈希稳定补色，页签按 `groupForRepo` 的唯一归属取色，多选切换不改变颜色。`ContextMenu` 的 `trailingAction` 用同级按钮实现菜单右侧快速 Pin，不能嵌套 button；快速 Pin 不改变 `activeGroupIds`。别名只影响页签显示，仓库身份 / 路径与所有 Git 操作仍用真实路径。分组只过滤页签栏，不影响已打开仓库的后台状态；当前活动仓库被隐藏时自动切到该组第一个可见页签，空组显示提示。打开仓库时若其所属组未选中会自动补选，新仓库归入 Default 或当前第一个非 Default 选中组。校验用白名单（sanitizeConfig），容忍脏数据与指向已删组 / 已关闭仓库的记录。分组菜单不再提供「显示全部组 / 仅显示 Default」；管理器的颜色入口是当前色块 + fixed 色板弹层，Esc 需在 window 捕获阶段拦截，才能先于 Dialog 的 document 捕获关闭而只收起色板。
+- **仓库页签分组是纯 UI 配置**：`repoGroups.ts` 全局持久化组、Pin、预设色、仓库唯一分组与别名；`activeGroupIds` 多选取页签并集，Default 不可改名 / 删除 / Pin，删除组只回收页签，别名不改变仓库身份。分组仅过滤页签栏，当前仓库被隐藏时切到组内首项；打开仓库自动补选其组。菜单右侧快速 Pin 用 `ContextMenu.trailingAction` 同级按钮，不能嵌套 button；色板 Esc 在 window 捕获阶段处理，避免连带关闭 Dialog。
 - **页签拖拽用指针事件**：6px 阈值后才进入排序；`tabOrder.ts` 的 `insertionIndex` / `movePath` 只算数据，3px 插入线绝对定位；条外释放 / Esc / 失捕 / 结构变化取消，靠近边缘只调 `scrollLeft` 并隐藏原生滚动条。`reorderRepos` 只重排可见组槽位，隐藏页签原位；顺序随 `openRepos.v1` 持久化。Pin 组顺序持久化在 config（`reorderPinned`）。
 - **标题栏交互契约**：关闭 X 仅悬停 / 焦点显示且不改变几何，中键只关闭目标；页签右键含关闭 / 在右侧打开仓库 / 别名 / 复制路径，空白区右键打开应用菜单；方向键与 Home/End 切换页签；菜单关闭后恢复焦点。窗口手势仍走 Tauri 拖拽区。
 - **启动恢复只懒挂载活动页签**：`git-extensions.openRepos.v1` 存有序路径，缺失回退 `lastRepo`，显式 `[]` 表示用户关光了页签、不能回退。恢复直接串行调用 `api.openRepo` 只取 `RepoInfo`，不复用 `openRepo`（后者会逐页签激活、改写最近列表与分组）；`sessionRestored` 未置位前禁止持久化，防止用 `[]` 覆盖旧列表。App 只渲染 `mountedPaths ∪ {activePath}` 的 `RepoWorkspace`，未访问页签首次激活才挂载加载；恢复失败路径跳过并剪枝，通知一次。StrictMode 下用 ref 防恢复双跑，且不要用 cleanup 取消恢复。
