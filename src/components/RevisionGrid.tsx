@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Revision } from "../types";
 import { formatDate } from "../api";
 import ContextMenu from "../ui/ContextMenu";
@@ -8,6 +8,7 @@ const LANE_W = 14;
 const NODE_R = 4;
 const PALETTE = ["#e06c75", "#65a9f5", "#57bd8a", "#d19a66", "#c678dd", "#56b6c2", "#d5a84e", "#be5046", "#7ec8e3", "#b5cea8"];
 const MAX_GRAPH_W = 320;
+const optionId = (oid: string) => `revision-option-${oid}`;
 
 export type RevisionAction = "reset" | "diff" | "cherry-pick" | "revert" | "rebase" | "copy-sha" | "copy-subject" | "compare-head" | "compare-base" | "new-branch" | "new-tag" | "interactive-rebase";
 
@@ -17,11 +18,15 @@ interface Props {
   onSelect: (oid: string, additive: boolean) => void;
   onContextAction: (action: RevisionAction, rev: Revision) => void;
   loading: boolean;
+  /** 当前待对比的基准提交；用于把菜单项从「设为基准」切换为「与基准对比」。 */
+  compareBase?: string | null;
+  /** 过滤条件变化时重置增量图宽扫描。 */
+  layoutKey?: string;
   /** 轻量窗口只暴露已具备完整处理链路的动作。 */
   allowedActions?: RevisionAction[];
 }
 
-export default function RevisionGrid({ revisions, selectedOids, onSelect, onContextAction, loading, allowedActions }: Props) {
+export default function RevisionGrid({ revisions, selectedOids, onSelect, onContextAction, loading, compareBase, layoutKey, allowedActions }: Props) {
   const can = (action: RevisionAction) => !allowedActions || allowedActions.includes(action);
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -29,12 +34,24 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
   const [viewportH, setViewportH] = useState(600);
   const [menu, setMenu] = useState<{ x: number; y: number; rev: Revision } | null>(null);
   const selectedOid = selectedOids[selectedOids.length - 1] ?? null;
+  const [graphWidth, setGraphWidth] = useState(8 + LANE_W);
+  const graphScan = useRef({ key: "", length: 0, lanes: 1, firstOid: "" });
 
-  const graphWidth = useMemo(() => {
-    let lanes = 1;
-    for (const r of revisions) lanes = Math.max(lanes, r.activeLanes.length, r.lane + 1);
-    return Math.min(8 + lanes * LANE_W, MAX_GRAPH_W);
-  }, [revisions]);
+  // 日志按 300 条分批到达；只扫描新增尾部，避免每批重扫全部记录。
+  useEffect(() => {
+    const key = layoutKey ?? "";
+    const previous = graphScan.current;
+    const reset = previous.key !== key || revisions.length < previous.length
+      || (previous.length > 0 && revisions[0]?.oid !== previous.firstOid);
+    let lanes = reset ? 1 : previous.lanes;
+    for (let i = reset ? 0 : previous.length; i < revisions.length; i++) {
+      const revision = revisions[i];
+      lanes = Math.max(lanes, revision.activeLanes.length, revision.lane + 1);
+    }
+    graphScan.current = { key, length: revisions.length, lanes, firstOid: revisions[0]?.oid ?? "" };
+    const next = Math.min(8 + lanes * LANE_W, MAX_GRAPH_W);
+    setGraphWidth((current) => current === next ? current : next);
+  }, [layoutKey, revisions]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -98,7 +115,48 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
   }, [revisions, startRow, endRow, graphWidth]);
 
   return (
-    <div className="revision-grid" ref={scrollRef} role="listbox" aria-label="提交历史" aria-multiselectable onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
+    <div
+      className="revision-grid"
+      ref={scrollRef}
+      role="listbox"
+      aria-label="提交历史"
+      aria-multiselectable
+      aria-activedescendant={selectedOid ? optionId(selectedOid) : undefined}
+      tabIndex={0}
+      onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+      onKeyDown={(e) => {
+        if ((e.target as HTMLElement | null)?.closest(".context-menu")) return;
+        if ((e.key === "F10" && e.shiftKey) || e.key === "ContextMenu") {
+          const rev = revisions.find((item) => item.oid === selectedOid);
+          if (!rev) return;
+          e.preventDefault();
+          const rect = e.currentTarget.getBoundingClientRect();
+          setMenu({ x: rect.left + 24, y: rect.top + 30, rev });
+          return;
+        }
+        const target = e.target as HTMLElement | null;
+        if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+        const selectedIndex = revisions.findIndex((item) => item.oid === selectedOid);
+        if (e.key === "Enter") {
+          const rev = selectedIndex >= 0 ? revisions[selectedIndex] : null;
+          if (!rev) return;
+          e.preventDefault();
+          onContextAction("diff", rev);
+          return;
+        }
+        if (!["ArrowDown", "ArrowUp", "Home", "End", "PageDown", "PageUp"].includes(e.key)) return;
+        let next = selectedIndex;
+        if (e.key === "ArrowDown") next = Math.min(revisions.length - 1, selectedIndex + 1);
+        else if (e.key === "ArrowUp") next = Math.max(0, selectedIndex < 0 ? 0 : selectedIndex - 1);
+        else if (e.key === "Home") next = 0;
+        else if (e.key === "End") next = revisions.length - 1;
+        else if (e.key === "PageDown") next = Math.min((selectedIndex < 0 ? 0 : selectedIndex) + 20, revisions.length - 1);
+        else if (e.key === "PageUp") next = Math.max((selectedIndex < 0 ? 0 : selectedIndex) - 20, 0);
+        if (next < 0 || !revisions[next]) return;
+        e.preventDefault();
+        onSelect(revisions[next].oid, false);
+      }}
+    >
       <div className="revision-content" style={{ height: revisions.length * ROW_H }}>
         <canvas ref={canvasRef} className="graph-canvas" style={{ top: startRow * ROW_H, width: graphWidth }} />
         {revisions.slice(startRow, endRow).map((rev, i) => {
@@ -107,12 +165,15 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
           return (
             <div
               key={rev.oid}
+              id={optionId(rev.oid)}
               className={`revision-row${selected ? " selected" : ""}`}
               style={{ top: row * ROW_H, left: graphWidth, height: ROW_H }}
               role="option"
               aria-selected={selected}
-              tabIndex={selected ? 0 : -1}
-              onClick={(e) => onSelect(rev.oid, (e.ctrlKey || e.metaKey) && selectedOids.length > 0)}
+              aria-posinset={row + 1}
+              aria-setsize={revisions.length}
+              tabIndex={-1}
+              onClick={(e) => { onSelect(rev.oid, (e.ctrlKey || e.metaKey) && selectedOids.length > 0); scrollRef.current?.focus({ preventScroll: true }); }}
               onDoubleClick={() => onContextAction("diff", rev)}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -137,11 +198,11 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
       </div>
       {revisions.length === 0 && !loading && <div className="empty-state"><strong>暂无提交记录</strong><span>空仓库或当前过滤条件没有结果。</span></div>}
       {loading && <div className="loading-hint"><span className="spinner" />正在加载 · 已接收 {revisions.length.toLocaleString()} 条</div>}
-      {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={[
+      {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} ariaLabel={`提交 ${menu.rev.shortId} 操作`} items={[
         ...(can("diff") ? [{ id: "diff", label: "查看差异", onSelect: () => onContextAction("diff", menu.rev) }] : []),
         ...(can("copy-sha") ? [{ id: "copy-sha", label: "复制完整 SHA", icon: "copy" as const, shortcut: "Ctrl+Shift+C", onSelect: () => onContextAction("copy-sha", menu.rev) }] : []),
         ...(can("copy-subject") ? [{ id: "copy-subject", label: "复制提交主题", icon: "copy" as const, onSelect: () => onContextAction("copy-subject", menu.rev) }] : []),
-        ...(can("compare-base") ? [{ id: "compare-base", label: "设为对比基准", icon: "compare" as const, onSelect: () => onContextAction("compare-base", menu.rev) }] : []),
+        ...(can("compare-base") ? [{ id: "compare-base", label: compareBase === menu.rev.oid ? "取消对比基准" : compareBase ? `与基准 ${compareBase.slice(0, 7)} 对比` : "设为对比基准", icon: "compare" as const, onSelect: () => onContextAction("compare-base", menu.rev) }] : []),
         ...(can("compare-head") ? [{ id: "compare-head", label: "与当前分支对比", icon: "compare" as const, onSelect: () => onContextAction("compare-head", menu.rev) }] : []),
         ...(can("new-branch") ? [{ id: "new-branch", label: "在此新建分支…", icon: "branch" as const, onSelect: () => onContextAction("new-branch", menu.rev) }] : []),
         ...(can("new-tag") ? [{ id: "new-tag", label: "在此新建标签…", icon: "tag" as const, onSelect: () => onContextAction("new-tag", menu.rev) }] : []),

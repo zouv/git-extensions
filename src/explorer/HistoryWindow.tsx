@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { useRepoBusy } from "../useRepoBusy";
 import type { CommitDetail, ContainedInfo, ExplorerTarget, FileDiff, Revision, ScopedHistoryEntry } from "../types";
@@ -32,21 +32,24 @@ export default function HistoryWindow({ target, onBusyChange }: Props) {
   const confirm = useConfirm();
   const repoPath = target.repo.path;
   const follow = target.scope === "file";
+  const reloadSequence = useRef(0);
 
   useEffect(() => { onBusyChange(busy); }, [busy, onBusyChange]);
   useEffect(() => () => onBusyChange(false), [onBusyChange]);
   useEffect(() => { setHighlightEnabled(loadSettings().highlightEnabled); }, []);
 
   const reload = useCallback(async () => {
+    const sequence = ++reloadSequence.current;
     setLoading(true); setError("");
     try {
       const next = await api.scopedHistory(repoPath, target.relativePath, follow, 1000);
+      if (sequence !== reloadSequence.current) return;
       setEntries(next);
       setSelected((current) => next.some((entry) => entry.oid === current) ? current : next[0]?.oid ?? null);
     } catch (reason) {
-      setError(String(reason));
+      if (sequence === reloadSequence.current) setError(String(reason));
     } finally {
-      setLoading(false);
+      if (sequence === reloadSequence.current) setLoading(false);
     }
   }, [follow, repoPath, target.relativePath]);
 
@@ -83,7 +86,7 @@ export default function HistoryWindow({ target, onBusyChange }: Props) {
   })), [entries, target.repo.headOid]);
 
   const action = async (kind: RevisionAction, oid: string) => {
-    if (busy) return;
+    if (busy || loading) return;
     if (kind === "diff") { setSelected(oid); return; }
     if (kind === "copy-sha") { await navigator.clipboard?.writeText(oid); return; }
     const revision = entries.find((entry) => entry.oid === oid);
@@ -115,6 +118,10 @@ export default function HistoryWindow({ target, onBusyChange }: Props) {
   };
 
   const scopeLabel = target.scope === "file" ? "文件" : target.scope === "directory" ? "目录" : "当前分支";
+  const openMain = async () => {
+    try { await api.openRepositoryInMain(repoPath); }
+    catch (reason) { setError(`无法转到主窗口：${String(reason)}`); }
+  };
   return <div className="history-window">
     <div className="history-toolbar">
       <div>
@@ -124,7 +131,7 @@ export default function HistoryWindow({ target, onBusyChange }: Props) {
       <button disabled={loading || busy} onClick={() => void reload()}>刷新</button>
     </div>
     {error && <div className="inline-error history-error" role="alert">{error}
-      <button onClick={() => void api.openRepositoryInMain(repoPath)}>转到主窗口</button>
+      <button onClick={() => void openMain()}>转到主窗口</button>
     </div>}
     <div className="history-window-body">
       <section className="history-revisions">
@@ -144,6 +151,7 @@ export default function HistoryWindow({ target, onBusyChange }: Props) {
             files={files}
             loading={detailLoading}
             highlightEnabled={highlightEnabled}
+            prefKey={repoPath}
             loadFile={(file) => api.getCommitFileDiff(repoPath, selected!, file.path, file.oldPath)
               .then((diffs) => diffs.find((item) => item.path === file.path || item.oldPath === file.path) ?? null)}
           />

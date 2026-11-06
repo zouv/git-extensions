@@ -11,8 +11,9 @@ import type { IconName } from "../ui/Icon";
 import Icon from "../ui/Icon";
 import ContextMenu from "../ui/ContextMenu";
 import Dialog from "../ui/Dialog";
+import { useDirtyClose } from "../ui/useDirtyClose";
 
-export interface SessionMeta { busy: boolean; dirty: boolean; conflictCount: number }
+export interface SessionMeta { busy: boolean; dirty: boolean; conflictCount: number; loading?: boolean; error?: string | null }
 
 interface Props {
   repos: RepoInfo[];
@@ -60,6 +61,8 @@ export default function RepositoryTabs(props: Props) {
   const insertionRef = useRef<Insertion | null>(null);
   const suppressClickRef = useRef(false);
   const label = (repo: RepoInfo) => displayRepoName(props.repoGroups, repo);
+  const aliasDirty = aliasTarget ? aliasValue !== (props.repoGroups.aliases[aliasTarget.path] ?? "") : false;
+  const closeAlias = useDirtyClose(aliasDirty, false, () => setAliasTarget(null));
 
   const updateInsertion = useCallback((clientX: number) => {
     const drag = dragRef.current;
@@ -272,7 +275,7 @@ export default function RepositoryTabs(props: Props) {
               >
                 <Icon name="folder" />
                 <span className="repository-tab-name">{label(repo)}</span>
-                {state?.busy ? <span className="spinner" aria-label="操作中" /> : state?.conflictCount ? <span className="tab-badge conflict">{state.conflictCount}</span> : state?.dirty ? <span className="dirty-dot" title="有未保存草稿" /> : null}
+                {state?.busy || state?.loading ? <span className="spinner" aria-label={state?.busy ? "操作中" : "正在加载"} /> : state?.conflictCount ? <span className="tab-badge conflict">{state.conflictCount}</span> : state?.dirty ? <span className="dirty-dot" title="有未保存草稿" /> : state?.error ? <span className="tab-error" title={state.error} aria-label="读取失败"><Icon name="warning" size={12} /></span> : null}
                 <button
                   className="tab-close"
                   aria-label={`关闭 ${label(repo)}`}
@@ -306,9 +309,9 @@ export default function RepositoryTabs(props: Props) {
       {aliasTarget && (
         <Dialog
           title={`设置页签显示名 · ${aliasTarget.name}`}
-          onClose={() => setAliasTarget(null)}
+          onClose={closeAlias}
           footer={<>
-            <button onClick={() => setAliasTarget(null)}>取消</button>
+            <button onClick={closeAlias}>取消</button>
             <button disabled={!props.repoGroups.aliases[aliasTarget.path]} onClick={() => { props.onSetAlias(aliasTarget.path, ""); setAliasTarget(null); }}>恢复仓库名</button>
             <button className="primary" onClick={() => { props.onSetAlias(aliasTarget.path, aliasValue); setAliasTarget(null); }}>保存</button>
           </>}

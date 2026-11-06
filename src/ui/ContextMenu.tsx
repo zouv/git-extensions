@@ -1,12 +1,14 @@
 import { useLayoutEffect, useRef } from "react";
 import type { IconName } from "./Icon";
 import Icon from "./Icon";
+import { isTopLayer, popLayer, pushLayer } from "./layerStack";
 
 export interface MenuTrailingAction {
   icon: IconName;
   label: string;
   checked: boolean;
   disabled?: boolean;
+  keepOpen?: boolean;
   onSelect: () => void;
 }
 
@@ -21,6 +23,8 @@ export interface MenuItem {
   checked?: boolean;
   title?: string;
   separator?: boolean;
+  /** 多选类菜单保持打开，便于连续切换多个项目。 */
+  keepOpen?: boolean;
   trailingAction?: MenuTrailingAction;
   onSelect?: () => void;
 }
@@ -42,6 +46,7 @@ export default function ContextMenu({ x, y, items, onClose, ariaLabel = "上下�
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const layer = pushLayer();
     const previousFocus = document.activeElement as HTMLElement | null;
     const rect = el.getBoundingClientRect();
     const left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
@@ -51,9 +56,10 @@ export default function ContextMenu({ x, y, items, onClose, ariaLabel = "上下�
     el.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
 
     const keydown = (event: KeyboardEvent) => {
+      if (!isTopLayer(layer)) return;
       if (event.key === "Escape") {
         event.preventDefault();
-        event.stopPropagation();
+        event.stopImmediatePropagation();
         onCloseRef.current();
         return;
       }
@@ -61,14 +67,16 @@ export default function ContextMenu({ x, y, items, onClose, ariaLabel = "上下�
       const buttons = [...el.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
       if (buttons.length === 0) return;
       event.preventDefault();
+      event.stopImmediatePropagation();
       const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
       const next = event.key === "Home" ? 0
         : event.key === "End" ? buttons.length - 1
-        : event.key === "ArrowUp" ? (index <= 0 ? buttons.length - 1 : index - 1)
-        : (index + 1) % buttons.length;
+        : (event.key === "ArrowUp" || (event.key === "Tab" && event.shiftKey)) ? (index <= 0 ? buttons.length - 1 : index - 1)
+        : (index < 0 ? 0 : (index + 1) % buttons.length);
       buttons[next]?.focus();
     };
     const pointerdown = (event: PointerEvent) => {
+      if (!isTopLayer(layer)) return;
       if (!el.contains(event.target as Node)) onCloseRef.current();
     };
     const close = () => onCloseRef.current();
@@ -77,6 +85,7 @@ export default function ContextMenu({ x, y, items, onClose, ariaLabel = "上下�
     window.addEventListener("blur", close);
     window.addEventListener("resize", close);
     return () => {
+      popLayer(layer);
       document.removeEventListener("keydown", keydown, true);
       document.removeEventListener("pointerdown", pointerdown);
       window.removeEventListener("blur", close);
@@ -98,7 +107,7 @@ export default function ContextMenu({ x, y, items, onClose, ariaLabel = "上下�
             key={item.id}
             disabled={item.disabled}
             title={item.title}
-            onClick={() => { onClose(); item.onSelect?.(); }}
+            onClick={() => { if (!item.keepOpen) onClose(); item.onSelect?.(); }}
           >
             {item.checked !== undefined && <span className="menu-check">{item.checked ? <Icon name="check" size={14} /> : null}</span>}
             {item.color && <span className="menu-color" style={{ background: item.color }} aria-hidden="true" />}
@@ -120,7 +129,7 @@ export default function ContextMenu({ x, y, items, onClose, ariaLabel = "上下�
               className={`context-item-action${action.checked ? " checked" : ""}`}
               disabled={action.disabled}
               title={action.label}
-              onClick={() => { onClose(); action.onSelect(); }}
+              onClick={() => { if (!action.keepOpen) onClose(); action.onSelect(); }}
             >
               <Icon name={action.icon} size={14} />
             </button>

@@ -7,6 +7,7 @@ import {
 } from "../repoGroups";
 import Dialog from "../ui/Dialog";
 import Icon from "../ui/Icon";
+import { useDirtyClose } from "../ui/useDirtyClose";
 import GroupAvatar from "./GroupAvatar";
 
 interface Props {
@@ -120,6 +121,7 @@ export default function RepoGroupsDialog({ config, repos, onChange, onClose }: P
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string; repos: string[]; closedCount: number } | null>(null);
   const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
   const skipAliasBlur = useRef<string | null>(null);
+  const close = useDirtyClose(newName.trim().length > 0 || Object.keys(aliasDrafts).length > 0, false, onClose);
 
   const submitRename = (groupId: string) => {
     const next = renameGroup(config, groupId, renameValue);
@@ -161,7 +163,7 @@ export default function RepoGroupsDialog({ config, repos, onChange, onClose }: P
 
   return (
     <>
-      <Dialog title="仓库页签分组管理" onClose={onClose} wide footer={<button onClick={onClose}>关闭</button>}>
+      <Dialog title="仓库页签分组管理" onClose={close} wide footer={<button onClick={close}>关闭</button>}>
         <div className="group-manager-list">
           {config.groups.map((group) => {
             const members = reposInGroup(config, repos, group.id);

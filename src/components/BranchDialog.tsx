@@ -3,6 +3,9 @@ import { api } from "../api";
 import { useRepoBusy } from "../useRepoBusy";
 import type { BranchInfo } from "../types";
 import Dialog from "../ui/Dialog";
+import InlineError from "../ui/InlineError";
+import { moveListFocus } from "../ui/listNav";
+import { useDirtyClose } from "../ui/useDirtyClose";
 import { useConfirm } from "../ui/Confirm";
 
 interface Props {
@@ -19,17 +22,19 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, in
   const [selected, setSelected] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [force, setForce] = useState(false);
+  const [error, setError] = useState("");
   const [localBusy, setBusy] = useState(false);
   const repoBusy = useRepoBusy(repoPath);
   const busy = localBusy || repoBusy;
   const confirm = useConfirm();
   const selectedBranch = branches.find((b) => b.name === selected && !b.isRemote) ?? null;
+  const close = useDirtyClose(newName.trim().length > 0, busy, onClose);
 
   const run = async (action: () => Promise<unknown>, success: string) => {
     if (busy) return;
-    setBusy(true);
+    setBusy(true); setError("");
     try { await action(); setMessage(success); onChanged(); onClose(); }
-    catch (e) { setMessage(String(e)); setBusy(false); }
+    catch (e) { setError(String(e)); setMessage(String(e)); setBusy(false); }
   };
   const remove = async () => {
     if (!selectedBranch) return;
@@ -38,9 +43,10 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, in
   };
 
   return (
-    <Dialog title="分支管理" onClose={onClose} busy={busy} footer={<button onClick={onClose} disabled={busy}>关闭</button>}>
-      <div className="branch-list" data-autofocus={initialMode === "checkout" ? "" : undefined} tabIndex={-1}>
-        {branches.map((branch) => <div key={branch.name} className={`branch-item${selected === branch.name ? " selected" : ""}${branch.isRemote ? " remote" : ""}`} onClick={() => setSelected(branch.name)} onDoubleClick={() => { if (!branch.isRemote && !branch.isHead) void run(() => api.checkoutBranch(repoPath, branch.name), `已切换到 ${branch.name}`); }}>
+    <Dialog title="分支管理" onClose={close} busy={busy} footer={<button onClick={close} disabled={busy}>关闭</button>}>
+      {error && <InlineError message={error} />}
+      <div className="branch-list" tabIndex={-1} role="listbox" aria-label="分支">
+        {branches.map((branch) => <div key={branch.name} className={`branch-item${selected === branch.name ? " selected" : ""}${branch.isRemote ? " remote" : ""}`} role="option" aria-selected={selected === branch.name} tabIndex={0} onFocus={() => setSelected(branch.name)} onClick={() => setSelected(branch.name)} onKeyDown={(e) => { if (moveListFocus(e, ".branch-item")) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(branch.name); } }} onDoubleClick={() => { if (!branch.isRemote && !branch.isHead) void run(() => api.checkoutBranch(repoPath, branch.name), `已切换到 ${branch.name}`); }}>
           <span className={branch.isHead ? "branch-head" : ""}>{branch.isHead ? "● " : ""}{branch.name}</span><span className="branch-oid">{branch.oid.slice(0, 7)}</span>
         </div>)}
       </div>

@@ -20,13 +20,14 @@ export default function CompareView(props: Props) {
   const [target, setTarget] = useState(props.initialTarget);
   const [result, setResult] = useState<CompareResult | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const sequence = useRef(0);
   const compare = useCallback(async (a: string, b: string) => {
     if (!a.trim() || !b.trim()) return;
-    const id = ++sequence.current; setLoading(true); setResult(null);
+    const id = ++sequence.current; setLoading(true); setError("");
     try { const next = await api.getCompareFiles(props.repoPath, a.trim(), b.trim()); if (id === sequence.current) setResult(next); }
-    catch (e) { if (id === sequence.current) props.onError(String(e)); }
+    catch (e) { if (id === sequence.current) { setError(String(e)); props.onError(String(e)); } }
     finally { if (id === sequence.current) setLoading(false); }
   }, [props.repoPath, props.onError]);
 
@@ -48,9 +49,9 @@ export default function CompareView(props: Props) {
         <Icon name="compare" />
         <strong>比较文件差异</strong>
         <div className="compare-selectors">
-          <input aria-label="对比基准" list="compare-refs" value={base} onChange={(e) => setBase(e.target.value)} />
+          <input aria-label="对比基准" list="compare-refs" value={base} onChange={(e) => setBase(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void compare(base, target); } }} />
           <span>与</span>
-          <input aria-label="对比目标" list="compare-refs" value={target} onChange={(e) => setTarget(e.target.value)} />
+          <input aria-label="对比目标" list="compare-refs" value={target} onChange={(e) => setTarget(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void compare(base, target); } }} />
           <datalist id="compare-refs">{props.refs.map((ref) => <option key={ref} value={ref} />)}</datalist>
         </div>
         <button disabled={loading || !base.trim() || !target.trim()} onClick={() => void compare(base, target)}>比较</button>
@@ -58,9 +59,10 @@ export default function CompareView(props: Props) {
         {result && <button title="复制两端完整 SHA" onClick={() => { void navigator.clipboard?.writeText(`${result.baseOid} ${result.targetOid}`); }}><Icon name="copy" />复制范围</button>}
       </div>
       <div className="compare-summary">
-        {result ? <><span className="mono">{result.baseOid.slice(0, 10)}</span><span>→</span><span className="mono">{result.targetOid.slice(0, 10)}</span><span>{result.files.length} 个文件</span></> : <span>比较两个提交、分支或标签的文件树</span>}
+        {loading ? <><span className="spinner" /><span>{result ? "正在重新比较，当前显示上一次结果…" : "正在比较…"}</span></> : result ? <><span className="mono">{result.baseOid.slice(0, 10)}</span><span>→</span><span className="mono">{result.targetOid.slice(0, 10)}</span><span>{result.files.length} 个文件</span></> : <span>比较两个提交、分支或标签的文件树</span>}
       </div>
-      <div className="task-content"><DiffView files={result?.files ?? []} loadFile={loadFile} loading={loading} onFileAction={props.onFileAction} /></div>
+      {error && <div className="inline-error" role="alert"><span>{error}</span></div>}
+      <div className="task-content"><DiffView files={result?.files ?? []} loadFile={loadFile} loading={loading} onFileAction={props.onFileAction} prefKey={props.repoPath} /></div>
     </div>
   );
 }

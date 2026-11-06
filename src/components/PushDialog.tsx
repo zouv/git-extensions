@@ -3,6 +3,7 @@ import { api } from "../api";
 import { useRepoBusy } from "../useRepoBusy";
 import type { PushInfo } from "../types";
 import Dialog from "../ui/Dialog";
+import { useDirtyClose } from "../ui/useDirtyClose";
 
 interface Props {
   repoPath: string;
@@ -20,6 +21,8 @@ export default function PushDialog(props: Props) {
   const [remote, setRemote] = useState("");
   const [target, setTarget] = useState("");
   const [error, setError] = useState("");
+  const dirty = !!info && !info.hasUpstream && (remote !== "" || target !== info.branch);
+  const close = useDirtyClose(dirty, busy, props.onClose);
 
   useEffect(() => {
     let alive = true;
@@ -44,8 +47,8 @@ export default function PushDialog(props: Props) {
     } finally { setBusy(false); }
   };
 
-  return <Dialog title="推送提交" busy={busy} onClose={props.onClose} footer={<>
-    <button disabled={busy} onClick={props.onClose}>取消</button>
+  return <Dialog title="推送提交" busy={busy} onClose={close} footer={<>
+    <button disabled={busy} onClick={close}>取消</button>
     <button className="primary" disabled={busy || loading || !info || (!info.hasUpstream && (!remote || !target.trim()))} onClick={() => void push()}>{busy ? "推送中…" : info?.hasUpstream ? "Push" : "推送并建立 upstream"}</button>
   </>}>
     {loading && <p className="panel-hint">正在读取推送配置…</p>}

@@ -17,17 +17,22 @@ import Dialog from "./ui/Dialog";
 import Icon from "./ui/Icon";
 import { ConfirmProvider, useConfirm } from "./ui/Confirm";
 import { loadSettings, saveSettings } from "./settings";
+import { hasDirtyDialogs } from "./dialogState";
 import { fitWindowState, loadWindowState, saveWindowState } from "./windowState";
 import type { WindowState } from "./windowState";
 import { loadOpenRepos, pickActivePath, restoreCandidates, saveOpenRepos } from "./openRepos";
 import type { RepoGroupConfig } from "./repoGroups";
 import {
   DEFAULT_GROUP_ID, ensureGroupActive, groupForRepo, loadRepoGroups, primaryGroupId,
-  saveRepoGroups, setRepoAlias, setRepoGroup, visibleRepos,
+  displayRepoName, saveRepoGroups, setRepoAlias, setRepoGroup, visibleRepos,
 } from "./repoGroups";
 import RepoGroupsDialog from "./components/RepoGroupsDialog";
 import CloneDialog from "./components/CloneDialog";
 import CreateRepositoryDialog from "./components/CreateRepositoryDialog";
+import CommandPalette from "./components/CommandPalette";
+import { registerCommands, unregisterCommands } from "./commands";
+import type { Command } from "./commands";
+import { pickDirectory } from "./nativeDialog";
 
 const LAST_REPO_KEY = "git-extensions.lastRepo";
 const RECENT_REPOS_KEY = "git-extensions.recentRepos.v2";
@@ -37,7 +42,7 @@ function rememberActive(path: string | null) {
   if (path) localStorage.setItem(LAST_REPO_KEY, path);
   else localStorage.removeItem(LAST_REPO_KEY);
 }
-const EMPTY_META: SessionMeta = { busy: false, dirty: false, conflictCount: 0 };
+const EMPTY_META: SessionMeta = { busy: false, dirty: false, conflictCount: 0, loading: false, error: null };
 
 function recentRepos(): string[] {
   try {
@@ -52,6 +57,7 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
   const [recent, setRecent] = useState<string[]>(() => TEST_REPO ? [] : recentRepos());
   const [settings, setSettings] = useState(loadSettings);
   const [showSettings, setShowSettings] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
   const [explorerIntegrationSupported, setExplorerIntegrationSupported] = useState(false);
   const [cloneParent, setCloneParent] = useState<string | null>(null);
   const [createRepositoryPath, setCreateRepositoryPath] = useState<string | null>(null);
@@ -165,6 +171,13 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
 
   useEffect(() => { if (!TEST_REPO) saveSettings(settings); }, [settings]);
   useEffect(() => { if (!TEST_REPO) saveRepoGroups(repoGroups); }, [repoGroups]);
+  // 任务栏 / Alt+Tab 标题跟随活动仓库和草稿状态，而不是固定为应用名。
+  useEffect(() => {
+    const repo = repos.find((item) => item.path === activePath);
+    const name = repo ? displayRepoName(repoGroups, repo) : "";
+    const dirty = activePath ? meta[activePath]?.dirty : false;
+    void getCurrentWindow().setTitle(name ? `${dirty ? "● " : ""}${name} — Git Extensions` : "Git Extensions").catch(() => undefined);
+  }, [activePath, meta, repoGroups, repos]);
   // 恢复完成前不能用空数组覆盖上次的页签列表。
   useEffect(() => {
     if (TEST_REPO || !sessionRestored) return;
@@ -173,9 +186,10 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
 
   const notify = useCallback((repoPath: string, kind: Notice["kind"], message: string, details?: string, repoName?: string) => {
     const id = ++noticeId.current;
-    setNotices((prev) => [...prev.slice(-19), { id, repoPath, repoName: repoName ?? repoPath.split(/[\\/]/).pop() ?? repoPath, kind, message, details }]);
-    if (kind === "success") window.setTimeout(() => setNotices((prev) => prev.filter((n) => n.id !== id)), 4000);
+    setNotices((prev) => [...prev.slice(-99), { id, repoPath, repoName: repoName ?? repoPath.split(/[\\/]/).pop() ?? repoPath, kind, message, details }]);
   }, []);
+  const dismissNotice = useCallback((id: number) => setNotices((prev) => prev.filter((notice) => notice.id !== id)), []);
+  const clearNotices = useCallback(() => setNotices([]), []);
 
   const openRepo = useCallback(async (path: string): Promise<RepoInfo | null> => {
     const trimmed = path.trim();
@@ -229,6 +243,15 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
     setShowOpen(true);
   }, []);
 
+  const browseOpenPath = useCallback(async () => {
+    try {
+      const path = await pickDirectory("选择 Git 仓库目录");
+      if (path) setOpenPath(path);
+    } catch (error) {
+      notify("", "error", "无法打开目录选择器", String(error));
+    }
+  }, [notify]);
+
   const beginOpenRightOf = useCallback((path: string) => {
     setOpenInsertAfter(path);
     setOpenPath("");
@@ -242,6 +265,20 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       .catch((error) => notify("", "error", "无法读取系统集成能力", String(error)));
     return () => { alive = false; };
   }, [notify]);
+
+  // 拖放目录 / 仓库内文件即可打开仓库；多个路径按顺序打开，避免并发写页签列表。
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void getCurrentWindow().onDragDropEvent((event) => {
+      const payload = event.payload;
+      if (payload.type !== "drop" || payload.paths.length === 0) return;
+      void (async () => {
+        for (const path of payload.paths) await openRepo(path);
+      })();
+    }).then((fn) => { if (disposed) fn(); else unlisten = fn; }).catch(() => undefined);
+    return () => { disposed = true; unlisten?.(); };
+  }, [openRepo]);
 
   useEffect(() => {
     let alive = true;
@@ -420,22 +457,50 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
     setMeta((prev) => { const next = { ...prev }; delete next[path]; return next; });
   }, [activePath, confirm, meta, notify]);
 
-  const closeOthers = useCallback((path: string) => {
-    const closing = shownRepos.filter((repo) => repo.path !== path && !meta[repo.path]?.busy && !getRepoOperation(repo.path) && !meta[repo.path]?.dirty);
-    if (closing.length === 0) { setActivePath(path); rememberActive(path); return; }
-    const paths = new Set(closing.map((repo) => repo.path));
+  const closeOthers = useCallback(async (path: string) => {
+    const closable: typeof shownRepos = [];
+    const kept: { name: string; reason: string }[] = [];
+    for (const repo of shownRepos) {
+      if (repo.path === path) continue;
+      if (meta[repo.path]?.busy || getRepoOperation(repo.path)) kept.push({ name: repo.name, reason: "有操作进行中" });
+      else if (meta[repo.path]?.dirty) kept.push({ name: repo.name, reason: "有未保存草稿" });
+      else closable.push(repo);
+    }
+    if (closable.length === 0) {
+      if (kept.length > 0) {
+        notify(path, "info", "没有可关闭的其它页签", kept.map((item) => `${item.name}：${item.reason}`).join("\n"), "关闭其它");
+      }
+      setActivePath(path);
+      rememberActive(path);
+      return;
+    }
+    if (kept.length > 0) {
+      const ok = await confirm({
+        title: `关闭其它 ${closable.length} 个页签？`,
+        body: <div>
+          <p>以下页签会被关闭；带未保存草稿或正在操作的页签将保留。</p>
+          <pre className="confirm-file-list">{kept.map((item) => `${item.name} · ${item.reason}`).join("\n")}</pre>
+        </div>,
+        confirmLabel: `关闭 ${closable.length} 个页签`,
+      });
+      if (!ok) return;
+    }
+    const paths = new Set(closable.map((repo) => repo.path));
     setRepos((prev) => prev.filter((repo) => !paths.has(repo.path)));
     setMeta((prev) => Object.fromEntries(Object.entries(prev).filter(([repoPath]) => !paths.has(repoPath))));
     setActivePath(path);
     rememberActive(path);
-  }, [meta, shownRepos]);
+  }, [confirm, meta, notify, shownRepos]);
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (document.querySelector(".modal-backdrop, .context-menu")) return;
       const mod = event.ctrlKey || event.metaKey;
       if (!mod) return;
-      if (event.key.toLowerCase() === "o") {
+      if (event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setShowPalette(true);
+      } else if (event.key.toLowerCase() === "o") {
         event.preventDefault();
         beginOpen(activePath ?? "");
       } else if (event.key.toLowerCase() === "w" && activePath) {
@@ -459,10 +524,40 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
   const updateMeta = useCallback((path: string, value: SessionMeta) => {
     setMeta((prev) => {
       const old = prev[path];
-      if (old && old.busy === value.busy && old.dirty === value.dirty && old.conflictCount === value.conflictCount) return prev;
+      if (old && old.busy === value.busy && old.dirty === value.dirty && old.conflictCount === value.conflictCount && old.loading === value.loading && old.error === value.error) return prev;
       return { ...prev, [path]: value };
     });
   }, []);
+
+  const activateRepo = useCallback((path: string) => {
+    setRepoGroups((prev) => ensureGroupActive(prev, groupForRepo(prev, path)));
+    setActivePath(path);
+    rememberActive(path);
+  }, []);
+
+  // 全局命令：应用级动作与所有已打开仓库的切换；仓库内动作由 RepoWorkspace 注册。
+  useEffect(() => {
+    const commands: Command[] = [
+      { id: "app.open-repo", title: "打开仓库…", group: "应用", shortcut: "Ctrl+O", keywords: ["open", "repository"], run: () => beginOpen() },
+      { id: "app.clone", title: "克隆仓库…", group: "应用", keywords: ["clone"], run: () => setCloneParent("") },
+      { id: "app.create", title: "新建仓库…", group: "应用", keywords: ["create", "init"], run: () => setCreateRepositoryPath("") },
+      { id: "app.settings", title: "设置…", group: "应用", shortcut: "Ctrl+,", keywords: ["settings", "preferences"], run: () => setShowSettings(true) },
+      { id: "app.groups", title: "管理仓库页签分组…", group: "应用", keywords: ["group", "tab"], run: () => setShowGroupManager(true) },
+      { id: "app.close-tab", title: "关闭当前仓库页签", group: "应用", shortcut: "Ctrl+W", enabled: !!activePath, run: () => { if (activePath) void closeRepo(activePath); } },
+    ];
+    for (const repo of repos) {
+      commands.push({
+        id: `app.switch:${repo.path}`,
+        title: `切换到 ${displayRepoName(repoGroups, repo)}`,
+        group: "切换仓库",
+        keywords: [repo.path, repo.name],
+        enabled: repo.path !== activePath,
+        run: () => activateRepo(repo.path),
+      });
+    }
+    registerCommands("app", commands);
+    return () => unregisterCommands("app");
+  }, [activateRepo, activePath, beginOpen, closeRepo, repoGroups, repos]);
 
   const updateRepoGroups = useCallback((next: RepoGroupConfig) => setRepoGroups(next), []);
 
@@ -486,11 +581,11 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
   const allowCloseRef = useRef(false);
   const closeWindow = useCallback(async () => {
     const entries = Object.entries(metaRef.current);
-    const anyDirty = entries.some(([, m]) => m.dirty);
+    const anyDirty = hasDirtyDialogs() || entries.some(([, m]) => m.dirty);
     const anyBusy = lifecycleBusy || entries.some(([, m]) => m.busy);
     if (anyBusy && !anyDirty) { notify(activePath ?? "", "info", "有仓库操作进行中，完成后才能关闭窗口"); return; }
     if (anyDirty || anyBusy) {
-      const ok = await confirm({ title: "关闭应用？", body: "有仓库存在未保存草稿或正在执行的操作。关闭窗口会丢弃界面草稿（不会删除仓库），进行中的 Git 写操作可能在后台完成。", confirmLabel: "退出", danger: true });
+      const ok = await confirm({ title: "关闭应用？", body: "有仓库存在未保存草稿、弹窗输入或正在执行的操作。关闭窗口会丢弃界面草稿与弹窗输入（不会删除仓库），进行中的 Git 写操作可能在后台完成。", confirmLabel: "退出", danger: true });
       if (!ok) return;
     }
     try { await flushWindowState(); } catch { /* 状态保存失败不阻止退出 */ }
@@ -524,10 +619,13 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
         activePath={activePath}
         meta={meta}
         repoGroups={repoGroups}
-        onActivate={(path) => { setActivePath(path); rememberActive(path); }}
+        onActivate={activateRepo}
         onClose={(path) => void closeRepo(path)}
         onCloseOthers={(path) => closeOthers(path)}
         onOpen={() => beginOpen()}
+        onClone={() => setCloneParent("")}
+        onCreate={() => setCreateRepositoryPath("")}
+        onCommandPalette={() => setShowPalette(true)}
         onOpenRightOf={beginOpenRightOf}
         onSettings={() => setShowSettings(true)}
         onCopyPath={(path) => { void navigator.clipboard?.writeText(path).then(() => notify(path, "success", "已复制仓库路径")); }}
@@ -537,6 +635,8 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
         onSetRepoAlias={(path, alias) => updateRepoGroups(setRepoAlias(repoGroups, path, alias))}
         onManageGroups={() => setShowGroupManager(true)}
         onCloseWindow={() => void closeWindow()}
+        recentRepos={recent}
+        onOpenRecent={(path) => { void openRepo(path); }}
       />
       {repos.filter((repo) => mounted.has(repo.path)).map((repo) => (
         <div className={`repo-host${repo.path === activePath ? " active" : ""}`} key={repo.path} aria-hidden={repo.path !== activePath}>
@@ -548,6 +648,7 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
             onSettings={() => setShowSettings(true)}
             onNotify={(kind, message, details) => notify(repo.path, kind, message, details, repo.name)}
             onMeta={(value) => updateMeta(repo.path, value)}
+            onOpenRepo={(path) => { void openRepo(path); }}
             launchAction={workspaceLaunch?.path === repo.path ? workspaceLaunch : null}
             onLaunchActionConsumed={() => setWorkspaceLaunch((current) => current?.path === repo.path ? null : current)}
           />
@@ -568,20 +669,34 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
         <Icon name="branch" size={42} />
         <h1>Git Extensions</h1>
         <p>打开一个本地 Git 仓库，开始查看历史或提交变更。</p>
-        <button className="primary" onClick={() => beginOpen()}><Icon name="plus" />打开仓库</button>
+        <div className="welcome-actions">
+          <button className="primary" onClick={() => beginOpen()}><Icon name="plus" />打开仓库</button>
+          <button onClick={() => setCloneParent("")}><Icon name="fetch" />克隆仓库</button>
+          <button onClick={() => setCreateRepositoryPath("")}><Icon name="folder" />新建仓库</button>
+        </div>
+        {recent.length > 0 && <div className="welcome-recent">
+          <span className="section-label">最近打开</span>
+          {recent.slice(0, 6).map((path) => <button key={path} title={path} onClick={() => void openRepo(path)}><Icon name="history" size={13} /><span>{path}</span></button>)}
+        </div>}
       </div>}
       {showGroupManager && <RepoGroupsDialog config={repoGroups} repos={repos} onChange={updateRepoGroups} onClose={() => setShowGroupManager(false)} />}
       {showOpen && <Dialog title="打开 Git 仓库" onClose={() => { if (!opening) { setShowOpen(false); setOpenInsertAfter(null); } }} busy={opening} footer={<>
         <button disabled={opening} onClick={() => { setShowOpen(false); setOpenInsertAfter(null); }}>取消</button>
         <button className="primary" disabled={opening || !openPath.trim()} onClick={() => void openRepo(openPath)}>{opening ? "打开中…" : "打开"}</button>
       </>}>
-        <label className="field-label">仓库路径<input data-autofocus className="repo-path-input" placeholder="C:\path\to\project" value={openPath} onChange={(e) => setOpenPath(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void openRepo(openPath); }} /></label>
-        {recent.length > 0 && <div className="recent-repos"><div className="section-label">最近打开</div>{recent.map((path) => <button key={path} onClick={() => setOpenPath(path)} title={path}><Icon name="history" /><span>{path}</span></button>)}</div>}
+        <label className="field-label">仓库路径
+          <div className="path-input-row">
+            <input data-autofocus className="repo-path-input" placeholder="C:\path\to\project" value={openPath} onChange={(e) => setOpenPath(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void openRepo(openPath); }} />
+            <button type="button" disabled={opening} onClick={() => void browseOpenPath()}>浏览…</button>
+          </div>
+        </label>
+        {recent.length > 0 && <div className="recent-repos"><div className="section-label">最近打开</div>{recent.map((path) => <button key={path} onClick={() => setOpenPath(path)} onDoubleClick={() => void openRepo(path)} title={`${path}（双击直接打开）`}><Icon name="history" /><span>{path}</span></button>)}</div>}
       </Dialog>}
       {showSettings && <SettingsDialog settings={settings} explorerIntegrationSupported={!TEST_REPO && explorerIntegrationSupported} onSave={saveSettingsDialog} onClose={() => setShowSettings(false)} />}
+      {showPalette && <CommandPalette onClose={() => setShowPalette(false)} />}
       {cloneParent !== null && <CloneDialog initialParent={cloneParent} onOpen={openRepo} onClose={() => setCloneParent(null)} onBusyChange={setLifecycleBusy} />}
       {createRepositoryPath !== null && <CreateRepositoryDialog initialPath={createRepositoryPath} onOpen={openRepo} onClose={() => setCreateRepositoryPath(null)} onBusyChange={setLifecycleBusy} />}
-      <NotificationCenter notices={notices} onDismiss={(id) => setNotices((prev) => prev.filter((n) => n.id !== id))} onClear={() => setNotices([])} />
+      <NotificationCenter notices={notices} onDismiss={dismissNotice} onClear={clearNotices} />
     </div>
   );
 }

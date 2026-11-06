@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AppSettings } from "../settings";
 import type { ExplorerAction, ExplorerMenuPlacement } from "../types";
 import {
   EXPLORER_MENU_ACTIONS, explorerMenuPreview, nextExplorerMenuPlacement,
 } from "../explorerMenu";
 import Dialog from "../ui/Dialog";
+import { useDirtyClose } from "../ui/useDirtyClose";
+import { SHORTCUT_HELP } from "../commands";
 
 interface Props {
   settings: AppSettings;
@@ -52,7 +54,8 @@ export default function SettingsDialog({ settings, onSave, onClose, explorerInte
     setDraft((prev) => ({ ...prev, [key]: value }));
     setSaveError("");
   };
-  const requestClose = useCallback(() => { if (!saving) onClose(); }, [onClose, saving]);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
+  const requestClose = useDirtyClose(dirty, saving, onClose);
   const updatePlacement = (action: ExplorerAction, placement: ExplorerMenuPlacement) => {
     setDraft((prev) => ({
       ...prev,
@@ -82,7 +85,18 @@ export default function SettingsDialog({ settings, onSave, onClose, explorerInte
     </div>
   </>}>
     <div className="settings-layout">
-      <nav className="settings-categories" aria-label="设置分类">
+      <nav className="settings-categories" aria-label="设置分类" onKeyDown={(event) => {
+        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+        if (buttons.length === 0) return;
+        const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+          : event.key === "ArrowDown" ? (index < 0 ? 0 : Math.min(buttons.length - 1, index + 1))
+          : (index <= 0 ? 0 : index - 1);
+        buttons[next]?.focus();
+        if (CATEGORIES[next]) setCategory(CATEGORIES[next].id);
+      }}>
         {CATEGORIES.map((item) => <button
           type="button"
           key={item.id}
@@ -140,13 +154,7 @@ export default function SettingsDialog({ settings, onSave, onClose, explorerInte
         </>}
         {category === "shortcuts" && <div className="shortcut-help">
           <h4>快捷键</h4>
-          <div><kbd>Ctrl+O</kbd> 打开仓库　<kbd>Ctrl+W</kbd> 关闭页签　<kbd>Ctrl+Tab</kbd> 切换仓库</div>
-          <div><kbd>Ctrl+1/2/3</kbd> 历史 / 变更 / 对比　<kbd>F5</kbd> 刷新　<kbd>F6</kbd> 面板焦点</div>
-          <div><kbd>Ctrl+F</kbd> 过滤　<kbd>Ctrl+B</kbd> 导航　<kbd>Shift+F10</kbd> 右键菜单</div>
-          <div><kbd>↑/↓</kbd> 选择提交　<kbd>PgUp/PgDn</kbd> 翻页　<kbd>Enter</kbd> 查看差异</div>
-          <div><kbd>Ctrl+Shift+B/S/T/M</kbd> 分支 / Stash / 标签 / 子模块</div>
-          <div><kbd>Ctrl+Shift+F/L/P</kbd> Fetch / Pull / Push　<kbd>Ctrl+Enter</kbd> 提交</div>
-          <div><kbd>Ctrl+S</kbd> 保存冲突结果　<kbd>Esc</kbd> 退出最大化 / 关闭弹窗</div>
+          {SHORTCUT_HELP.map((item) => <div key={item.keys}><kbd>{item.keys}</kbd>{item.text}</div>)}
         </div>}
       </section>
     </div>

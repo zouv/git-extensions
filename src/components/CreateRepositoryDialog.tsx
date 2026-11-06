@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useRepoBusy } from "../useRepoBusy";
 import Dialog from "../ui/Dialog";
+import { useDirtyClose } from "../ui/useDirtyClose";
+import { pickDirectory } from "../nativeDialog";
 
 interface Props {
   initialPath: string;
@@ -16,10 +18,18 @@ export default function CreateRepositoryDialog({ initialPath, onOpen, onClose, o
   const [error, setError] = useState<string | null>(null);
   const repoBusy = useRepoBusy(path);
   const busy = localBusy || repoBusy;
+  const dirty = path.trim().length > 0 && path !== initialPath;
+  const close = useDirtyClose(dirty, busy, onClose);
   useEffect(() => {
     onBusyChange(busy);
     return () => onBusyChange(false);
   }, [busy, onBusyChange]);
+  const browse = async () => {
+    try {
+      const selected = await pickDirectory("选择新仓库目录");
+      if (selected) setPath(selected);
+    } catch (e) { setError(String(e)); }
+  };
   const create = async () => {
     if (busy || !path.trim()) return;
     setBusy(true); setError(null);
@@ -30,9 +40,9 @@ export default function CreateRepositoryDialog({ initialPath, onOpen, onClose, o
     } catch (e) { setError(String(e)); }
     finally { setBusy(false); }
   };
-  return <Dialog title="创建新仓库" onClose={onClose} busy={busy} footer={<><button disabled={busy} onClick={onClose}>取消</button><button className="primary" disabled={busy || !path.trim()} onClick={() => void create()}>创建并打开</button></>}>
+  return <Dialog title="创建新仓库" onClose={close} busy={busy} footer={<><button disabled={busy} onClick={close}>取消</button><button className="primary" disabled={busy || !path.trim()} onClick={() => void create()}>创建并打开</button></>}>
     <div className="dialog-form">
-      <label><span>仓库目录</span><input data-autofocus disabled={busy} value={path} onChange={(e) => setPath(e.target.value)} /></label>
+      <label><span>仓库目录</span><div className="path-input-row"><input data-autofocus disabled={busy} value={path} onChange={(e) => setPath(e.target.value)} /><button type="button" disabled={busy} onClick={() => void browse()}>浏览…</button></div></label>
       <div className="settings-note">将在上述目录创建普通非 bare 仓库。为避免意外嵌套，目标已经位于其它 Git 仓库内时会拒绝创建。</div>
       {error && <div className="inline-error" role="alert">{error}</div>}
     </div>

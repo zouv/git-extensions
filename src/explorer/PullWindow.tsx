@@ -25,8 +25,12 @@ export default function PullWindow({ target, onBusyChange }: Props) {
     }).catch(() => setAheadBehind(""));
   }, [target.repo.path]);
 
-  const pull = async () => {
-    if (busy) return;
+  const openMain = async () => {
+    try { await api.openRepositoryInMain(target.repo.path); }
+    catch (reason) { setError(`无法转到主窗口：${String(reason)}`); }
+  };
+
+  const pull = async () => {    if (busy) return;
     setBusy(true); setError(""); setOutput(null);
     try {
       const result = await api.pullWithOutput(target.repo.path);
@@ -49,7 +53,7 @@ export default function PullWindow({ target, onBusyChange }: Props) {
       <button className="primary" disabled={busy} onClick={() => void pull()}>{busy ? "Pull 执行中…" : "执行 Pull"}</button>
     </div>
     {error && <><div className="inline-error" role="alert">{error}</div>
-      {operation?.conflicts.length ? <button onClick={() => void api.openRepositoryInMain(target.repo.path)}>转到主窗口解决冲突</button> : null}
+      {operation?.conflicts.length ? <button onClick={() => void openMain()}>转到主窗口解决冲突</button> : null}
     </>}
     {output && <section className="command-output">
       <h4>Pull 输出</h4>

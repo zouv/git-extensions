@@ -37,7 +37,7 @@
 - 级联父键使用 `MUIVerb`，`(Default)` 必须为**值未设置**。`ExtendedSubCommandsKey` 是父键上的 **REG_SZ 相对路径值**（如 `Directory\shell\GitExt.Menu`、`*\shell\GitExt.Menu`），子命令位于该路径对应键的 `shell` 下；字面 `ExtendedSubCommandsKey` 子键或空字符串值都不能让 Explorer 识别级联。此格式以 Windows 自带 `Directory\shell\UpdateEncryptionSettings` 为实测参照，known 计划同时覆盖两种旧布局和旧 `(Default)` 标签。
 - `main` 先处理内部 Rebase editor，再解析 `--explorer-action <动作> [--path <路径>]`。single-instance 插件必须最先注册；首进程按首请求创建窗口，后续进程只把参数转发给首进程。
 - `window_host` 为每个窗口保存 pending 请求。`main` / `open-repository` / `settings` 进入唯一完整主窗口；其余动作各创建 `action-N` 轻量窗口。主窗口已存在时先 `unminimize → show → set_focus`，再入队并 emit `main-launch-available`；前端先订阅事件，再调用 `take_pending_launches` 排空，避免丢请求。
-- 前端启动 `get_window_bootstrap` 决定渲染完整 `App` 或 `ExplorerWindow`。轻量窗口隐藏创建，React 提交后调用 `show_current_window`；不读取 / 保存主窗口的窗口几何、页签、分组或最近仓库。
+- 前端启动 `get_window_bootstrap` 决定渲染完整 `App` 或 `ExplorerWindow`；轻量窗口在 `main.tsx` 外层包 `ConfirmProvider`，保证弹窗 dirty 关闭与危险确认可用。轻量窗口隐藏创建，React 提交后调用 `show_current_window`；不读取 / 保存主窗口的窗口几何、页签、分组或最近仓库。
 - Open repository / Settings 由主窗口串行消费。Open 复用 `openRepo` 去重 / 激活页签；Settings 直接打开设置弹窗。轻量动作窗口是单任务界面，不启动提交日志洪流或主工作区轮询。
 
 ## 4. IPC 契约

@@ -4,6 +4,7 @@ import { restoreConflictDraft } from "../viewState";
 import { useRepoBusy } from "../useRepoBusy";
 import type { ConflictFile, ConflictDraft, OperationState } from "../types";
 import Icon from "../ui/Icon";
+import { moveListFocus } from "../ui/listNav";
 import { useConfirm } from "../ui/Confirm";
 
 interface Props {
@@ -79,6 +80,13 @@ export default function ConflictCenter(props: Props) {
     setResult(value ?? ""); setResolveAsDeletion(value === null); setDirty(true);
   };
 
+  const adoptBoth = () => {
+    if (busy || !content) return;
+    const parts = [content.ours, content.theirs].filter((value): value is string => value !== null);
+    setResult(parts.join("\n")); setResolveAsDeletion(parts.length === 0); setDirty(true);
+    editorRef.current?.focus();
+  };
+
   const saveResolved = async () => {
     if (!selected || busy || !content || content.path !== selected || content.binary || content.truncated) return;
     if (staleDraft && !await confirm({ title: "保存经过外部变化的合并草稿？", body: "请确认已核对最新两侧内容。保存将覆盖当前工作区文件并暂存。", confirmLabel: "已核对，保存草稿", danger: true, requireAck: true })) return;
@@ -99,21 +107,33 @@ export default function ConflictCenter(props: Props) {
   const continueOperation = async () => {
     if (busy) return;
     setBusy(true); setError("");
+    let continued = false;
     try {
       await api.continueOperation(props.repoPath);
+      continued = true;
       props.onNotify("success", `${state ? operationNames[state.kind] : "操作"}已继续`);
       props.onChanged();
-      const next = await api.getOperationState(props.repoPath);
-      setState(next);
-      if (next.kind === "none") { props.onExit(); return; }
-      if (next.conflicts.length > 0) { setSelected(next.conflicts[0]); await loadFile(next.conflicts[0]); }
     } catch (e) {
       const details = String(e);
       const next = await api.getOperationState(props.repoPath).catch(() => null);
       if (next) setState(next);
       if (next?.conflicts.length) { setSelected(next.conflicts[0]); await loadFile(next.conflicts[0]); }
       setError(details); props.onChanged(); props.onNotify("error", "继续操作未完成，请检查当前 Git 状态", details);
-    } finally { setBusy(false); }
+    }
+    if (continued) {
+      // 操作已成功；刷新失败不能反过来把成功判成失败。
+      try {
+        const next = await api.getOperationState(props.repoPath);
+        setState(next);
+        if (next.kind === "none") { props.onExit(); }
+        else if (next.conflicts.length > 0) { setSelected(next.conflicts[0]); await loadFile(next.conflicts[0]); }
+      } catch (e) {
+        const details = String(e);
+        setError(`操作已继续，但刷新状态失败：${details}`);
+        props.onNotify("info", "操作已继续，但状态刷新失败，请稍后点「刷新状态」", details);
+      }
+    }
+    setBusy(false);
   };
 
   const skip = async () => {
@@ -152,6 +172,8 @@ export default function ConflictCenter(props: Props) {
   };
 
   const name = state ? operationNames[state.kind] : "操作";
+  const conflictMarkers = (result.match(/^(<{7}|>{7})( |$)/gm) ?? []).length;
+  const continueBlocked = !!state && state.kind !== "none" && (state.conflicts.length > 0 || dirty);
   return (
     <div className="task-view conflict-center">
       <div className="task-header conflict-task-header">
@@ -161,6 +183,7 @@ export default function ConflictCenter(props: Props) {
         {state?.current && state.total && <span className="task-progress">第 {state.current}/{state.total} 步</span>}
         <span className={state?.conflicts.length ? "warning-text" : "success-text"}>{state?.conflicts.length ? `还有 ${state.conflicts.length} 个文件未解决` : "所有冲突已解决"}</span>
         <div className="toolbar-spacer" />
+        {continueBlocked && <span className="continue-hint">{dirty ? "先保存当前文件" : `${state?.conflicts.length ?? 0} 个文件未解决`}</span>}
         <button onClick={() => void reload()} disabled={busy} title="重新读取操作状态与来源，保留当前会话草稿"><Icon name="refresh" />刷新状态</button>
         <button className="primary" disabled={busy || !state || state.kind === "none" || state.conflicts.length > 0 || dirty} title={dirty ? "先保存当前文件" : state?.conflicts.length ? "仍有未解决冲突" : `继续 ${name}`} onClick={() => void continueOperation()}>继续 {name}</button>
         {state && ["rebase", "cherryPick", "revert"].includes(state.kind) && <button disabled={busy} onClick={() => void skip()}>跳过当前提交…</button>}
@@ -168,19 +191,20 @@ export default function ConflictCenter(props: Props) {
       </div>
       {error && <div className="inline-error"><Icon name="warning" /><span>{error}</span><button onClick={() => { void navigator.clipboard?.writeText(error); }}>复制</button></div>}
       <div className="conflict-layout">
-        <div className="conflict-files">
+        <div className="conflict-files" aria-label="冲突文件">
           <div className="panel-header">冲突文件<span className="count-badge">{state?.conflicts.length ?? 0}</span></div>
-          {state?.conflicts.map((path) => <button className={path === selected ? "selected" : ""} key={path} onClick={() => void chooseFile(path)}><Icon name="conflict" size={14} /><span title={path}>{path}</span>{(props.drafts.has(path) || (path === selected && dirty)) && <span className="dirty-dot" />}</button>)}
+          {state?.conflicts.map((path) => <button className={path === selected ? "selected" : ""} key={path} onClick={() => void chooseFile(path)} onKeyDown={(e) => { moveListFocus(e, "button"); }}><Icon name="conflict" size={14} /><span title={path}>{path}</span>{(props.drafts.has(path) || (path === selected && dirty)) && <span className="dirty-dot" />}</button>)}
           {state && state.conflicts.length === 0 && <div className="empty-state compact"><Icon name="check" /><span>没有未解决文件</span><span>现在可以继续{name}。</span></div>}
         </div>
         <div className="conflict-editor">
           {content ? <>
-            <div className="conflict-file-title"><span className="mono">{content.path}</span>{dirty && <span className="warning-text">未保存</span>}</div>
+            <div className="conflict-file-title"><span className="mono">{content.path}</span>{dirty && <span className="warning-text">未保存</span>}{conflictMarkers > 0 && <span className="warning-text">{conflictMarkers} 个冲突标记未处理</span>}</div>
             <div className="conflict-sides">
               <label>当前：{content.oursLabel}<textarea readOnly value={content.ours ?? "（该侧不存在此文件）"} /></label>
               <label>传入：{content.theirsLabel}<textarea readOnly value={content.theirs ?? "（该侧不存在此文件）"} /></label>
             </div>
-            <div className="merge-result-header"><strong>合并结果</strong><button disabled={busy} onClick={() => adopt("ours")}>采用当前{content.ours === null ? "（删除）" : ""}</button><button disabled={busy} onClick={() => adopt("theirs")}>采用传入{content.theirs === null ? "（删除）" : ""}</button><button disabled={busy} onClick={() => jumpConflict(-1)}>上一个冲突块</button><button disabled={busy} onClick={() => jumpConflict(1)}>下一个冲突块</button></div>
+            <div className="merge-result-header"><strong>合并结果</strong><button disabled={busy} onClick={() => adopt("ours")}>采用当前{content.ours === null ? "（删除）" : ""}</button><button disabled={busy} onClick={() => adopt("theirs")}>采用传入{content.theirs === null ? "（删除）" : ""}</button><button disabled={busy} onClick={adoptBoth}>合并两侧</button><button disabled={busy} onClick={() => jumpConflict(-1)}>上一个冲突块</button><button disabled={busy} onClick={() => jumpConflict(1)}>下一个冲突块</button></div>
+            {conflictMarkers > 0 && <div className="inline-warning"><Icon name="warning" size={14} /><span>合并结果仍有 {conflictMarkers} 个冲突标记；处理完所有标记后才能继续。</span></div>}
             <textarea disabled={busy} ref={editorRef} className="merge-editor" aria-label="合并结果" spellCheck={false} value={result} onChange={(e) => { setResult(e.target.value); setResolveAsDeletion(false); setDirty(true); }} onKeyDown={(e) => {
               if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); void saveResolved(); }
             }} />

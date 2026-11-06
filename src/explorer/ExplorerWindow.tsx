@@ -3,7 +3,6 @@ import { api } from "../api";
 import { useRepoBusy } from "../useRepoBusy";
 import type { BranchInfo, ExplorerAction, ExplorerTarget, LaunchRequest, StatusSnapshot } from "../types";
 import { EXPLORER_MENU_ACTIONS } from "../explorerMenu";
-import { ConfirmProvider } from "../ui/Confirm";
 import ApplyPatchDialog from "../components/ApplyPatchDialog";
 import BranchDialog from "../components/BranchDialog";
 import CheckoutRevisionDialog from "../components/CheckoutRevisionDialog";
@@ -213,6 +212,6 @@ export default function ExplorerWindow({ launch }: { launch: LaunchRequest }) {
   }
 
   return <Frame action={launch.action} target={target} message={message}>
-    <ConfirmProvider>{content}</ConfirmProvider>
+    {content}
   </Frame>;
 }

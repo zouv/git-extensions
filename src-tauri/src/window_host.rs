@@ -158,6 +158,16 @@ fn explorer_window_size(action: ExplorerAction) -> (f64, f64) {
     }
 }
 
+fn explorer_window_min_size(action: ExplorerAction) -> (f64, f64) {
+    match action {
+        ExplorerAction::Commit
+        | ExplorerAction::ViewChanges
+        | ExplorerAction::Pull
+        | ExplorerAction::FileHistory => (900.0, 620.0),
+        _ => (560.0, 420.0),
+    }
+}
+
 fn create_explorer_window(app: &AppHandle, request: LaunchRequest) -> Result<(), String> {
     let state = app.state::<LaunchState>();
     let label = {
@@ -166,6 +176,7 @@ fn create_explorer_window(app: &AppHandle, request: LaunchRequest) -> Result<(),
         format!("action-{}", windows.next_explorer_id)
     };
     let (width, height) = explorer_window_size(request.action);
+    let (min_width, min_height) = explorer_window_min_size(request.action);
     {
         let mut windows = lock(&state);
         windows.sessions.insert(
@@ -183,7 +194,7 @@ fn create_explorer_window(app: &AppHandle, request: LaunchRequest) -> Result<(),
             request.action.window_title()
         ))
         .inner_size(width, height)
-        .min_inner_size(560.0, 420.0)
+        .min_inner_size(min_width, min_height)
         .decorations(true)
         .visible(false)
         .build();

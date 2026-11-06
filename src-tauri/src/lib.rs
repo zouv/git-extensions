@@ -11,6 +11,7 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(launch_request: Option<launch::LaunchRequest>) {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             let request =
                 launch::parse_launch_request(argv.into_iter().skip(1).map(OsString::from));

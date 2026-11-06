@@ -84,6 +84,16 @@ export default function CommitWindow({ action, target, onDirtyChange, onBusyChan
     } catch (reason) { setError(String(reason)); setMessage(String(reason)); }
   };
 
+  const openInMain = async (message: string) => {
+    try {
+      await api.openRepositoryInMain(target.repo.path);
+      setMessage(message);
+    } catch (reason) {
+      setError(String(reason));
+      setMessage(`无法转到主窗口：${String(reason)}`);
+    }
+  };
+
   if (!status) {
     return <div className="empty-state">{error ? <span role="alert">{error}</span> : <><span className="spinner" /><span>读取工作区…</span></>}</div>;
   }
@@ -105,7 +115,7 @@ export default function CommitWindow({ action, target, onDirtyChange, onBusyChan
       highlightEnabled={highlightEnabled}
       onPathAction={(kind, path) => void pathAction(kind, path)}
       onDiscard={(paths, untracked) => void discard(paths, untracked)}
-      onOpenConflict={() => { void api.openRepositoryInMain(target.repo.path); setMessage("已转到主窗口；请在冲突中心解决冲突"); }}
+      onOpenConflict={() => { void openInMain("已转到主窗口；请在冲突中心解决冲突"); }}
       onDirtyChange={onDirtyChange}
       focusCommitSignal={action === "commit" ? 1 : 0}
       initialPath={target.relativePath}

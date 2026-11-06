@@ -3,6 +3,7 @@ import { api, formatDate } from "../api";
 import type { FileDiff, FileLogEntry } from "../types";
 import DiffView from "./DiffView";
 import Dialog from "../ui/Dialog";
+import { moveListFocus } from "../ui/listNav";
 
 interface Props {
   repoPath: string;
@@ -71,9 +72,9 @@ export default function FileHistoryDialog({ repoPath, file, highlightEnabled, on
       {error && <div className="panel-hint">{error}</div>}
       {!loading && !error && (
         <>
-          <div className="history-list">
+          <div className="history-list" role="listbox" aria-label="文件历史">
             {entries.map((entry) => (
-              <div key={entry.oid} className={`history-item${selected === entry.oid ? " selected" : ""}`} onClick={() => setSelected(entry.oid)}>
+              <div key={entry.oid} className={`history-item${selected === entry.oid ? " selected" : ""}`} role="option" aria-selected={selected === entry.oid} tabIndex={0} onFocus={() => setSelected(entry.oid)} onClick={() => setSelected(entry.oid)} onKeyDown={(e) => { if (moveListFocus(e, ".history-item")) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(entry.oid); } }}>
                 <span className="blame-sha">{entry.shortId}</span>
                 <span className="history-subject" title={entry.subject}>{entry.subject}</span>
                 <span className="blame-author">{entry.authorName}</span>
@@ -82,7 +83,7 @@ export default function FileHistoryDialog({ repoPath, file, highlightEnabled, on
             ))}
             {entries.length === 0 && <div className="panel-hint">（无历史记录）</div>}
           </div>
-          <div className="history-diff">{diffError ? <div className="inline-error" role="alert">{diffError}</div> : diffLoading ? <div className="panel-hint" role="status">正在读取该版本的文件差异…</div> : diff ? <DiffView files={[diff]} highlightEnabled={highlightEnabled} showFileHeader={false} /> : <div className="panel-hint">选择提交查看该文件的 diff</div>}</div>
+          <div className="history-diff">{diffError ? <div className="inline-error" role="alert">{diffError}</div> : diffLoading ? <div className="panel-hint" role="status">正在读取该版本的文件差异…</div> : diff ? <DiffView files={[diff]} highlightEnabled={highlightEnabled} showFileHeader={false} prefKey={repoPath} /> : <div className="panel-hint">选择提交查看该文件的 diff</div>}</div>
         </>
       )}
     </Dialog>

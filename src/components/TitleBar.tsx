@@ -25,6 +25,9 @@ interface Props {
   onClose: (path: string) => void;
   onCloseOthers: (path: string) => void;
   onOpen: () => void;
+  onClone: () => void;
+  onCreate: () => void;
+  onCommandPalette: () => void;
   onOpenRightOf: (path: string) => void;
   onSettings: () => void;
   onCopyPath: (path: string) => void;
@@ -34,6 +37,8 @@ interface Props {
   onSetRepoAlias: (path: string, alias: string) => void;
   onManageGroups: () => void;
   onCloseWindow: () => void;
+  recentRepos: string[];
+  onOpenRecent: (path: string) => void;
 }
 
 const win = getCurrentWindow();
@@ -78,11 +83,13 @@ export default function TitleBar(props: Props) {
       label: g.name,
       color: g.color,
       checked: isGroupActive(config, g.id),
+      keepOpen: true,
       trailingAction: {
         icon: "pin" as const,
         label: g.id === DEFAULT_GROUP_ID ? "Default 不可 Pin" : g.pinned ? `取消 Pin 分组 ${g.name}` : `Pin 分组 ${g.name} 到顶部栏`,
         checked: g.pinned,
         disabled: g.id === DEFAULT_GROUP_ID,
+        keepOpen: true,
         onSelect: () => props.onRepoGroupsChange(togglePin(config, g.id)),
       },
       onSelect: () => props.onRepoGroupsChange(toggleActiveGroup(config, g.id)),
@@ -152,6 +159,13 @@ export default function TitleBar(props: Props) {
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={() => dropPin(g.id)}
                 onClick={() => props.onRepoGroupsChange(toggleActiveGroup(config, g.id))}
+                onKeyDown={(event) => {
+                  if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
+                    event.preventDefault();
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setGroupMenu({ x: rect.left, y: rect.bottom + 2 });
+                  }
+                }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   const r = e.currentTarget.getBoundingClientRect();
@@ -191,9 +205,22 @@ export default function TitleBar(props: Props) {
       {appMenu && (
         <ContextMenu x={appMenu.x} y={appMenu.y} onClose={() => setAppMenu(null)} ariaLabel="应用菜单" items={[
           { id: "open", label: "打开仓库…", icon: "plus", shortcut: "Ctrl+O", onSelect: props.onOpen },
+          { id: "clone", label: "克隆仓库…", icon: "fetch", onSelect: props.onClone },
+          { id: "create", label: "新建仓库…", icon: "folder", onSelect: props.onCreate },
+          { id: "palette", label: "命令面板…", icon: "search", shortcut: "Ctrl+K", onSelect: props.onCommandPalette },
           { id: "settings", label: "设置…", icon: "settings", shortcut: "Ctrl+,", onSelect: props.onSettings },
           { id: "sep-app", separator: true },
           { id: "about", label: "关于 Git Extensions…", onSelect: () => setAboutOpen(true) },
+          ...(props.recentRepos.length > 0 ? [
+            { id: "sep-recent", separator: true },
+            ...props.recentRepos.slice(0, 5).map((path) => ({
+              id: `recent-${path}`,
+              label: `最近打开：${path.split(/[\\/]/).pop() ?? path}`,
+              title: path,
+              icon: "history" as const,
+              onSelect: () => props.onOpenRecent(path),
+            })),
+          ] : []),
           { id: "sep-exit", separator: true },
           { id: "close-window", label: "关闭窗口", shortcut: "Alt+F4", danger: true, onSelect: props.onCloseWindow },
         ]} />

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import type { FileDiff } from "../types";
 import {
   buildInlineRows, buildSplitRows, diffWindow, isHunkRow,
@@ -12,9 +13,21 @@ import Icon from "../ui/Icon";
 
 const LINE_H = 20;
 const MAX_HIGHLIGHT_LINES = 5000;
+const MAX_FILE_ROWS = 500;
+const DIFF_MODE_KEY = "git-extensions.diffMode";
+const DIFF_WRAP_KEY = "git-extensions.diffWrap";
 
 export type FileAction = "history" | "blame" | "open" | "reveal" | "copy-path";
 type DiffMode = "inline" | "split";
+type LineMenu = { x: number; y: number; path: string; line: number; text: string };
+
+function loadDiffMode(key: string): DiffMode {
+  try { return localStorage.getItem(`${DIFF_MODE_KEY}:${key}`) === "split" ? "split" : "inline"; } catch { return "inline"; }
+}
+
+function loadDiffWrap(key: string): boolean {
+  try { return localStorage.getItem(`${DIFF_WRAP_KEY}:${key}`) === "1"; } catch { return false; }
+}
 
 interface Props {
   files: FileDiff[];
@@ -24,20 +37,24 @@ interface Props {
   onFileAction?: (action: FileAction, file: FileDiff) => void;
   /** 单文件预览时隐藏文件标题与文件列表，避免与外部文件列表重复。 */
   showFileHeader?: boolean;
+  /** 按仓库保存 Inline / Split 与换行偏好。 */
+  prefKey?: string;
 }
 
 type DisplayRow = { kind: "dir"; path: string; depth: number } | { kind: "file"; file: FileDiff; index: number; depth: number };
 
-export default function DiffView({ files, loading, highlightEnabled = true, onFileAction, loadFile, showFileHeader = true }: Props) {
+export default function DiffView({ files, loading, highlightEnabled = true, onFileAction, loadFile, showFileHeader = true, prefKey = "" }: Props) {
   const [selected, setSelected] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(400);
   const [menu, setMenu] = useState<{ x: number; y: number; file: FileDiff } | null>(null);
+  const [lineMenu, setLineMenu] = useState<LineMenu | null>(null);
   const [highlight, setHighlight] = useState<Map<number, string>>(new Map());
-  const [wrap, setWrap] = useState(false);
+  const [wrap, setWrap] = useState(() => loadDiffWrap(prefKey));
+  const [fileFilter, setFileFilter] = useState("");
   const [listMode, setListMode] = useState<"list" | "tree">("list");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [diffMode, setDiffMode] = useState<DiffMode>("inline");
+  const [diffMode, setDiffMode] = useState<DiffMode>(() => loadDiffMode(prefKey));
   const [collapse, setCollapse] = useState(false);
   const [expandedFolds, setExpandedFolds] = useState<Set<string>>(new Set());
   const [activeHunk, setActiveHunk] = useState(-1);
@@ -47,6 +64,8 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
   const rootRef = useRef<HTMLDivElement>(null);
   const selectedPath = useRef<string | null>(null);
   useEffect(() => { setSelected(selectedFileIndex(files, selectedPath.current)); }, [files]);
+  useEffect(() => { try { localStorage.setItem(`${DIFF_MODE_KEY}:${prefKey}`, diffMode); } catch { /* 偏好保存失败不影响当前视图 */ } }, [diffMode, prefKey]);
+  useEffect(() => { try { localStorage.setItem(`${DIFF_WRAP_KEY}:${prefKey}`, wrap ? "1" : "0"); } catch { /* 偏好保存失败不影响当前视图 */ } }, [prefKey, wrap]);
 
   const manifestFile = files.length > 0 ? files[Math.min(selected, files.length - 1)] : null;
   const [loaded, setLoaded] = useState<{ source: FileDiff; value: FileDiff | null } | null>(null);
@@ -63,6 +82,8 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
   }, [manifestFile, loadFile]);
 
   const parsed = useMemo(() => parsePatch(file?.patch ?? ""), [file]);
+  const additions = useMemo(() => parsed.lines.filter((line) => line.kind === "add").length, [parsed]);
+  const deletions = useMemo(() => parsed.lines.filter((line) => line.kind === "del").length, [parsed]);
   const contentLines = useMemo(() => parsed.lines.filter((line) => line.kind === "add" || line.kind === "del" || line.kind === "ctx"), [parsed]);
   // 单文件预览不重复显示文件名：隐藏 diff/index/---/+++ 这些标准路径头。
   const visibleLines = useMemo(() => showFileHeader
@@ -109,11 +130,21 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
   useEffect(() => () => { workerRef.current?.terminate(); workerRef.current = null; }, []);
   useEffect(() => { setExpandedFolds(new Set()); }, [file]);
 
+  const [filteredEntries, hiddenFiles] = useMemo(() => {
+    const query = fileFilter.trim().toLocaleLowerCase();
+    const matched = files
+      .map((entry, index) => ({ file: entry, index }))
+      .filter(({ file: entry }) => !query
+        || entry.path.toLocaleLowerCase().includes(query)
+        || (entry.oldPath ?? "").toLocaleLowerCase().includes(query));
+    return [matched.slice(0, MAX_FILE_ROWS), Math.max(0, matched.length - MAX_FILE_ROWS)] as const;
+  }, [fileFilter, files]);
+
   const rows = useMemo<DisplayRow[]>(() => {
-    if (listMode === "list") return files.map((f, index) => ({ kind: "file", file: f, index, depth: 0 }));
+    if (listMode === "list") return filteredEntries.map(({ file: entry, index }) => ({ kind: "file", file: entry, index, depth: 0 }));
     const result: DisplayRow[] = [];
     const seen = new Set<string>();
-    files.map((entry, index) => ({ file: entry, index })).sort((a, b) => a.file.path.localeCompare(b.file.path)).forEach(({ file: entry, index }) => {
+    [...filteredEntries].sort((a, b) => a.file.path.localeCompare(b.file.path)).forEach(({ file: entry, index }) => {
       const parts = entry.path.split("/");
       let hidden = false;
       for (let i = 1; i < parts.length; i++) {
@@ -125,7 +156,7 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
       if (!hidden) result.push({ kind: "file", file: entry, index, depth: Math.max(0, parts.length - 1) });
     });
     return result;
-  }, [collapsed, files, listMode]);
+  }, [collapsed, filteredEntries, listMode]);
 
   const { start, end } = diffWindow(displayRows.length, scrollTop, viewportH, LINE_H);
   useEffect(() => {
@@ -171,20 +202,47 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+      const altArrow = event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown");
+      const plainNext = !event.altKey && !event.ctrlKey && !event.metaKey && (event.key === "n" || event.key === "p");
+      if (!altArrow && !plainNext) return;
       const root = rootRef.current;
       if (!root || root.offsetParent === null) return;
-      if (document.querySelector(".modal-backdrop, .context-menu")) return;
+      const modals = document.querySelectorAll(".modal-backdrop");
+      const topModal = modals[modals.length - 1];
+      if (topModal && !topModal.contains(root)) return;
+      if (document.querySelector(".context-menu")) return;
       if ((event.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (plainNext) {
+        const active = document.activeElement as HTMLElement | null;
+        if (!root.contains(active) && !(event.target as HTMLElement | null)?.closest(".diff-view")) return;
+      }
       event.preventDefault();
-      goDiff(event.key === "ArrowUp" ? -1 : 1);
+      const direction = plainNext ? (event.key === "n" ? 1 : -1) : (event.key === "ArrowUp" ? -1 : 1);
+      goDiff(direction);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [goDiff]);
 
+  const openLineMenu = (event: ReactMouseEvent, line: PatchLine, side: "old" | "new" | "auto" = "auto") => {
+    if (line.kind !== "add" && line.kind !== "del" && line.kind !== "ctx") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const lineNo = side === "old" ? line.oldLine : side === "new" ? line.newLine : line.newLine ?? line.oldLine;
+    setLineMenu({ x: event.clientX, y: event.clientY, path: manifestFile?.path ?? file?.path ?? "", line: lineNo ?? 0, text: line.content });
+  };
+
   const resetPatchScroll = () => { setScrollTop(0); setActiveHunk(-1); if (patchRef.current) patchRef.current.scrollTop = 0; };
   const selectFile = (index: number) => { selectedPath.current = files[index]?.path ?? null; setSelected(index); resetPatchScroll(); };
+  // 过滤后若当前选中文件被隐藏，切到第一个匹配文件，避免列表与右侧 patch 脱节。
+  useEffect(() => {
+    if (!fileFilter.trim() || filteredEntries.length === 0) return;
+    if (filteredEntries.some((entry) => entry.index === selected)) return;
+    selectedPath.current = filteredEntries[0].file.path;
+    setSelected(filteredEntries[0].index);
+    setScrollTop(0); setActiveHunk(-1);
+    if (patchRef.current) patchRef.current.scrollTop = 0;
+  }, [fileFilter]);
   const changeDiffMode = (mode: DiffMode) => { setDiffMode(mode); setExpandedFolds(new Set()); resetPatchScroll(); };
   const toggleCollapse = () => { setCollapse((value) => !value); setExpandedFolds(new Set()); resetPatchScroll(); };
   const toggleFold = (runId: string) => setExpandedFolds((prev) => {
@@ -220,7 +278,7 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
     const className = `diff-line line-${line.kind}${effectiveWrap ? " wrapped" : ""}`;
     if (line.kind === "hunk") return <div key={`line-${line.sourceIndex}`} className={className} style={style} data-hunk-row="">{line.text}</div>;
     if (line.kind === "meta" || line.kind === "note") return <div key={`line-${line.sourceIndex}`} className={className} style={style}>{line.text}</div>;
-    return <div key={`line-${line.sourceIndex}`} className={className} style={style}>{renderContent(line)}</div>;
+    return <div key={`line-${line.sourceIndex}`} className={className} style={style} onContextMenu={(e) => openLineMenu(e, line)}>{renderContent(line)}</div>;
   };
 
   const renderCell = (line: PatchLine | null, side: "old" | "new") => {
@@ -230,7 +288,7 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
     const sign = side === "old" ? (line.kind === "del" ? "-" : line.kind === "ctx" ? " " : "") : (line.kind === "add" ? "+" : line.kind === "ctx" ? " " : "");
     const html = highlight.get(line.sourceIndex);
     return (
-      <div className={`diff-cell${lineClass}${effectiveWrap ? " wrapped" : ""}`}>
+      <div className={`diff-cell${lineClass}${effectiveWrap ? " wrapped" : ""}`} onContextMenu={(e) => openLineMenu(e, line, side)}>
         <span className="diff-no">{lineNo ?? ""}</span>
         <span className="diff-sign">{sign}</span>
         {html !== undefined ? <span className="diff-text" dangerouslySetInnerHTML={{ __html: html }} /> : <span className="diff-text">{line.content || " "}</span>}
@@ -264,9 +322,14 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
         {showFileList && (
           <div className="diff-file-column">
             <div className="diff-file-header">
-              <span>文件</span>
-              <button className={`text-toggle${listMode === "tree" ? " active" : ""}`} title="切换文件列表 / 目录树" onClick={() => setListMode(listMode === "list" ? "tree" : "list")}>{listMode === "list" ? "列表" : "目录树"}</button>
+              <span>文件 ({filteredEntries.length}{hiddenFiles > 0 ? `/${files.length}` : ""})</span>
+              <button className={`text-toggle${listMode === "tree" ? " active" : ""}`} title="切换文件列表 / 目录树" onClick={() => setListMode(listMode === "list" ? "tree" : "list")}>{listMode === "list" ? "目录树" : "列表"}</button>
             </div>
+            <div className="diff-file-filter">
+              <Icon name="search" size={13} />
+              <input aria-label="过滤差异文件" placeholder="过滤文件…" value={fileFilter} onChange={(e) => setFileFilter(e.target.value)} />
+            </div>
+            {hiddenFiles > 0 && <div className="diff-file-note">仅显示前 {MAX_FILE_ROWS} 个匹配文件，请继续输入以缩小范围。</div>}
             <div className="diff-file-list" role="listbox" aria-label="差异文件">
               {rows.map((row) => row.kind === "dir" ? (
                 <button className="diff-directory" key={`dir-${row.path}`} style={{ paddingLeft: 8 + row.depth * 14 }} onClick={() => setCollapsed((prev) => { const next = new Set(prev); if (next.has(row.path)) next.delete(row.path); else next.add(row.path); return next; })}><Icon name={collapsed.has(row.path) ? "folder" : "chevron-down"} size={13} /><span>{row.path.split("/").pop()}</span></button>
@@ -297,13 +360,15 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
         <div className="diff-main">
           <div className="diff-toolbar">
             {showFileHeader && <span className="panel-title">{manifestFile?.path}</span>}
+            {showFileHeader && <span className="diff-stat" aria-label={`新增 ${additions} 行，删除 ${deletions} 行`}><span className="diff-stat-add">+{additions}</span><span className="diff-stat-del">−{deletions}</span></span>}
             {showFileHeader && <span className="diff-toolbar-separator" aria-hidden="true" />}
             <div className="diff-mode-group" role="group" aria-label="差异视图模式">
               <button className={`text-toggle${diffMode === "inline" ? " active" : ""}`} aria-pressed={diffMode === "inline"} title="Inline view（行内差异）" onClick={() => changeDiffMode("inline")}>Inline</button>
               <button className={`text-toggle${diffMode === "split" ? " active" : ""}`} aria-pressed={diffMode === "split"} title="Split view（并排差异）" onClick={() => changeDiffMode("split")}>Split</button>
             </div>
-            <button className="icon-button diff-prev" title="上一处差异 (Alt+↑)" aria-label="上一处差异" disabled={!hasHunks || activeHunk <= 0} onClick={() => goDiff(-1)}><Icon name="chevron-down" size={14} /></button>
-            <button className="icon-button" title="下一处差异 (Alt+↓)" aria-label="下一处差异" disabled={!hasHunks || activeHunk >= hunkRows.length - 1} onClick={() => goDiff(1)}><Icon name="chevron-down" size={14} /></button>
+            <button className="icon-button diff-prev" title="上一处差异 (Alt+↑ / p)" aria-label="上一处差异" disabled={!hasHunks || activeHunk <= 0} onClick={() => goDiff(-1)}><Icon name="chevron-down" size={14} /></button>
+            <button className="icon-button" title="下一处差异 (Alt+↓ / n)" aria-label="下一处差异" disabled={!hasHunks || activeHunk >= hunkRows.length - 1} onClick={() => goDiff(1)}><Icon name="chevron-down" size={14} /></button>
+            <span className="diff-hunk-count" title="当前差异块 / 总数">{hasHunks ? `${Math.max(activeHunk, 0) + 1}/${hunkRows.length}` : "—"}</span>
             <button className={`text-toggle${collapse ? " active" : ""}`} aria-pressed={collapse} title="Collapse Unchanged Fragments（折叠未修改片段）" onClick={toggleCollapse}>折叠未修改</button>
             <button className={`text-toggle${wrap ? " active" : ""}`} disabled={contentLines.length > MAX_HIGHLIGHT_LINES} title={contentLines.length > MAX_HIGHLIGHT_LINES ? "超大 patch 不支持自动换行" : "自动换行"} onClick={() => setWrap(!wrap)}>换行</button>
             <button className="icon-button" title="复制当前 patch" onClick={() => { if (file) void navigator.clipboard?.writeText(file.patch); }}><Icon name="copy" size={14} /></button>
@@ -320,13 +385,17 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
           </div>
         </div>
       </div>
-      {menu && onFileAction && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={[
+      {menu && onFileAction && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} ariaLabel={`${menu.file.path} 操作`} items={[
         { id: "open", label: "打开文件", icon: "external", onSelect: () => onFileAction("open", menu.file) },
         { id: "history", label: "查看文件历史", icon: "history", onSelect: () => onFileAction("history", menu.file) },
         { id: "blame", label: "Blame（逐行归属）", onSelect: () => onFileAction("blame", menu.file) },
         { id: "sep", separator: true },
         { id: "reveal", label: "在文件管理器中显示", icon: "folder", onSelect: () => onFileAction("reveal", menu.file) },
         { id: "copy", label: "复制相对路径", icon: "copy", onSelect: () => onFileAction("copy-path", menu.file) },
+      ]} />}
+      {lineMenu && <ContextMenu x={lineMenu.x} y={lineMenu.y} onClose={() => setLineMenu(null)} ariaLabel="差异行操作" items={[
+        { id: "copy-ref", label: `复制 ${lineMenu.path}:${lineMenu.line}`, icon: "copy", onSelect: () => { void navigator.clipboard?.writeText(`${lineMenu.path}:${lineMenu.line}`); } },
+        { id: "copy-text", label: "复制行内容", icon: "copy", onSelect: () => { void navigator.clipboard?.writeText(lineMenu.text); } },
       ]} />}
     </div>
   );

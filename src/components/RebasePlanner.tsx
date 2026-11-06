@@ -30,6 +30,7 @@ export default function RebasePlanner(props: Props) {
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [batchAction, setBatchAction] = useState<RebaseAction>("pick");
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [dirty, setDirty] = useState(props.draft?.dirty ?? false);
   const loadSequence = useRef(0);
   const confirm = useConfirm();
@@ -65,6 +66,11 @@ export default function RebasePlanner(props: Props) {
   const invalidFirst = entries.find((entry) => entry.action !== "drop")?.action === "squash" || entries.find((entry) => entry.action !== "drop")?.action === "fixup";
   const invalidMessage = entries.some((entry) => (entry.action === "reword" || entry.action === "squash") && !entry.message.trim());
   const dropped = entries.filter((entry) => entry.action === "drop").length;
+  const actionSummary = actions
+    .map((action) => ({ action, count: entries.filter((entry) => entry.action === action).length }))
+    .filter((item) => item.count > 0)
+    .map((item) => `${item.count} ${item.action}`)
+    .join(" · ");
 
   const exit = async () => {
     if (busy) return;
@@ -94,15 +100,26 @@ export default function RebasePlanner(props: Props) {
       props.onDraftChange(props.startOid, null); props.onChanged(); props.onExit();
     } catch (e) {
       const operation = await api.getOperationState(props.repoPath).catch(() => null);
-      if (operation?.kind === "rebase") { setDirty(false); setPlan(null); props.onDraftChange(props.startOid, null); props.onNotify("info", "Rebase 已暂停，等待处理冲突或提交信息", String(e)); props.onConflict(); }
-      else setError(String(e));
+      const branchName = plan?.branch.replace(/^refs\/heads\//, "");
+      const onto = operation?.onto ?? "";
+      const ontoMatches = !!plan && (onto === plan.onto || onto.startsWith(plan.onto) || plan.onto.startsWith(onto));
+      // 只有能证明是本次计划产生的 rebase 才清空草稿；遗留或外部 rebase 不能当成“已暂停”。
+      const started = operation?.kind === "rebase" && ontoMatches && (!operation.headName || operation.headName === branchName);
+      if (started) {
+        setDirty(false); setPlan(null); props.onDraftChange(props.startOid, null);
+        props.onNotify("info", "Rebase 已暂停，等待处理冲突或提交信息", String(e));
+        props.onConflict();
+      } else {
+        setError(String(e));
+        props.onNotify("error", "Rebase 未开始", String(e));
+      }
     } finally { setBusy(false); }
   };
 
   return (
     <div className="task-view rebase-planner">
       <div className="task-header">
-        <button className="icon-button" title="返回历史" disabled={busy} onClick={() => void exit()}>←</button>
+        <button className="icon-button" title="返回历史（计划草稿会保留）" disabled={busy} onClick={() => void exit()}>←</button>
         <Icon name="branch" /><strong>交互式 Rebase</strong>
         {plan && <span>{plan.branch} → <code>{plan.onto.slice(0, 10)}</code></span>}
         <div className="toolbar-spacer" />
@@ -111,11 +128,11 @@ export default function RebasePlanner(props: Props) {
       </div>
       {error && <div className="inline-error"><Icon name="warning" /><span>{error}</span></div>}
       {invalidFirst && <div className="inline-warning">第一个提交不能使用 squash 或 fixup，因为它没有可合并的前一个提交。</div>}
-      <div className="rebase-plan-meta">{plan ? <><span>最旧在上、最新在下</span><span>{entries.length} 个提交</span><span>{dropped} 个 drop</span><span>拖动只编辑计划，不会修改仓库</span></> : <span>正在读取线性提交范围…</span>}</div>
+      <div className="rebase-plan-meta">{plan ? <><span>最旧在上、最新在下</span><span>{entries.length} 个提交</span><span>{actionSummary || "全部 pick"}</span><span>拖动只编辑计划，不会修改仓库</span></> : <span>正在读取线性提交范围…</span>}</div>
       {invalidMessage && <div className="inline-warning">reword / squash 的提交信息不能为空。</div>}
       <div className="rebase-batch"><button disabled={busy || loading} onClick={() => setChecked(new Set(entries.map((entry) => entry.oid)))}>全选</button><button disabled={busy || !checked.size} onClick={() => setChecked(new Set())}>清空选择</button><span>选中 {checked.size} 个</span><select aria-label="批量 Rebase 动作" value={batchAction} disabled={busy} onChange={(e) => setBatchAction(e.target.value as RebaseAction)}>{actions.map((action) => <option key={action} value={action}>{action}</option>)}</select><button disabled={busy || !checked.size} onClick={() => { setDirty(true); setEntries((prev) => prev.map((entry) => checked.has(entry.oid) ? { ...entry, action: batchAction } : entry)); }}>应用动作</button><span className="panel-hint">Alt+↑/↓ 重排；未执行计划只保留在当前仓库页签。原 HEAD 会先备份。</span></div>
       <div className="rebase-list">
-        {loading ? <div className="empty-state"><span className="spinner" /><span>准备 Rebase 计划…</span></div> : entries.map((entry, index) => <div className={`rebase-entry${entry.action === "drop" ? " dropped" : ""}`} key={entry.oid} draggable={!busy} tabIndex={0} onKeyDown={(e) => { if (e.altKey && e.key === "ArrowUp") { e.preventDefault(); move(index, index - 1); } else if (e.altKey && e.key === "ArrowDown") { e.preventDefault(); move(index, index + 1); } }} onDragStart={() => setDragIndex(index)} onDragOver={(e) => e.preventDefault()} onDrop={() => { if (dragIndex !== null) move(dragIndex, index); setDragIndex(null); }}>
+        {loading ? <div className="empty-state"><span className="spinner" /><span>准备 Rebase 计划…</span></div> : entries.map((entry, index) => <div className={`rebase-entry${entry.action === "drop" ? " dropped" : ""}${dropIndex === index && dragIndex !== null && dragIndex !== index ? " drop-target" : ""}`} key={entry.oid} draggable={!busy} tabIndex={0} onKeyDown={(e) => { if (e.altKey && e.key === "ArrowUp") { e.preventDefault(); move(index, index - 1); } else if (e.altKey && e.key === "ArrowDown") { e.preventDefault(); move(index, index + 1); } }} onDragStart={() => setDragIndex(index)} onDragOver={(e) => { e.preventDefault(); setDropIndex(index); }} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropIndex((current) => current === index ? null : current); }} onDragEnd={() => { setDragIndex(null); setDropIndex(null); }} onDrop={() => { if (dragIndex !== null) move(dragIndex, index); setDragIndex(null); setDropIndex(null); }}>
           <input type="checkbox" aria-label={`选择提交 ${entry.shortId}`} disabled={busy} checked={checked.has(entry.oid)} onChange={() => setChecked((prev) => { const next = new Set(prev); if (next.has(entry.oid)) next.delete(entry.oid); else next.add(entry.oid); return next; })} />
           <span className="drag-handle" title="拖动调整顺序">☰</span>
           <select aria-label={`${entry.subject} 的动作`} disabled={busy} value={entry.action} onChange={(e) => update(index, e.target.value as RebaseAction)}>{actions.map((action) => <option key={action} value={action}>{action}</option>)}</select>

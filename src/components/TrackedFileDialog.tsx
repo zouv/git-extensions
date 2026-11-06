@@ -30,7 +30,7 @@ export default function TrackedFileDialog({ repoPath, onClose, onSelect }: Props
       {loading && <div className="panel-hint">正在读取 tracked 文件…</div>}
       {error && <div className="inline-error" role="alert">{error}</div>}
       {!loading && !error && <div className="file-picker-list" role="listbox" aria-label="仓库文件">
-        {visible.map((file) => <button role="option" aria-selected="false" key={file} onDoubleClick={() => onSelect(file)} onClick={() => onSelect(file)}>{file}</button>)}
+        {visible.map((file) => <button role="option" aria-selected={false} key={file} onClick={() => onSelect(file)}>{file}</button>)}
         {matches.length === 0 && <div className="panel-hint">没有匹配的 tracked 文件。</div>}
       </div>}
       {matches.length > visible.length && <div className="settings-note">仅显示前 500 个匹配项，请继续输入以缩小范围。</div>}
