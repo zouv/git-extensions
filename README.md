@@ -15,7 +15,7 @@ Windows 双击脚本（推荐）：
 | 脚本 | 作用 |
 |---|---|
 | `setup.bat` | 检查工具链并安装依赖 |
-| `dev.bat` | 开发模式运行桌面应用（前端热更新） |
+| `dev.bat` | 开发模式运行桌面应用（前端热更新；独立 identifier，可与安装版 / 便携版同时运行） |
 | `build.bat` | TS 类型检查 + 前端产物 |
 | `test.bat` | 前端检查 + Rust 单元 / 集成测试 |
 | `package.bat` | 打包桌面安装包（输出在 `src-tauri/target/release/bundle/`） |
