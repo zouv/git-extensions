@@ -2,7 +2,7 @@
 
 ## 状态快照
 
-- 最近更新：2026-11-07。0.7.0 已发布：GitHub Release v0.7.0（https://github.com/zouv/git-extensions/releases/tag/v0.7.0）包含 NSIS / MSI、便携 zip 与 SHA256 校验；main、标签 v0.7.0 与 Release 已推送。
+- 最近更新：2026-11-07。0.7.0 已发布：GitHub Release v0.7.0（https://github.com/zouv/git-extensions/releases/tag/v0.7.0）包含 NSIS / MSI、便携 zip 与 SHA256 校验；main、标签 v0.7.0 与 Release 已推送。另修复 dev.bat 与发布版互斥问题（独立 dev identifier，待随下个版本归档）。
 - 远程已关联并推送：origin = https://github.com/zouv/git-extensions，main 与历史标签已推送。
 
 ## 当前任务
@@ -48,6 +48,7 @@
 
 - 2026-11-07 UI 优化本轮：`pnpm test` Node 65/65、`pnpm build`（tsc + Vite）通过、`cargo check` 通过（含 `tauri-plugin-dialog`）、`cargo test` Rust 91/91（36 + 5 + 21 + 14 + 15）、`cargo fmt --check` 与 `sh check-docs.sh` 通过。
 - 2026-11-07 UI 实机（WebView2 远程调试驱动，非完整人工验收）：弹窗初始焦点落在路径输入框，等待 6 秒轮询后不跳；`Ctrl+K` 面板可搜索并执行刷新；错误通知进入通知抽屉；嵌套删除确认按 Esc 只关一层；dirty 弹窗关闭确认 / 取消 / 放弃均正确；变更预览跨轮询保留 DiffView 与滚动状态；Split 偏好写入按仓库 key。原生目录选择、拖放打开、150% / 200% DPI 仍需人工验收。
+- 2026-11-07 dev.bat 修复验证：0.7.0 便携版运行中执行 `dev.bat` 仍会先编译并启动独立 dev 实例（`com.gitextensions.dev.dev`），release 实例保持运行；非 0 退出时批处理保留窗口显示错误。
 - 0.7.0 release 构建通过：NSIS 0.7.0（3.17 MiB）、MSI 0.7.0（5.37 MiB）、unpack 目录、便携 zip（4.32 MiB）与 SHA256SUMS；本地校验通过。
 - GitHub Release v0.7.0 已创建并上传 4 个资产（`Git.Extensions_0.7.0_x64-setup.exe` / `.msi` / `-unpack.zip` / `SHA256SUMS.txt`）；重新下载后按发布版 SHA256SUMS 校验三个二进制产物全部 OK。
 - 0.6.0 历史发布与自动验收见 CHANGELOG [0.6.0]。

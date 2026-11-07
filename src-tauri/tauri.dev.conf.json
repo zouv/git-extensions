@@ -1,0 +1,5 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Git Extensions Dev",
+  "identifier": "com.gitextensions.dev.dev"
+}

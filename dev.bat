@@ -13,7 +13,14 @@ if not exist node_modules (
     echo [INFO] node_modules missing, running pnpm install first...
     pnpm install || (popd & exit /b 1)
 )
+echo [INFO] Starting Git Extensions in dev mode (separate from installed release)...
 pnpm tauri:dev
 set "CODE=%ERRORLEVEL%"
+if not "%CODE%"=="0" (
+    echo.
+    echo [ERROR] Dev exited with code %CODE%.
+    echo Check the messages above, then press any key to close this window.
+    pause >nul
+)
 popd
 exit /b %CODE%
