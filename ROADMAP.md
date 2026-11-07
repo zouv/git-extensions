@@ -11,13 +11,14 @@
 
 ---
 
-## 总进度（2026-11-04 更新）
+## 总进度（2026-11-07 更新）
 
 - M1–M4 规划开发与可执行验证已完成；Windows / Linux 自动化测试全绿。后续为统一 GUI 验收、Git Extensions 界面性能对比及 macOS 实机或 CI 验收。
 - M5 功能实现、Windows 常规 DPI GUI 实测与 17,783 提交基准已完成；高 DPI 和 macOS 验收待补。
 - 审查加固与高级操作优化已整体交付代码：安全调度、按需 Diff / 历史正确性、分级刷新、草稿、Reset / 恢复及 Rebase / 冲突 / Stash；Windows 自动回归与 release 大仓库测量完成，新增 GUI / 高 DPI / macOS 验收仍待补。
 - 0.5.0 已交付：仓库页签持久化、标题栏交互规范、左侧导航 / Submodules / Worktrees、Inline / Split 差异视图；细节见 CHANGELOG [0.5.0]。
 - Windows 资源管理器集成、单实例轻量窗口、文件级 View changelog 与 Shell extension 设置已交付 0.6.0；真实菜单、各轻量窗口 / 冲突反馈及安装版 / 便携版验收待补。
+- 0.7.0 已交付界面交互优化：弹窗焦点 / 错误反馈 / 草稿保护、命令面板与原生目录选择、键盘可达性、Diff 工具增强与大列表性能；剩余原生对话框 / 拖放 / 高 DPI / 安装版验收。
 
 ---
 

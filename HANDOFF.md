@@ -2,7 +2,7 @@
 
 ## 状态快照
 
-- 最近更新：2026-11-07。0.7.0 版本号、CHANGELOG 与文档已就绪，正在执行提交 / 打包 / GitHub Release 上传；0.6.0 历史发布信息保留在下方。
+- 最近更新：2026-11-07。0.7.0 已发布：GitHub Release v0.7.0（https://github.com/zouv/git-extensions/releases/tag/v0.7.0）包含 NSIS / MSI、便携 zip 与 SHA256 校验；main、标签 v0.7.0 与 Release 已推送。
 - 远程已关联并推送：origin = https://github.com/zouv/git-extensions，main 与历史标签已推送。
 
 ## 当前任务
@@ -10,7 +10,7 @@
 - 目标：界面交互全面优化（P0–P2）。先修确定性缺陷，再做可发现性与键盘可达性，最后处理大列表性能与 Diff / 冲突 / Rebase 打磨。
 - 范围：`src/ui/`、`src/components/`、`App.tsx`、`RepoWorkspace.tsx`、`styles.css`、`explorer/`；新增 `@tauri-apps/plugin-dialog` 原生目录选择。
 - 完成定义：P0 全部缺陷修复；P1 命令面板 / 溢出菜单 / 对比基准 / 分组多选 / 键盘列表 / 入口补齐；P2 大列表性能、Diff 工具增强、轻量窗口尺寸；`test.bat`、文档检查与 GUI 验收通过。
-- 代码状态：P0–P2 已完成，自动验证通过；下一步只剩真实 GUI 验收与问题修复。
+- 代码状态：P0–P2 已完成，0.7.0 已发布；剩余真实 GUI 验收与问题修复。
 
 ### 上一个任务（0.6.0 Explorer 轻量窗口）
 
@@ -26,6 +26,7 @@
 - [x] P0：Dialog 焦点 / 模态栈 / dirty 关闭保护、弹窗内联错误、变更预览 stale-while-revalidate、通知中心保留错误、关闭其它说明、F6 可见区域、Rebase / 冲突状态判断。
 - [x] P1：命令注册与 `Ctrl+K`、视图 / 更多菜单、对比基准条、原生目录选择与拖放、分组多选不关闭、列表键盘模型、读取失败局部状态、页签加载 / 错误徽标、Worktree 打开。
 - [x] P2：过滤 / 封顶 / 增量图宽、Diff 过滤 / 统计 / 行菜单 / 偏好记忆、提交详情复制与 ref 链接、冲突 / Rebase 细节、Blame 跳转、轻量窗口最小尺寸。
+- [x] 0.7.0：版本号、提交、标签、release 打包、GitHub Release 上传与重新下载 SHA256 校验。
 - [ ] 真实 GUI 验收 P0–P2（见「待验收」第 1 条）。
 
 ### 0.6.0 Explorer 轻量窗口（延续）
@@ -40,16 +41,16 @@
 ## 下一步
 
 1. 启动 `dev.bat` 按「待验收」第 1 条验收界面交互优化：弹窗焦点与 dirty 守卫、嵌套 Esc、通知抽屉、`Ctrl+K`、原生目录选择 / 拖放、Diff 偏好、窄窗口 / 高 DPI。
-2. 用 0.6.0 发布版保存一次系统集成设置，验证文件右键菜单与各轻量窗口。
+2. 用 0.7.0 发布版保存一次系统集成设置，验证文件右键菜单与各轻量窗口。
 3. 验证 Open repository / Settings 不新开窗口；关闭最后窗口进程退出；冲突后转主窗口。
 
 ## 验证状态
 
 - 2026-11-07 UI 优化本轮：`pnpm test` Node 65/65、`pnpm build`（tsc + Vite）通过、`cargo check` 通过（含 `tauri-plugin-dialog`）、`cargo test` Rust 91/91（36 + 5 + 21 + 14 + 15）、`cargo fmt --check` 与 `sh check-docs.sh` 通过。
 - 2026-11-07 UI 实机（WebView2 远程调试驱动，非完整人工验收）：弹窗初始焦点落在路径输入框，等待 6 秒轮询后不跳；`Ctrl+K` 面板可搜索并执行刷新；错误通知进入通知抽屉；嵌套删除确认按 Esc 只关一层；dirty 弹窗关闭确认 / 取消 / 放弃均正确；变更预览跨轮询保留 DiffView 与滚动状态；Split 偏好写入按仓库 key。原生目录选择、拖放打开、150% / 200% DPI 仍需人工验收。
-- 0.6.0 `package.bat` 已通过：`dist/release/` 已更新为 NSIS 0.6.0（3.08 MiB）、MSI 0.6.0（5.23 MiB）、unpack 目录、便携 zip（4.2 MiB）与 SHA256SUMS；本地校验通过。
-- GitHub Release v0.6.0 已创建并上传 4 个资产；重新下载后按发布版 SHA256SUMS 校验三个二进制产物全部 OK。`dist/release/` 与 GitHub 资产名存在空格 / 点的差异，Release 内校验文件已按 GitHub 资产名生成。
-- release 实机冒烟：正常启动、Commit、View changelog、Clone、Pull 均以单进程窗口打开；Open repository / Settings 复用主窗口；轻量首启后可再创建主窗口。文件菜单注册与各动作成功 / 失败仍需用户验收。
+- 0.7.0 release 构建通过：NSIS 0.7.0（3.17 MiB）、MSI 0.7.0（5.37 MiB）、unpack 目录、便携 zip（4.32 MiB）与 SHA256SUMS；本地校验通过。
+- GitHub Release v0.7.0 已创建并上传 4 个资产（`Git.Extensions_0.7.0_x64-setup.exe` / `.msi` / `-unpack.zip` / `SHA256SUMS.txt`）；重新下载后按发布版 SHA256SUMS 校验三个二进制产物全部 OK。
+- 0.6.0 历史发布与自动验收见 CHANGELOG [0.6.0]。
 
 ## 待验收
 
