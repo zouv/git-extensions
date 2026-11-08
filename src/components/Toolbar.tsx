@@ -30,6 +30,13 @@ interface Props {
   onStash: () => void;
   onTags: () => void;
   onSubmodules: () => void;
+  onRemotes?: () => void;
+  onWorktrees?: () => void;
+  onPullOptions?: () => void;
+  onMerge?: () => void;
+  onSearch?: () => void;
+  onCommandLog?: () => void;
+  onBisectStart?: () => void;
   onSettings: () => void;
   onRecovery: () => void;
   onCompare: () => void;
@@ -66,10 +73,19 @@ export default function Toolbar(props: Props) {
   ];
 
   const moreItems: MenuItem[] = [
+    ...(props.onSearch ? [{ id: "search", label: "高级搜索（提交历史 / 代码全文）…", icon: "search" as const, shortcut: "Ctrl+Shift+H", onSelect: props.onSearch }] : []),
+    ...(props.onMerge ? [{ id: "merge", label: "合并分支到当前 HEAD…", icon: "branch" as const, onSelect: props.onMerge }] : []),
+    ...(props.onPullOptions ? [{ id: "pull-options", label: "Pull 选项（Rebase / Autostash）…", icon: "pull" as const, onSelect: props.onPullOptions }] : []),
+    ...(props.onRemotes ? [{ id: "remotes", label: "远程仓库管理 (Remotes)…", icon: "fetch" as const, onSelect: props.onRemotes }] : []),
+    ...(props.onWorktrees ? [{ id: "worktrees", label: "Worktree 管理…", icon: "branch" as const, onSelect: props.onWorktrees }] : []),
+    { id: "sep-more-1", separator: true },
     { id: "recovery", label: "恢复历史（HEAD 备份与 reflog）", icon: "history", onSelect: props.onRecovery },
     { id: "stash", label: "Stash 管理…", icon: "stash", shortcut: "Ctrl+Shift+S", onSelect: props.onStash },
     { id: "tags", label: "标签管理…", icon: "tag", shortcut: "Ctrl+Shift+T", onSelect: props.onTags },
     { id: "submodules", label: "子模块…", icon: "folder", shortcut: "Ctrl+Shift+M", onSelect: props.onSubmodules },
+    ...(props.onBisectStart || props.onCommandLog ? [{ id: "sep-more-2", separator: true }] : []),
+    ...(props.onBisectStart ? [{ id: "bisect", label: "启动 Git Bisect 二分排查…", onSelect: props.onBisectStart }] : []),
+    ...(props.onCommandLog ? [{ id: "command-log", label: "Git 命令执行日志…", shortcut: "Ctrl+Shift+G", onSelect: props.onCommandLog }] : []),
   ];
 
   return (
@@ -93,6 +109,7 @@ export default function Toolbar(props: Props) {
         <ToolButton icon="compare" title="创建提交 / 分支对比" disabled={busy} onClick={props.onCompare} />
         {props.compareBase && <button type="button" className="compare-base-chip" title="当前对比基准；点击清除" onClick={props.onClearCompareBase}>基准 {props.compareBase.slice(0, 7)}<Icon name="close" size={11} /></button>}
         <div className="filter-box"><Icon name="search" /><input className="revision-filter" aria-label="过滤提交" placeholder="过滤提交… (Ctrl+F)" value={filter} onChange={(e) => props.onFilter(e.target.value)} />{filter && <button aria-label="清除过滤" onClick={() => props.onFilter("")}><Icon name="close" size={12} /></button>}</div>
+        {props.onSearch && <ToolButton icon="search" title="高级提交与代码搜索 (Ctrl+Shift+H)" onClick={props.onSearch} />}
       </>}
       <span className="revision-count" title="当前提交数量">{revisionCount.toLocaleString()} 条</span>
       <button ref={viewButton} type="button" className="tool-button toolbar-view" title="视图与布局" aria-label="视图与布局" aria-haspopup="menu" aria-expanded={!!viewMenu} onPointerDown={(event) => { if (viewMenu) event.stopPropagation(); }} onClick={() => { if (viewMenu) setViewMenu(null); else openMenu(viewButton.current, setViewMenu); }}><Icon name="panel" /><span>视图</span></button>

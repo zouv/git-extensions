@@ -31,15 +31,15 @@
 | `src/components/Toolbar.tsx` | 命令栏：分支 / 远程 / 过滤 / 视图菜单 / 窄窗口“更多”菜单 | 改工具栏组织 |
 | `src/components/LeftPanel.tsx` | 本地变更 / 全部提交 / 分支 / 标签 / Submodules / Worktrees；分支标签过滤、200 条分页、树键盘移动、worktree 打开 | 改引用导航 |
 | `src/components/RevisionGrid.tsx` | 虚拟化提交列表 + Canvas 分支图；`aria-activedescendant`、容器级方向键、增量图宽 | 改列表 / 图渲染 |
-| `src/components/DiffView.tsx` | 文件列表 / 目录树、过滤与 500 条封顶、按需 patch、Inline / Split、hunk 导航、行右键、增删统计、按仓库记住模式 | 改 diff 展示 |
-| `src/viewState.ts` | Diff 解析 / 分类 / 分栏 / 折叠 / 虚拟窗口、草稿恢复、dirty 规则 | 改可测试的视图状态规则 |
+| `src/components/DiffView.tsx` | 文件列表 / 目录树、过滤与 500 条封顶、按需 patch、Inline / Split、hunk 导航与内联 Hunk 暂存 / 取消暂存 / 丢弃、行右键、增删统计、按仓库记住模式 | 改 diff 展示 |
+| `src/viewState.ts` | Diff 解析 / 分类 / 分栏 / 折叠 / 虚拟窗口、`extractHunkPatch`、`buildBranchTree`、`applyAutosquashOrder`、草稿恢复、dirty 规则 | 改可测试的视图状态规则 |
 | `src/highlight.worker.ts` / `src/languages.ts` | highlight.js 后台高亮、扩展名到语言映射 | 改高亮语言 / 请求协议 |
-| `src/components/ChangesPanel.tsx` | 暂存区 / 工作区列表、过滤、键盘预览、diff 预览（stale-while-revalidate）、提交与内联错误 | 改 stage/commit 交互 |
+| `src/components/ChangesPanel.tsx` | 暂存区 / 工作区列表、过滤、键盘预览、diff 预览（stale-while-revalidate）与 Hunk 级操作、`.gitignore` 快捷添加、提交（含 Amend 修正）与内联错误 | 改 stage/commit 交互 |
 | `src/components/CommitInfo.tsx` | 提交详情；SHA / 邮箱复制、包含分支 / 标签可点击过滤 | 改详情字段展示 |
 | `src/components/CompareView.tsx` | 双端提交 / 分支 / 标签对比；保留上一次结果、Enter 触发、内联错误 | 改对比交互 |
 | `src/components/ConflictCenter.tsx` | 冲突草稿、来源快照校验、冲突标记提示、合并两侧、继续 / 跳过 / 中止 | 改冲突工作流 |
-| `src/components/RebasePlanner.tsx` | 会话内线性 Rebase 计划、批量动作 / 重排 / 拖放指示、执行 | 改 Rebase 交互 |
-| `src/components/{Branch,Stash,Tag,Submodule,CheckoutRevision,DiffTool,ApplyPatch,Clone,CreateRepository,Push,Reset,Recovery,Blame,FileHistory,TrackedFile}Dialog.tsx` | 各类任务弹窗；Branch / Stash / Tag / Clone / Create / Checkout / ApplyPatch / Push 使用 dirty 关闭守卫，错误内联并保留 Git 原始输出 | 改对应工作流 |
+| `src/components/RebasePlanner.tsx` | 会话内线性 Rebase 计划、批量动作 / 重排 / Autosquash 自动重排 / 拖放指示、执行 | 改 Rebase 交互 |
+| `src/components/{Branch,Merge,Pull,Remotes,Worktree,CommandLog,Search,Stash,Tag,Submodule,CheckoutRevision,DiffTool,ApplyPatch,Clone,CreateRepository,Push,Reset,Recovery,Blame,FileHistory,TrackedFile}Dialog.tsx` | 各类任务弹窗；表单弹窗使用 dirty 关闭守卫，错误内联并保留 Git 原始输出 | 改对应工作流 |
 | `src/components/SettingsDialog.tsx` | 行为设置、分类键盘导航、未保存修改保护、快捷键帮助（由 `SHORTCUT_HELP` 生成） | 改设置交互 |
 | `src/explorer/` | 单任务窗口 Host、Commit / Pull / History 轻量界面与原生关闭保护 | 改 Explorer 轻量工作流 |
 | `src/repoGroups.ts` | 页签分组纯数据层：组 CRUD、Pin、颜色、分配、多选并集、别名 | 改分组规则 |
@@ -64,10 +64,11 @@
 | 右键菜单 / 多选菜单 | `ui/ContextMenu.tsx`；`TitleBar.tsx` 的 `groupMenuItems`（`keepOpen`） | 分组多选菜单保持打开；浮层栈只让顶层处理 Esc |
 | 通知 / 错误反馈 | `NotificationCenter.tsx` 的 `ToastItem`、`clearAll`；`App.tsx` 的 `notify`；`ui/InlineError.tsx` | 成功 toast 4 秒自动消失，hover / focus 暂停；错误保留在通知中心 |
 | 变更预览 / 轮询 | `RepoWorkspace.tsx` 的 `refreshAux`、`pollOnce`；`ChangesPanel.tsx` 的 `showPreview` 与 status effect | 后台重取保留旧 patch；status 无实质变化不重绘 DiffView |
-| 提交 / 暂存 / 内联错误 | `ChangesPanel.tsx` 的 `run`、`doCommit`、`commitError` | 失败同时写状态栏与内联错误 |
-| 提交图选择 / 图宽 | `RevisionGrid.tsx` 的容器 keydown、`aria-activedescendant`、`graphScan` | 增量扫描；Keyboard Home/End/PgUp/PgDn |
-| Diff 模式 / 文件过滤 | `DiffView.tsx` 的 `loadDiffMode` / `loadDiffWrap`、`filteredEntries`、`openLineMenu`、`goDiff` | 偏好键含 `prefKey`（仓库路径）；文件列表 500 条封顶 |
-| 左侧导航 / 分支过滤 | `LeftPanel.tsx` 的 `refFilter`、`refLimit`、`focusProps`、`treeKeyDown`、`onOpenWorktree` | 树内单一 tab stop + 方向键；200 条分页 |
+| 提交 / 暂存 / Amend / Hunk / `.gitignore` | `ChangesPanel.tsx` 的 `run`、`doCommit`、`toggleAmend`、`applyHunk`、`ignorePattern`、`commitError`；`viewState.ts::extractHunkPatch` | Amend 自动回填 HEAD 提交信息；Hunk 丢弃需危险确认 |
+| 提交图选择 / 图宽 / 右键扩展动作 | `RevisionGrid.tsx` 的容器 keydown、`aria-activedescendant`、`graphScan`、`RevisionAction` | 支持合并到当前分支、Fixup/Squash、导出补丁/归档、Bisect Good/Bad |
+| Diff 模式 / 文件过滤 / Hunk 按钮 | `DiffView.tsx` 的 `loadDiffMode` / `loadDiffWrap`、`filteredEntries`、`renderHunkBar`、`openLineMenu`、`goDiff` | 偏好键含 `prefKey`（仓库路径）；文件列表 500 条封顶 |
+| 左侧导航 / 分支文件夹树 | `LeftPanel.tsx` 的 `refFilter`、`refLimit`、`collapsedFolders`、`focusProps`、`treeKeyDown`、`onOpenWorktree`；`viewState.ts::buildBranchTree` | 分支按 `/` 分层可折叠；右键支持远程检出、重命名、远程删除与合并 |
+| Merge / Pull / Remotes / Worktree / 搜索 / 命令日志 / Bisect | `MergeDialog.tsx`、`PullDialog.tsx`、`RemotesDialog.tsx`、`WorktreeDialog.tsx`、`SearchDialog.tsx`、`CommandLogDialog.tsx`；`RepoWorkspace.tsx` 的 Bisect 横幅 | `Ctrl+Shift+H` 打开搜索、`Ctrl+Shift+G` 打开命令日志 |
 | 对比基准 | `RepoWorkspace.tsx` 的 `compareBase`、`onRevisionAction("compare-base")`；`Toolbar.tsx` 的 `compare-base-chip`；`RevisionGrid.tsx` 菜单标签 | 基准 chip 可清除；Esc 先清基准 |
 | 任务视图 / 草稿 | `RepoWorkspace.tsx` 的 `conflictDrafts`、`rebaseDrafts`、`saveConflictDraft`、`saveRebaseDraft`、`switchWorkspace` | 草稿存在会话 maps；关闭页签确认 |
 | 分组管理 / 页签别名 | `repoGroups.ts`；`RepoGroupsDialog.tsx`；`TitleBar.tsx`；`RepositoryTabs.tsx` | 全局持久化；别名只改显示 |

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { api } from "../api";
+import { extractHunkPatch } from "../viewState";
 import { useRepoBusy } from "../useRepoBusy";
 import type { FileDiff, StatusEntry, StatusSnapshot } from "../types";
 import DiffView from "./DiffView";
@@ -9,6 +10,7 @@ import ContextMenu from "../ui/ContextMenu";
 import SplitHandle from "../ui/SplitHandle";
 import Icon from "../ui/Icon";
 import InlineError from "../ui/InlineError";
+import { useConfirm } from "../ui/Confirm";
 
 interface Props {
   repoPath: string;
@@ -45,9 +47,11 @@ export default function ChangesPanel(props: Props) {
   const [checked, setChecked] = useState<Record<Side, Set<string>>>({ staged: new Set(), unstaged: new Set() });
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [amend, setAmend] = useState(false);
   const [localBusy, setBusy] = useState(false);
   const repoBusy = useRepoBusy(props.repoPath);
   const busy = localBusy || repoBusy;
+  const confirm = useConfirm();
   const [filter, setFilter] = useState("");
   const [preview, setPreview] = useState<{ side: Side; path: string; file: FileDiff | null } | null>(null);
   const [menu, setMenu] = useState<MenuTarget | null>(null);
@@ -153,16 +157,68 @@ export default function ChangesPanel(props: Props) {
       `${side === "unstaged" ? "已暂存" : "已取消暂存"} ${safePaths.length} 个文件${conflictHint ? `；${conflictHint}` : ""}`,
     );
   };
+  const toggleAmend = async (next: boolean) => {
+    setAmend(next);
+    setCommitError("");
+    if (next && !title.trim() && !body.trim()) {
+      try {
+        const headCommit = await api.getCommit(repoPath, "HEAD");
+        const lines = headCommit.message.split(/\r?\n/);
+        const firstLine = (lines[0] ?? "").trim();
+        const rest = lines.slice(1).join("\n").trim();
+        setTitle((current) => current.trim() ? current : firstLine);
+        setBody((current) => current.trim() ? current : rest);
+      } catch {
+        // 空仓库或无 HEAD 时忽略自动填充
+      }
+    }
+  };
+
+  const applyHunk = (file: FileDiff, hunkIndex: number, mode: "stage" | "unstage" | "discard") => {
+    const patch = extractHunkPatch(file, hunkIndex);
+    if (!patch) {
+      props.setMessage("无法提取当前差异块补丁");
+      return;
+    }
+    if (mode === "discard") {
+      void confirm({
+        title: `丢弃 ${file.path} 的第 ${hunkIndex + 1} 处差异块？`,
+        body: "该差异块的未暂存修改将从工作区移除，无法通过 Git 恢复。",
+        confirmLabel: "丢弃差异块",
+        danger: true,
+      }).then((ok) => {
+        if (!ok) return;
+        void run(
+          () => api.applyDiffPatch(repoPath, patch, false, true),
+          `已丢弃 ${file.path} 的差异块 #${hunkIndex + 1}`,
+        );
+      });
+      return;
+    }
+    const isUnstage = mode === "unstage";
+    void run(
+      () => api.applyDiffPatch(repoPath, patch, true, isUnstage),
+      `${isUnstage ? "已取消暂存" : "已暂存"} ${file.path} 的差异块 #${hunkIndex + 1}`,
+    );
+  };
+
+  const ignorePattern = (pattern: string) => {
+    void run(
+      () => api.ignoreFile(repoPath, pattern),
+      `已将 ${pattern} 写入 .gitignore`,
+    );
+  };
+
   const doCommit = () => {
     if (busy) return;
-    if (status.staged.length === 0) { const message = "没有已暂存的变更"; setCommitError(message); return props.setMessage(message); }
+    if (!amend && status.staged.length === 0) { const message = "没有已暂存的变更"; setCommitError(message); return props.setMessage(message); }
     if (!title.trim()) { const message = "提交标题不能为空"; setCommitError(message); return props.setMessage(message); }
     const message = title.trim() + (body.trim() ? `\n\n${body.trim()}` : "");
     void run(async () => {
-      const result = await api.commit(repoPath, message);
-      setTitle(""); setBody("");
+      const result = await api.commit(repoPath, message, amend);
+      setTitle(""); setBody(""); setAmend(false);
       return result;
-    }, "提交完成", true);
+    }, amend ? "修正提交 (Amend) 完成" : "提交完成", true);
   };
 
   const listKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>, side: Side, visible: StatusEntry[]) => {
@@ -253,16 +309,34 @@ export default function ChangesPanel(props: Props) {
         <div className="commit-box">
           {commitError && <InlineError message={commitError} />}
           <input ref={commitTitleRef} aria-label="提交标题" placeholder="提交标题（必填）" disabled={busy} value={title} onChange={(e) => { setTitle(e.target.value); setCommitError(""); }} />
-          <div className="commit-title-count">{title.length > 50 ? "标题建议不超过 50 字符 · " : ""}{title.length}/50</div>
+          <div className="commit-title-count">
+            <label className="amend-checkbox" title="修正上一次提交（git commit --amend）">
+              <input type="checkbox" disabled={busy} checked={amend} onChange={(e) => void toggleAmend(e.target.checked)} />
+              <span>修正上次提交 (Amend)</span>
+            </label>
+            <span>{title.length > 50 ? "标题建议不超过 50 字符 · " : ""}{title.length}/50</span>
+          </div>
           <textarea aria-label="提交正文" placeholder="提交正文（可选）" disabled={busy} value={body} onChange={(e) => { setBody(e.target.value); setCommitError(""); }} rows={3} onKeyDown={(e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doCommit(); }
           }} />
-          <button className="primary commit-button" disabled={busy || status.staged.length === 0} onClick={doCommit}>{busy ? <span className="spinner" /> : <Icon name="check" />}提交 ({status.staged.length})</button>
+          <button className="primary commit-button" disabled={busy || (!amend && status.staged.length === 0)} onClick={doCommit}>{busy ? <span className="spinner" /> : <Icon name="check" />}{amend ? `修正提交 (${status.staged.length})` : `提交 (${status.staged.length})`}</button>
         </div>
       </div>
       <SplitHandle direction="vertical" label="调整变更文件列表宽度" onResize={(delta) => props.onWidth(Math.min(720, Math.max(300, props.width + delta)))} onReset={() => props.onWidth(420)} />
       <div className="changes-preview">
-        {preview?.file ? <DiffView files={[preview.file]} highlightEnabled={props.highlightEnabled} onFileAction={props.onFileAction} showFileHeader={false} prefKey={repoPath} /> : preview ? previewError ? <div className="empty-state" role="alert">{previewError}</div> : <div className="empty-state"><span className="spinner" /><span>diff 加载中…</span></div> : <div className="empty-state"><Icon name="file" size={28} /><strong>选择一个文件</strong><span>查看工作区或暂存区差异</span></div>}
+        {preview?.file ? <DiffView
+          files={[preview.file]}
+          highlightEnabled={props.highlightEnabled}
+          onFileAction={props.onFileAction}
+          showFileHeader={false}
+          prefKey={repoPath}
+          hunkActions={preview.file.status !== "conflicted" ? {
+            staged: preview.side === "staged",
+            busy,
+            onStageHunk: (f, idx) => applyHunk(f, idx, preview.side === "staged" ? "unstage" : "stage"),
+            onDiscardHunk: preview.side === "unstaged" && preview.file.status !== "new" ? (f, idx) => applyHunk(f, idx, "discard") : undefined,
+          } : undefined}
+        /> : preview ? previewError ? <div className="empty-state" role="alert">{previewError}</div> : <div className="empty-state"><span className="spinner" /><span>diff 加载中…</span></div> : <div className="empty-state"><Icon name="file" size={28} /><strong>选择一个文件</strong><span>查看工作区或暂存区差异</span></div>}
       </div>
       {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} ariaLabel={`${menu.entry.path} 操作`} items={[
         ...(menu.entry.status !== "conflicted" ? [{ id: "stage", label: menu.side === "staged" ? "取消暂存" : "暂存", onSelect: () => stagePaths(menu.side, [menu.entry.path]) }] : [{ id: "resolve", label: "解决冲突", icon: "conflict" as const, onSelect: props.onOpenConflict }]),
@@ -270,6 +344,13 @@ export default function ChangesPanel(props: Props) {
         { id: "reveal", label: "在文件管理器中显示", icon: "folder", onSelect: () => props.onPathAction("reveal", menu.entry.path) },
         { id: "copy", label: "复制相对路径", icon: "copy", onSelect: () => props.onPathAction("copy-path", menu.entry.path) },
         ...(menu.side === "unstaged" ? [
+          { id: "sep-ignore", separator: true },
+          { id: "ignore-file", label: "添加到 .gitignore", onSelect: () => ignorePattern(menu.entry.path) },
+          ...(menu.entry.path.includes(".") && !menu.entry.path.endsWith(".") ? [{
+            id: "ignore-ext",
+            label: `忽略同类后缀 (*.${menu.entry.path.split(".").pop()})`,
+            onSelect: () => ignorePattern(`*.${menu.entry.path.split(".").pop()}`),
+          }] : []),
           { id: "sep", separator: true },
           menu.entry.status === "new"
             ? { id: "delete", label: "删除未跟踪文件…", danger: true, onSelect: () => props.onDiscard([menu.entry.path], true) }

@@ -17,7 +17,7 @@ interface Props {
   onNotify: (kind: "success" | "error" | "info", message: string, details?: string) => void;
 }
 
-const operationNames: Record<string, string> = { merge: "Merge", cherryPick: "Cherry-pick", revert: "Revert", rebase: "Rebase", none: "操作" };
+const operationNames: Record<string, string> = { merge: "Merge", cherryPick: "Cherry-pick", revert: "Revert", rebase: "Rebase", bisect: "Bisect", none: "操作" };
 
 export default function ConflictCenter(props: Props) {
   const [state, setState] = useState<OperationState | null>(null);

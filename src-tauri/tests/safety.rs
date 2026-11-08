@@ -394,7 +394,7 @@ fn write_lease_covers_hooks_alias_paths_and_linked_worktrees() {
     git::cli::stage_files(t.path(), vec!["base.txt".into()]).unwrap();
     let path = t.path();
     let writer = std::thread::spawn(move || {
-        tauri::async_runtime::block_on(git::commands::commit(path, "with hook".into()))
+        tauri::async_runtime::block_on(git::commands::commit(path, "with hook".into(), None))
     });
     let deadline = Instant::now() + Duration::from_secs(10);
     while !t.root.join(".git/ge-ready").exists() && Instant::now() < deadline {

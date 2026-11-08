@@ -265,3 +265,175 @@ pub fn file_log(
     }
     Ok(entries)
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrepMatch {
+    pub path: String,
+    pub line: usize,
+    pub text: String,
+}
+
+fn validate_search_arg(value: &str, label: &str) -> GitResult<()> {
+    if value.contains(['\0', '\n', '\r']) {
+        return Err(GitError::InvalidInput(format!("invalid {label} filter")));
+    }
+    Ok(())
+}
+
+/// 后端提交历史高级搜索（支持提交信息关键字、作者、路径范围及全部引用）。
+pub fn search_commits(
+    path: String,
+    query: Option<String>,
+    author: Option<String>,
+    file: Option<String>,
+    all_refs: bool,
+    max_count: Option<u32>,
+) -> GitResult<Vec<ScopedHistoryEntry>> {
+    let repo = open(&path)?;
+    if repo.is_empty()? {
+        return Ok(Vec::new());
+    }
+    let max = max_count.unwrap_or(200).clamp(1, 2000).to_string();
+    let mut args = vec![
+        "log".to_string(),
+        "--regexp-ignore-case".into(),
+        "--fixed-strings".into(),
+        "--format=%x00%H%x00%an%x00%at%x00%s".into(),
+        "-n".into(),
+        max,
+    ];
+    if let Some(q) = query.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        validate_search_arg(q, "query")?;
+        args.push(format!("--grep={q}"));
+    }
+    if let Some(a) = author.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        validate_search_arg(a, "author")?;
+        args.push(format!("--author={a}"));
+    }
+    if all_refs {
+        args.push("--exclude=refs/git-extensions/backups/*".into());
+        args.push("--all".into());
+    } else {
+        args.push("HEAD".into());
+    }
+    if let Some(f) = file.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        super::validate_relative_path(f)?;
+        args.extend(["--".into(), f.to_string()]);
+    }
+    let out = run_git(&path, &args)?;
+    let mut entries = Vec::new();
+    let mut fields = out.split('\0').filter(|field| !field.is_empty());
+    while let Some(oid) = fields.next() {
+        let oid = oid.trim_start_matches('\n');
+        if oid.len() != 40 || !oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            continue;
+        }
+        let (Some(author_name), Some(time), Some(subject)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            break;
+        };
+        entries.push(ScopedHistoryEntry {
+            oid: oid.into(),
+            short_id: oid[..7].into(),
+            author_name: author_name.into(),
+            author_time: time.parse().unwrap_or_default(),
+            subject: subject.trim_end_matches(['\r', '\n']).into(),
+        });
+    }
+    Ok(entries)
+}
+
+/// 仓库全文代码搜索（`git grep`），忽略二进制，结果上限保护。
+pub fn git_grep(
+    path: String,
+    pattern: String,
+    revision: Option<String>,
+    ignore_case: bool,
+    max_count: Option<u32>,
+) -> GitResult<Vec<GrepMatch>> {
+    let pattern = pattern.trim();
+    if pattern.is_empty() {
+        return Err(GitError::InvalidInput("search pattern is empty".into()));
+    }
+    validate_search_arg(pattern, "search pattern")?;
+    let limit = max_count.unwrap_or(500).clamp(1, 2000) as usize;
+    let repo = open(&path)?;
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| GitError::InvalidInput("bare repository has no worktree".into()))?;
+    let mut args = vec![
+        "grep".to_string(),
+        "-n".into(),
+        "-I".into(),
+        "--fixed-strings".into(),
+        "--null".into(),
+    ];
+    if ignore_case {
+        args.push("-i".into());
+    }
+    args.extend(["-e".into(), pattern.to_string()]);
+    if let Some(rev) = revision.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        validate_search_arg(rev, "revision")?;
+        if rev.starts_with('-') {
+            return Err(GitError::InvalidInput("invalid revision".into()));
+        }
+        let oid = repo.revparse_single(rev)?.peel_to_commit()?.id().to_string();
+        args.push(oid);
+    }
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("-C")
+        .arg(workdir)
+        .arg("--literal-pathspecs")
+        .args(&args)
+        .stdin(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = cmd.output()?;
+    // git grep 无匹配时退出码为 1，不算错误。
+    if !output.status.success() {
+        if output.status.code() == Some(1) && output.stderr.is_empty() {
+            return Ok(Vec::new());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(GitError::Cli(if stderr.is_empty() {
+            format!("git grep exited with status {}", output.status)
+        } else {
+            stderr
+        }));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut matches = Vec::new();
+    for raw_line in stdout.lines() {
+        if matches.len() >= limit {
+            break;
+        }
+        // --null 输出格式：[rev:]path \0 line \0 text
+        let mut parts = raw_line.splitn(3, '\0');
+        let (Some(mut file_part), Some(line_part), Some(text_part)) =
+            (parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        if revision.as_deref().map(str::trim).is_some_and(|s| !s.is_empty()) {
+            if let Some((_, rest)) = file_part.split_once(':') {
+                file_part = rest;
+            }
+        }
+        let Ok(line_no) = line_part.parse::<usize>() else {
+            continue;
+        };
+        matches.push(GrepMatch {
+            path: file_part.to_string(),
+            line: line_no,
+            text: text_part.to_string(),
+        });
+    }
+    Ok(matches)
+}
+

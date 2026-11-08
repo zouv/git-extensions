@@ -12,6 +12,20 @@
 
 ## [未发布]
 
+## [0.8.0] - 2026-11-08
+
+### 新增
+- 新增合并分支工作流（`MergeDialog` 与左侧分支 / 提交图右键菜单）：支持默认合并、始终创建合并提交（`--no-ff`）、仅快进（`--ff-only`）与压缩更改（`--squash`）。
+- 变更面板新增「修正上一次提交（Amend）」开关：勾选且提交框为空时自动回填 `HEAD` 提交信息，允许在无新增暂存文件时仅修改提交信息。
+- 分支管理与左侧引用树支持检出远程分支为本地跟踪分支、重命名本地分支、删除远程分支（需勾选确认），以及一键扫描并批量清理已合并到当前 `HEAD` 的本地分支。
+- 变更面板的差异预览支持 Hunk 级暂存、取消暂存与丢弃该块（Inline / Split 视图每个 `@@` 块头内联操作按钮）；未暂存 / 未跟踪文件右键支持将该文件或同类后缀加入 `.gitignore`。
+- 新增远程管理弹窗（`RemotesDialog`）：查看、添加、修改 Fetch / Push URL、重命名、删除远程，以及按远程执行带 `--prune` 的 Fetch；新增拉取选项弹窗（`PullDialog`：合并 / `--rebase` / `--ff-only` 与 `--autostash`）；推送弹窗新增 `--force-with-lease`（二次勾选确认）与 `--tags` 选项。
+- 新增 Worktree 管理弹窗（`WorktreeDialog`）：新建 linked worktree（基于现有或新建分支）、锁定 / 解锁、移除（支持强制移除）与 `prune` 清理失效记录；左侧导航本地与远程分支支持按 `/` 路径层级折叠为文件夹树。
+- 新增 Git 命令执行日志查看器（`CommandLogDialog`，快捷键 `Ctrl+Shift+G`）：环形缓冲记录最近 200 条 Git CLI 命令、工作目录、耗时、退出码与标准输出 / 错误详情。
+- 新增全库搜索弹窗（`SearchDialog`，快捷键 `Ctrl+Shift+H`）：支持后端提交历史搜索（按信息 / 作者 / 路径 / 全部分支）与 `git grep` 代码全文搜索，点击结果可直接跳转到对应提交。
+- 提交右键菜单新增「创建 Fixup / Squash 提交」（`git commit --fixup` / `--squash`），交互式 Rebase 计划器新增「自动重排 fixup!/squash!（Autosquash）」按钮。
+- 提交右键菜单新增「导出补丁（format-patch）…」与「导出归档（zip/tar.gz）…」；新增 Git Bisect 可视化二分排错工作流（工具栏 / 命令面板启动、顶部横幅与提交右键标记 Good / Bad / Skip / Reset）。
+
 ### 修复
 - 修复安装版或便携版运行时双击 `dev.bat` 静默退出的问题：开发模式改用独立 identifier，可与发布版同时启动；启动失败时保留控制台窗口显示错误。
 

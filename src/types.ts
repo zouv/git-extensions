@@ -156,7 +156,32 @@ export interface CompareResult {
   files: FileDiff[];
 }
 
-export type OperationKind = "none" | "merge" | "cherryPick" | "revert" | "rebase";
+export type OperationKind = "none" | "merge" | "cherryPick" | "revert" | "rebase" | "bisect";
+
+export interface RemoteInfo {
+  name: string;
+  fetchUrl: string;
+  pushUrl: string;
+}
+
+export interface CommandLogEntry {
+  timestamp: number;
+  repoPath: string;
+  args: string[];
+  durationMs: number;
+  exitCode: number | null;
+  success: boolean;
+  stderr: string;
+}
+
+export interface GrepMatch {
+  path: string;
+  line: number;
+  text: string;
+}
+
+export type MergeMode = "default" | "no-ff" | "ff-only" | "squash";
+export type PullMode = "default" | "rebase" | "ff-only" | "no-ff";
 
 export interface OperationState {
   kind: OperationKind;

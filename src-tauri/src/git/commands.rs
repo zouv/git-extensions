@@ -57,8 +57,31 @@ pub async fn unstage_files(path: String, paths: Vec<String>) -> GitResult<String
 }
 
 #[tauri::command]
-pub async fn commit(path: String, message: String) -> GitResult<String> {
-    run_blocking(move || cli::commit(path, message)).await
+pub async fn commit(
+    path: String,
+    message: String,
+    amend: Option<bool>,
+) -> GitResult<String> {
+    run_blocking(move || cli::commit_ex(path, message, amend.unwrap_or(false))).await
+}
+
+#[tauri::command]
+pub async fn commit_fixup(
+    path: String,
+    target_oid: String,
+    squash: Option<bool>,
+) -> GitResult<String> {
+    run_blocking(move || cli::commit_fixup(path, target_oid, squash.unwrap_or(false))).await
+}
+
+#[tauri::command]
+pub async fn apply_diff_patch(
+    path: String,
+    patch: String,
+    cached: bool,
+    reverse: bool,
+) -> GitResult<String> {
+    run_blocking(move || cli::apply_diff_patch(path, patch, cached, reverse)).await
 }
 
 #[tauri::command]
@@ -76,18 +99,107 @@ pub async fn checkout_branch(path: String, name: String) -> GitResult<String> {
 }
 
 #[tauri::command]
+pub async fn checkout_remote_branch(
+    path: String,
+    remote_branch: String,
+    local_name: Option<String>,
+) -> GitResult<String> {
+    run_blocking(move || cli::checkout_remote_branch(path, remote_branch, local_name)).await
+}
+
+#[tauri::command]
+pub async fn rename_branch(
+    path: String,
+    old_name: String,
+    new_name: String,
+) -> GitResult<String> {
+    run_blocking(move || cli::rename_branch(path, old_name, new_name)).await
+}
+
+#[tauri::command]
 pub async fn delete_branch(path: String, name: String, force: bool) -> GitResult<String> {
     run_blocking(move || cli::delete_branch(path, name, force)).await
 }
 
 #[tauri::command]
-pub async fn fetch(path: String, remote: Option<String>) -> GitResult<String> {
-    run_blocking(move || cli::fetch(path, remote)).await
+pub async fn delete_branches(
+    path: String,
+    names: Vec<String>,
+    force: Option<bool>,
+) -> GitResult<String> {
+    run_blocking(move || cli::delete_branches(path, names, force.unwrap_or(false))).await
 }
 
 #[tauri::command]
-pub async fn pull(path: String) -> GitResult<String> {
-    run_blocking(move || cli::pull(path)).await
+pub async fn delete_remote_branch(path: String, remote_branch: String) -> GitResult<String> {
+    run_blocking(move || cli::delete_remote_branch(path, remote_branch)).await
+}
+
+#[tauri::command]
+pub async fn merge_branch(
+    path: String,
+    target: String,
+    mode: Option<String>,
+    message: Option<String>,
+) -> GitResult<String> {
+    run_blocking(move || cli::merge_branch(path, target, mode, message)).await
+}
+
+#[tauri::command]
+pub async fn remote_list(path: String) -> GitResult<Vec<super::repo::RemoteInfo>> {
+    super::operations::run_read(move || super::repo::remote_list(path)).await
+}
+
+#[tauri::command]
+pub async fn remote_add(path: String, name: String, url: String) -> GitResult<String> {
+    run_blocking(move || cli::remote_add(path, name, url)).await
+}
+
+#[tauri::command]
+pub async fn remote_set_url(
+    path: String,
+    name: String,
+    url: String,
+    push: Option<bool>,
+) -> GitResult<String> {
+    run_blocking(move || cli::remote_set_url(path, name, url, push.unwrap_or(false))).await
+}
+
+#[tauri::command]
+pub async fn remote_rename(
+    path: String,
+    old_name: String,
+    new_name: String,
+) -> GitResult<String> {
+    run_blocking(move || cli::remote_rename(path, old_name, new_name)).await
+}
+
+#[tauri::command]
+pub async fn remote_remove(path: String, name: String) -> GitResult<String> {
+    run_blocking(move || cli::remote_remove(path, name)).await
+}
+
+#[tauri::command]
+pub async fn get_merged_branches(path: String) -> GitResult<Vec<String>> {
+    super::operations::run_read(move || super::repo::get_merged_branches(path)).await
+}
+
+#[tauri::command]
+pub async fn fetch(
+    path: String,
+    remote: Option<String>,
+    prune: Option<bool>,
+) -> GitResult<String> {
+    run_blocking(move || cli::fetch_ex(path, remote, prune.unwrap_or(false))).await
+}
+
+#[tauri::command]
+pub async fn pull(
+    path: String,
+    mode: Option<String>,
+    autostash: Option<bool>,
+) -> GitResult<String> {
+    run_blocking(move || cli::pull_ex(path, mode, autostash.unwrap_or(false))).await
 }
 
 #[tauri::command]
@@ -120,8 +232,21 @@ pub async fn push(
     branch: Option<String>,
     expected_head: Option<String>,
     expected_branch: Option<String>,
+    force_with_lease: Option<bool>,
+    push_tags: Option<bool>,
 ) -> GitResult<String> {
-    run_blocking(move || cli::push(path, remote, branch, expected_head, expected_branch)).await
+    run_blocking(move || {
+        cli::push_ex(
+            path,
+            remote,
+            branch,
+            expected_head,
+            expected_branch,
+            force_with_lease.unwrap_or(false),
+            push_tags.unwrap_or(false),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -423,3 +548,142 @@ pub async fn skip_operation(
 ) -> GitResult<String> {
     run_blocking(move || cli::skip_operation(path, expected)).await
 }
+
+#[tauri::command]
+pub async fn worktree_add(
+    path: String,
+    worktree_path: String,
+    branch: Option<String>,
+    new_branch: Option<bool>,
+    start_point: Option<String>,
+) -> GitResult<String> {
+    run_blocking(move || {
+        cli::worktree_add(
+            path,
+            worktree_path,
+            branch,
+            new_branch.unwrap_or(false),
+            start_point,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn worktree_remove(
+    path: String,
+    name: String,
+    force: Option<bool>,
+) -> GitResult<String> {
+    run_blocking(move || cli::worktree_remove(path, name, force.unwrap_or(false))).await
+}
+
+#[tauri::command]
+pub async fn worktree_lock(path: String, name: String, lock: bool) -> GitResult<String> {
+    run_blocking(move || cli::worktree_lock(path, name, lock)).await
+}
+
+#[tauri::command]
+pub async fn worktree_prune(path: String) -> GitResult<String> {
+    run_blocking(move || cli::worktree_prune(path)).await
+}
+
+#[tauri::command]
+pub async fn ignore_file(path: String, pattern: String) -> GitResult<String> {
+    run_blocking(move || cli::ignore_file(path, pattern)).await
+}
+
+#[tauri::command]
+pub async fn get_command_log(path: Option<String>) -> GitResult<Vec<cli::CommandLogEntry>> {
+    super::operations::run_read(move || cli::get_command_log(path)).await
+}
+
+#[tauri::command]
+pub async fn clear_command_log() -> GitResult<()> {
+    super::operations::run_read(cli::clear_command_log).await
+}
+
+#[tauri::command]
+pub async fn search_commits(
+    path: String,
+    query: Option<String>,
+    author: Option<String>,
+    file: Option<String>,
+    all_refs: Option<bool>,
+    max_count: Option<u32>,
+) -> GitResult<Vec<super::history::ScopedHistoryEntry>> {
+    super::operations::run_read(move || {
+        super::history::search_commits(
+            path,
+            query,
+            author,
+            file,
+            all_refs.unwrap_or(false),
+            max_count,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_grep(
+    path: String,
+    pattern: String,
+    revision: Option<String>,
+    ignore_case: Option<bool>,
+    max_count: Option<u32>,
+) -> GitResult<Vec<super::history::GrepMatch>> {
+    super::operations::run_read(move || {
+        super::history::git_grep(
+            path,
+            pattern,
+            revision,
+            ignore_case.unwrap_or(false),
+            max_count,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn bisect_start(
+    path: String,
+    bad_rev: Option<String>,
+    good_rev: Option<String>,
+) -> GitResult<String> {
+    run_blocking(move || cli::bisect_start(path, bad_rev, good_rev)).await
+}
+
+#[tauri::command]
+pub async fn bisect_mark(
+    path: String,
+    verdict: String,
+    target: Option<String>,
+) -> GitResult<String> {
+    run_blocking(move || cli::bisect_mark(path, verdict, target)).await
+}
+
+#[tauri::command]
+pub async fn bisect_reset(path: String) -> GitResult<String> {
+    run_blocking(move || cli::bisect_reset(path)).await
+}
+
+#[tauri::command]
+pub async fn format_patch(
+    path: String,
+    oid: String,
+    output_path: String,
+) -> GitResult<String> {
+    super::operations::run_read(move || cli::format_patch(path, oid, output_path)).await
+}
+
+#[tauri::command]
+pub async fn archive_commit(
+    path: String,
+    oid: String,
+    output_path: String,
+    format: Option<String>,
+) -> GitResult<String> {
+    super::operations::run_read(move || cli::archive_commit(path, oid, output_path, format)).await
+}
+

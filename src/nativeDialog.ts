@@ -1,4 +1,4 @@
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 
 /** 原生目录选择；用户取消时返回 null。 */
 export async function pickDirectory(title: string): Promise<string | null> {
@@ -16,3 +16,18 @@ export async function pickFile(title: string): Promise<string | null> {
   });
   return typeof result === "string" ? result : null;
 }
+
+/** 原生文件保存对话框，用于导出补丁或归档。 */
+export async function pickSaveFile(
+  title: string,
+  defaultPath?: string,
+  filters?: { name: string; extensions: string[] }[],
+): Promise<string | null> {
+  const result = await save({
+    title,
+    defaultPath,
+    filters: filters ?? [{ name: "All files", extensions: ["*"] }],
+  });
+  return typeof result === "string" ? result : null;
+}
+

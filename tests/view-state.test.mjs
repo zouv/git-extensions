@@ -4,7 +4,16 @@ import { readFile } from "node:fs/promises";
 import ts from "typescript";
 const source = await readFile(new URL("../src/viewState.ts", import.meta.url), "utf8");
 const url = "data:text/javascript;base64," + Buffer.from(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText).toString("base64");
-const { classifyDiffLine, restoreConflictDraft, selectedFileIndex, diffWindow, hasSessionDrafts } = await import(url);
+const {
+  classifyDiffLine,
+  restoreConflictDraft,
+  selectedFileIndex,
+  diffWindow,
+  hasSessionDrafts,
+  extractHunkPatch,
+  buildBranchTree,
+  applyAutosquashOrder,
+} = await import(url);
 
 test("Diff 文件头先于增删行分类", () => {
   for (const line of ["+++ b/a", "--- a/a", "diff --git a/a b/a", "rename from a"]) assert.equal(classifyDiffLine(line), "meta");
@@ -48,3 +57,61 @@ test("切换任务后，保留在会话内的草稿仍阻止无确认关闭页�
   assert.equal(hasSessionDrafts(true, 0, 0), true);
   assert.equal(hasSessionDrafts(false, 0, 0), false);
 });
+
+test("extractHunkPatch 提取指定 hunk 并保留或合成合法 diff 文件头", () => {
+  const file = {
+    path: "src/app.ts",
+    oldPath: null,
+    status: "modified",
+    isBinary: false,
+    truncated: false,
+    patch: [
+      "--- a/src/app.ts",
+      "+++ b/src/app.ts",
+      "@@ -1,3 +1,3 @@",
+      " line1",
+      "-old2",
+      "+new2",
+      "@@ -10,2 +10,3 @@",
+      " ctx",
+      "+added",
+    ].join("\n"),
+  };
+  const hunk0 = extractHunkPatch(file, 0);
+  assert.ok(hunk0.includes("diff --git a/src/app.ts b/src/app.ts"));
+  assert.ok(hunk0.includes("@@ -1,3 +1,3 @@"));
+  assert.ok(!hunk0.includes("@@ -10,2 +10,3 @@"));
+  assert.equal(extractHunkPatch(file, 2), null);
+});
+
+test("buildBranchTree 按斜杠分层构建可折叠文件夹树并统计子分支数量", () => {
+  const branches = [
+    { name: "main", isHead: true, isRemote: false, oid: "1" },
+    { name: "feature/auth/login", isHead: false, isRemote: false, oid: "2" },
+    { name: "feature/ui", isHead: false, isRemote: false, oid: "3" },
+  ];
+  const tree = buildBranchTree(branches);
+  assert.equal(tree.length, 2);
+  assert.equal(tree[0].kind, "folder");
+  assert.equal(tree[0].name, "feature");
+  assert.equal(tree[0].count, 2);
+  assert.equal(tree[1].kind, "branch");
+  assert.equal(tree[1].label, "main");
+});
+
+test("applyAutosquashOrder 自动将 fixup! 与 squash! 移到目标提交后并设好动作", () => {
+  const entries = [
+    { oid: "1111111", shortId: "1111111", subject: "feat: login", message: "feat: login", action: "pick" },
+    { oid: "2222222", shortId: "2222222", subject: "feat: dashboard", message: "feat: dashboard", action: "pick" },
+    { oid: "3333333", shortId: "3333333", subject: "fixup! feat: login", message: "fixup! feat: login", action: "pick" },
+    { oid: "4444444", shortId: "4444444", subject: "squash! feat: dashboard", message: "squash! feat: dashboard", action: "pick" },
+  ];
+  const ordered = applyAutosquashOrder(entries);
+  assert.deepEqual(ordered.map((e) => [e.oid, e.action]), [
+    ["1111111", "pick"],
+    ["3333333", "fixup"],
+    ["2222222", "pick"],
+    ["4444444", "squash"],
+  ]);
+});
+

@@ -86,6 +86,15 @@ test("全部正式写 API 都经过共享调度", async () => {
     ["discardFiles", [path, ["a"]]], ["deleteUntrackedFiles", [path, ["a"]]], ["startInteractiveRebase", [path, { branch: "refs/heads/main", entries: [] }]],
     ["cloneRepository", [path, "https://example.com/repo.git"]], ["createRepository", [path]],
     ["checkoutRevision", [path, "abc"]], ["applyPatch", [path, "change.patch", "patch-oid"]],
+    ["commitFixup", [path, "abc", false]], ["applyDiffPatch", [path, "diff", true, false]],
+    ["checkoutRemoteBranch", [path, "origin/main", "main"]], ["renameBranch", [path, "old", "new"]],
+    ["deleteBranches", [path, ["a", "b"], false]], ["deleteRemoteBranch", [path, "origin/feat"]],
+    ["mergeBranch", [path, "feat", "no-ff"]], ["remoteAdd", [path, "origin", "https://example.com/repo.git"]],
+    ["remoteSetUrl", [path, "origin", "https://example.com/repo.git", false]], ["remoteRename", [path, "origin", "upstream"]],
+    ["remoteRemove", [path, "upstream"]], ["worktreeAdd", [path, "C:\\wt", "feat", true]],
+    ["worktreeRemove", [path, "wt", false]], ["worktreeLock", [path, "wt", true]],
+    ["worktreePrune", [path]], ["ignoreFile", [path, "*.log"]],
+    ["bisectStart", [path, "HEAD", "abc"]], ["bisectMark", [path, "good"]], ["bisectReset", [path]],
   ];
   for (const [name, args] of writes) {
     const gate = deferred(); let invocations = 0;
@@ -136,7 +145,7 @@ test("只读 API 不占写状态，Rebase 与 Push 预览完整传递", async ()
   assert.deepEqual(received.at(-1), ["start_interactive_rebase", { path: "repo-read", plan }]);
   const preview = { branchRef: "refs/heads/main", headOid: "old" };
   await api.push("repo-read", "chosen", "target", preview);
-  assert.deepEqual(received.at(-1), ["push", { path: "repo-read", remote: "chosen", branch: "target", expectedHead: "old", expectedBranch: "refs/heads/main" }]);
+  assert.deepEqual(received.at(-1), ["push", { path: "repo-read", remote: "chosen", branch: "target", expectedHead: "old", expectedBranch: "refs/heads/main", forceWithLease: false, pushTags: false }]);
 });
 
 

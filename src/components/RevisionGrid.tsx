@@ -10,7 +10,26 @@ const PALETTE = ["#e06c75", "#65a9f5", "#57bd8a", "#d19a66", "#c678dd", "#56b6c2
 const MAX_GRAPH_W = 320;
 const optionId = (oid: string) => `revision-option-${oid}`;
 
-export type RevisionAction = "reset" | "diff" | "cherry-pick" | "revert" | "rebase" | "copy-sha" | "copy-subject" | "compare-head" | "compare-base" | "new-branch" | "new-tag" | "interactive-rebase";
+export type RevisionAction =
+  | "reset"
+  | "diff"
+  | "cherry-pick"
+  | "revert"
+  | "rebase"
+  | "merge-into-head"
+  | "fixup"
+  | "squash-commit"
+  | "export-patch"
+  | "export-archive"
+  | "bisect-bad"
+  | "bisect-good"
+  | "copy-sha"
+  | "copy-subject"
+  | "compare-head"
+  | "compare-base"
+  | "new-branch"
+  | "new-tag"
+  | "interactive-rebase";
 
 interface Props {
   revisions: Revision[];
@@ -206,12 +225,21 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
         ...(can("compare-head") ? [{ id: "compare-head", label: "与当前分支对比", icon: "compare" as const, onSelect: () => onContextAction("compare-head", menu.rev) }] : []),
         ...(can("new-branch") ? [{ id: "new-branch", label: "在此新建分支…", icon: "branch" as const, onSelect: () => onContextAction("new-branch", menu.rev) }] : []),
         ...(can("new-tag") ? [{ id: "new-tag", label: "在此新建标签…", icon: "tag" as const, onSelect: () => onContextAction("new-tag", menu.rev) }] : []),
-        ...(can("cherry-pick") || can("revert") || can("rebase") || can("reset") || can("interactive-rebase") ? [{ id: "sep-history", separator: true }] : []),
+        ...(can("merge-into-head") ? [{ id: "merge-into-head", label: "合并此提交到当前分支…", icon: "branch" as const, onSelect: () => onContextAction("merge-into-head", menu.rev) }] : []),
+        ...(can("cherry-pick") || can("revert") || can("rebase") || can("reset") || can("interactive-rebase") || can("fixup") || can("squash-commit") ? [{ id: "sep-history", separator: true }] : []),
         ...(can("cherry-pick") ? [{ id: "cherry", label: "Cherry-pick 此提交…", onSelect: () => onContextAction("cherry-pick", menu.rev) }] : []),
         ...(can("revert") ? [{ id: "revert", label: "Revert 此提交…", onSelect: () => onContextAction("revert", menu.rev) }] : []),
+        ...(can("fixup") ? [{ id: "fixup", label: "基于已暂存变更创建 Fixup 提交 (修正此提交)", onSelect: () => onContextAction("fixup", menu.rev) }] : []),
+        ...(can("squash-commit") ? [{ id: "squash-commit", label: "基于已暂存变更创建 Squash 提交", onSelect: () => onContextAction("squash-commit", menu.rev) }] : []),
         ...(can("rebase") ? [{ id: "rebase", label: "将当前分支 Rebase 到此提交…", danger: true, onSelect: () => onContextAction("rebase", menu.rev) }] : []),
         ...(can("reset") ? [{ id: "reset", label: "Reset 当前 HEAD 到此提交…", danger: true, onSelect: () => onContextAction("reset", menu.rev) }] : []),
         ...(can("interactive-rebase") ? [{ id: "interactive", label: "从此提交开始交互式 Rebase…", danger: true, onSelect: () => onContextAction("interactive-rebase", menu.rev) }] : []),
+        ...(can("export-patch") || can("export-archive") ? [{ id: "sep-export", separator: true }] : []),
+        ...(can("export-patch") ? [{ id: "export-patch", label: "导出补丁 (.patch)…", onSelect: () => onContextAction("export-patch", menu.rev) }] : []),
+        ...(can("export-archive") ? [{ id: "export-archive", label: "导出归档 (.zip)…", onSelect: () => onContextAction("export-archive", menu.rev) }] : []),
+        ...(can("bisect-bad") || can("bisect-good") ? [{ id: "sep-bisect", separator: true }] : []),
+        ...(can("bisect-bad") ? [{ id: "bisect-bad", label: "Bisect：标记此提交为坏 (Bad)", onSelect: () => onContextAction("bisect-bad", menu.rev) }] : []),
+        ...(can("bisect-good") ? [{ id: "bisect-good", label: "Bisect：标记此提交为好 (Good)", onSelect: () => onContextAction("bisect-good", menu.rev) }] : []),
       ]} />}
     </div>
   );

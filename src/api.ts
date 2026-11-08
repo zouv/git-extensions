@@ -24,6 +24,7 @@ import type {
   ResetMode, ResetPreview, ResetResult, RecoveryEntry,
   ExplorerIntegrationInfo, LaunchRequest, PatchPreview, ExplorerMenuItem,
   WindowBootstrap, ExplorerTarget, ScopedHistoryEntry, CommandOutput,
+  RemoteInfo, CommandLogEntry, GrepMatch, MergeMode, PullMode,
 } from "./types";
 
 // 只合并仍在途的同参数读取，不缓存工作区结果。
@@ -64,21 +65,62 @@ export const api = {
     writeInvoke<string>("stage_files", { path, paths }),
   unstageFiles: (path: string, paths: string[]) =>
     writeInvoke<string>("unstage_files", { path, paths }),
-  commit: (path: string, message: string) =>
-    writeInvoke<string>("commit", { path, message }),
+  commit: (path: string, message: string, amend = false) =>
+    writeInvoke<string>("commit", { path, message, amend }),
+  commitFixup: (path: string, targetOid: string, squash = false) =>
+    writeInvoke<string>("commit_fixup", { path, targetOid, squash }),
+  applyDiffPatch: (path: string, patch: string, cached: boolean, reverse: boolean) =>
+    writeInvoke<string>("apply_diff_patch", { path, patch, cached, reverse }),
   createBranch: (path: string, name: string, startPoint?: string) =>
     writeInvoke<string>("create_branch", { path, name, startPoint }),
   checkoutBranch: (path: string, name: string) =>
     writeInvoke<string>("checkout_branch", { path, name }),
+  checkoutRemoteBranch: (path: string, remoteBranch: string, localName?: string) =>
+    writeInvoke<string>("checkout_remote_branch", { path, remoteBranch, localName }),
+  renameBranch: (path: string, oldName: string, newName: string) =>
+    writeInvoke<string>("rename_branch", { path, oldName, newName }),
   deleteBranch: (path: string, name: string, force: boolean) =>
     writeInvoke<string>("delete_branch", { path, name, force }),
+  deleteBranches: (path: string, names: string[], force = false) =>
+    writeInvoke<string>("delete_branches", { path, names, force }),
+  deleteRemoteBranch: (path: string, remoteBranch: string) =>
+    writeInvoke<string>("delete_remote_branch", { path, remoteBranch }),
+  mergeBranch: (path: string, target: string, mode: MergeMode = "default", message?: string) =>
+    writeInvoke<string>("merge_branch", { path, target, mode, message }),
+  remoteList: (path: string) => invoke<RemoteInfo[]>("remote_list", { path }),
+  remoteAdd: (path: string, name: string, url: string) =>
+    writeInvoke<string>("remote_add", { path, name, url }),
+  remoteSetUrl: (path: string, name: string, url: string, push = false) =>
+    writeInvoke<string>("remote_set_url", { path, name, url, push }),
+  remoteRename: (path: string, oldName: string, newName: string) =>
+    writeInvoke<string>("remote_rename", { path, oldName, newName }),
+  remoteRemove: (path: string, name: string) =>
+    writeInvoke<string>("remote_remove", { path, name }),
+  getMergedBranches: (path: string) => invoke<string[]>("get_merged_branches", { path }),
   getAheadBehind: (path: string) => invoke<AheadBehind | null>("get_ahead_behind", { path }),
-  fetch: (path: string, remote?: string) => writeInvoke<string>("fetch", { path, remote }),
-  pull: (path: string) => writeInvoke<string>("pull", { path }),
+  fetch: (path: string, remote?: string, prune = false) =>
+    writeInvoke<string>("fetch", { path, remote, prune }),
+  pull: (path: string, mode: PullMode = "default", autostash = false) =>
+    writeInvoke<string>("pull", { path, mode, autostash }),
   pullWithOutput: (path: string) => writeInvoke<CommandOutput>("pull_with_output", { path }),
   getPushInfo: (path: string) => invoke<PushInfo>("get_push_info", { path }),
-  push: (path: string, remote?: string, branch?: string, preview?: PushInfo) =>
-    writeInvoke<string>("push", { path, remote, branch, expectedHead: preview?.headOid, expectedBranch: preview?.branchRef }),
+  push: (
+    path: string,
+    remote?: string,
+    branch?: string,
+    preview?: PushInfo,
+    forceWithLease = false,
+    pushTags = false,
+  ) =>
+    writeInvoke<string>("push", {
+      path,
+      remote,
+      branch,
+      expectedHead: preview?.headOid,
+      expectedBranch: preview?.branchRef,
+      forceWithLease,
+      pushTags,
+    }),
   stashList: (path: string) => invoke<StashInfo[]>("stash_list", { path }),
   stashPush: (path: string, message: string, includeUntracked: boolean) =>
     writeInvoke<string>("stash_push", { path, message, includeUntracked }),
@@ -97,6 +139,46 @@ export const api = {
   submoduleList: (path: string) => invoke<SubmoduleInfo[]>("submodule_list", { path }),
   submoduleUpdate: (path: string) => writeInvoke<string>("submodule_update", { path }),
   worktreeList: (path: string) => invoke<WorktreeInfo[]>("worktree_list", { path }),
+  worktreeAdd: (
+    path: string,
+    worktreePath: string,
+    branch?: string,
+    newBranch = false,
+    startPoint?: string,
+  ) => writeInvoke<string>("worktree_add", { path, worktreePath, branch, newBranch, startPoint }),
+  worktreeRemove: (path: string, name: string, force = false) =>
+    writeInvoke<string>("worktree_remove", { path, name, force }),
+  worktreeLock: (path: string, name: string, lock: boolean) =>
+    writeInvoke<string>("worktree_lock", { path, name, lock }),
+  worktreePrune: (path: string) => writeInvoke<string>("worktree_prune", { path }),
+  ignoreFile: (path: string, pattern: string) =>
+    writeInvoke<string>("ignore_file", { path, pattern }),
+  getCommandLog: (path?: string) => invoke<CommandLogEntry[]>("get_command_log", { path }),
+  clearCommandLog: () => invoke<void>("clear_command_log", {}),
+  searchCommits: (
+    path: string,
+    query?: string,
+    author?: string,
+    file?: string,
+    allRefs = false,
+    maxCount = 200,
+  ) => invoke<ScopedHistoryEntry[]>("search_commits", { path, query, author, file, allRefs, maxCount }),
+  gitGrep: (
+    path: string,
+    pattern: string,
+    revision?: string,
+    ignoreCase = true,
+    maxCount = 500,
+  ) => invoke<GrepMatch[]>("git_grep", { path, pattern, revision, ignoreCase, maxCount }),
+  bisectStart: (path: string, badRev?: string, goodRev?: string) =>
+    writeInvoke<string>("bisect_start", { path, badRev, goodRev }),
+  bisectMark: (path: string, verdict: "good" | "bad" | "skip", target?: string) =>
+    writeInvoke<string>("bisect_mark", { path, verdict, target }),
+  bisectReset: (path: string) => writeInvoke<string>("bisect_reset", { path }),
+  formatPatch: (path: string, oid: string, outputPath: string) =>
+    invoke<string>("format_patch", { path, oid, outputPath }),
+  archiveCommit: (path: string, oid: string, outputPath: string, format?: string) =>
+    invoke<string>("archive_commit", { path, oid, outputPath, format }),
   blameFile: (path: string, file: string, oid?: string) =>
     invoke<BlameLine[]>("blame_file", { path, file, oid }),
   fileLog: (path: string, file: string, maxCount?: number) =>

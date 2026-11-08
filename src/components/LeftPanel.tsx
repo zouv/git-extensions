@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import type { BranchInfo, SubmoduleInfo, TagInfo, WorktreeInfo } from "../types";
+import { buildBranchTree } from "../viewState";
+import type { BranchTreeNode } from "../viewState";
 import Icon from "../ui/Icon";
 import ContextMenu from "../ui/ContextMenu";
 import type { MenuItem } from "../ui/ContextMenu";
@@ -18,12 +20,17 @@ interface Props {
   onWorkspace: (workspace: "history" | "changes") => void;
   onFilter: (ref: string | null) => void;
   onCheckout: (name: string) => void;
+  onCheckoutRemote?: (remoteBranch: string) => void;
+  onMergeRef?: (ref: string) => void;
+  onRenameBranch?: (branch: BranchInfo) => void;
+  onDeleteRemoteBranch?: (remoteBranch: string) => void;
   onCompare: (ref: string) => void;
   onNewBranch: (startPoint: string) => void;
   onDeleteBranch: (branch: BranchInfo) => void;
   onDeleteTag: (name: string) => void;
   onStash: () => void;
   onSubmodules: () => void;
+  onWorktrees?: () => void;
   onCopyPath: (path: string) => void;
   onRevealPath: (path: string) => void;
   onOpenWorktree: (path: string) => void;
@@ -93,16 +100,20 @@ export default function LeftPanel(props: Props) {
     event.preventDefault();
     setMenu({ kind: "submodule", name: module.path, path: module.path, x: event.clientX, y: event.clientY });
   };
-  const refRow = (name: string, kind: "branch" | "remote", branch: BranchInfo) => (
+  const refRow = (name: string, kind: "branch" | "remote", branch: BranchInfo, label = name, depth = 0) => (
     <div
       className={`tree-item${historySelected(name) ? " selected" : ""}`}
+      style={depth > 0 ? { paddingLeft: 12 + depth * 14 } : undefined}
       role="treeitem"
       aria-selected={historySelected(name)}
       {...focusProps(`ref-${kind}-${name}`)}
       key={name}
       title={name}
       onClick={() => { props.onFilter(name); props.onWorkspace("history"); }}
-      onDoubleClick={() => { if (kind === "branch" && !branch.isHead) props.onCheckout(name); }}
+      onDoubleClick={() => {
+        if (kind === "branch" && !branch.isHead) props.onCheckout(name);
+        else if (kind === "remote" && props.onCheckoutRemote) props.onCheckoutRemote(name);
+      }}
       onContextMenu={(e) => openMenu(e, { kind, name, branch })}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); props.onFilter(name); props.onWorkspace("history"); }
@@ -110,10 +121,44 @@ export default function LeftPanel(props: Props) {
       }}
     >
       <Icon name={kind === "branch" ? "branch" : "fetch"} size={14} />
-      <span className={branch.isHead ? "branch-head" : ""}>{name}</span>
+      <span className={branch.isHead ? "branch-head" : ""}>{label}</span>
       {branch.isHead && <span className="head-marker">HEAD</span>}
     </div>
   );
+
+  const localTree = useMemo(() => buildBranchTree(local.slice(0, refLimit)), [local, refLimit]);
+  const remoteTree = useMemo(() => buildBranchTree(remote.slice(0, refLimit)), [remote, refLimit]);
+
+  const renderBranchTree = (nodes: BranchTreeNode[], kind: "branch" | "remote", depth = 0): ReactNode[] => {
+    const out: ReactNode[] = [];
+    for (const node of nodes) {
+      if (node.kind === "branch") {
+        out.push(refRow(node.branch.name, kind, node.branch, node.label, depth));
+      } else {
+        const folderKey = `folder-${kind}-${node.prefix}`;
+        const isCollapsed = collapsed.has(folderKey) && !query;
+        out.push(
+          <button
+            key={folderKey}
+            type="button"
+            className="tree-folder"
+            style={{ paddingLeft: 12 + depth * 14 }}
+            {...focusProps(`group-${folderKey}`)}
+            aria-expanded={!isCollapsed}
+            onClick={() => toggle(folderKey)}
+          >
+            <Icon name={isCollapsed ? "folder" : "chevron-down"} size={12} />
+            <span>{node.name}</span>
+            <span className="tree-count">{node.count}</span>
+          </button>,
+        );
+        if (!isCollapsed) {
+          out.push(...renderBranchTree(node.children, kind, depth + 1));
+        }
+      }
+    }
+    return out;
+  };
 
   const menuItems: MenuItem[] = (() => {
     if (!menu) return [];
@@ -124,17 +169,29 @@ export default function LeftPanel(props: Props) {
     ];
     if (menu.kind === "worktree") return [
       { id: "open", label: "在新页签打开", icon: "plus", onSelect: () => props.onOpenWorktree(menu.path) },
+      ...(props.onWorktrees ? [{ id: "manage-wt", label: "管理 Worktrees…", icon: "branch" as const, onSelect: props.onWorktrees }] : []),
       { id: "copy", label: "复制路径", icon: "copy", onSelect: () => props.onCopyPath(menu.path) },
       { id: "reveal", label: "在文件管理器中显示", icon: "external", onSelect: () => props.onRevealPath(menu.path) },
     ];
     return [
       ...(menu.kind === "branch" ? [
         { id: "checkout", label: "切换分支", icon: "branch" as const, disabled: menu.branch?.isHead, onSelect: () => props.onCheckout(menu.name) },
+        ...(props.onMergeRef ? [{ id: "merge", label: "合并到当前分支…", icon: "branch" as const, disabled: menu.branch?.isHead, onSelect: () => props.onMergeRef?.(menu.name) }] : []),
         { id: "new", label: "基于此新建分支…", icon: "plus" as const, onSelect: () => props.onNewBranch(menu.name) },
+        ...(props.onRenameBranch && menu.branch ? [{ id: "rename", label: "重命名分支…", onSelect: () => { if (menu.branch) props.onRenameBranch?.(menu.branch); } }] : []),
+      ] : []),
+      ...(menu.kind === "remote" ? [
+        ...(props.onCheckoutRemote ? [{ id: "checkout-remote", label: "检出为本地跟踪分支…", icon: "branch" as const, onSelect: () => props.onCheckoutRemote?.(menu.name) }] : []),
+        ...(props.onMergeRef ? [{ id: "merge-remote", label: "合并到当前分支…", icon: "branch" as const, onSelect: () => props.onMergeRef?.(menu.name) }] : []),
+        { id: "new-from-remote", label: "基于此新建分支…", icon: "plus" as const, onSelect: () => props.onNewBranch(menu.name) },
+      ] : []),
+      ...(menu.kind === "tag" && props.onMergeRef ? [
+        { id: "merge-tag", label: "合并此标签到当前分支…", icon: "branch" as const, onSelect: () => props.onMergeRef?.(menu.name) },
       ] : []),
       { id: "compare", label: "与当前分支对比", icon: "compare" as const, onSelect: () => props.onCompare(menu.name) },
       { id: "copy", label: "复制名称", icon: "copy" as const, onSelect: () => { void navigator.clipboard?.writeText(menu.name); } },
       ...(menu.kind === "branch" ? [{ id: "sep", separator: true }, { id: "delete", label: "删除分支…", icon: "close" as const, danger: true, disabled: menu.branch?.isHead, onSelect: () => { if (menu.branch) props.onDeleteBranch(menu.branch); } }] : []),
+      ...(menu.kind === "remote" && props.onDeleteRemoteBranch ? [{ id: "sep-remote", separator: true }, { id: "delete-remote", label: "删除远程分支…", icon: "close" as const, danger: true, onSelect: () => props.onDeleteRemoteBranch?.(menu.name) }] : []),
       ...(menu.kind === "tag" ? [{ id: "sep-tag", separator: true }, { id: "delete-tag", label: "删除标签…", icon: "close" as const, danger: true, onSelect: () => props.onDeleteTag(menu.name) }] : []),
     ];
   })();
@@ -158,10 +215,10 @@ export default function LeftPanel(props: Props) {
         </div>
         <div className={`tree-item all-revisions${historySelected(null) ? " selected" : ""}`} role="treeitem" aria-selected={historySelected(null)} {...focusProps("history")} onClick={() => { props.onFilter(null); props.onWorkspace("history"); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); props.onFilter(null); props.onWorkspace("history"); } }}><Icon name="history" size={14} />全部提交</div>
         {group("local", "本地分支", local.length)}
-        {(!collapsed.has("local") || !!query) && local.slice(0, refLimit).map((b) => refRow(b.name, "branch", b))}
+        {(!collapsed.has("local") || !!query) && renderBranchTree(localTree, "branch")}
         {(!collapsed.has("local") || !!query) && local.length > refLimit && <button className="tree-more" onClick={() => setRefLimit((value) => value + 200)}>显示更多（还有 {local.length - refLimit} 个）</button>}
         {group("remote", "远程分支", remote.length)}
-        {(!collapsed.has("remote") || !!query) && remote.slice(0, refLimit).map((b) => refRow(b.name, "remote", b))}
+        {(!collapsed.has("remote") || !!query) && renderBranchTree(remoteTree, "remote")}
         {(!collapsed.has("remote") || !!query) && remote.length > refLimit && <button className="tree-more" onClick={() => setRefLimit((value) => value + 200)}>显示更多（还有 {remote.length - refLimit} 个）</button>}
         {group("tags", "标签", tags.length)}
         {(!collapsed.has("tags") || !!query) && tags.slice(0, refLimit).map((tag) => <div
@@ -198,6 +255,7 @@ export default function LeftPanel(props: Props) {
       <div className="left-panel-footer">
         <button onClick={props.onStash}><Icon name="stash" size={14} />Stash</button>
         <button onClick={props.onSubmodules}><Icon name="folder" size={14} />子模块</button>
+        {props.onWorktrees && <button onClick={props.onWorktrees}><Icon name="branch" size={14} />Worktrees</button>}
       </div>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} ariaLabel={`${menu.name} 操作`} />}
     </aside>

@@ -11,7 +11,7 @@
 
 ---
 
-## 总进度（2026-11-07 更新）
+## 总进度（2026-11-08 更新）
 
 - M1–M4 规划开发与可执行验证已完成；Windows / Linux 自动化测试全绿。后续为统一 GUI 验收、Git Extensions 界面性能对比及 macOS 实机或 CI 验收。
 - M5 功能实现、Windows 常规 DPI GUI 实测与 17,783 提交基准已完成；高 DPI 和 macOS 验收待补。
@@ -19,6 +19,7 @@
 - 0.5.0 已交付：仓库页签持久化、标题栏交互规范、左侧导航 / Submodules / Worktrees、Inline / Split 差异视图；细节见 CHANGELOG [0.5.0]。
 - Windows 资源管理器集成、单实例轻量窗口、文件级 View changelog 与 Shell extension 设置已交付 0.6.0；真实菜单、各轻量窗口 / 冲突反馈及安装版 / 便携版验收待补。
 - 0.7.0 已交付界面交互优化：弹窗焦点 / 错误反馈 / 草稿保护、命令面板与原生目录选择、键盘可达性、Diff 工具增强与大列表性能；剩余原生对话框 / 拖放 / 高 DPI / 安装版验收。
+- 0.8.0 已交付核心 Git 能力补齐（P0–P2 共 13 项，对齐上游 Git Extensions）：合并分支、Amend、Hunk 级暂存、Remotes / Worktree 管理、分支文件夹树、命令日志、全库搜索、Fixup / Autosquash、导出补丁 / 归档、Git Bisect 与已合并分支清理；详见 CHANGELOG [0.8.0]，待实机 GUI 验收。
 
 ---
 
@@ -33,10 +34,18 @@
 - ✅ 0.5.0 会话恢复、标题栏与差异视图增强（2026-11-03）：页签持久化、标题栏交互规范、左侧导航与 Submodules / Worktrees、Inline / Split 差异视图；详见 CHANGELOG [0.5.0]。
 - ✅ 0.6.0 资源管理器集成与轻量工作流（2026-11-04）：文件 / 目录菜单、单实例多窗口、Clone / Commit / Pull / changelog 等单任务窗口、统一 View changelog；详见 CHANGELOG [0.6.0]。
 - ✅ 0.7.0 界面交互全面优化（2026-11-07）：弹窗焦点 / 错误可见性 / 草稿保护、命令面板与原生目录选择、键盘与 Diff 工具增强、大列表性能；详见 CHANGELOG [0.7.0]。
+- ✅ 0.8.0 核心 Git 能力补齐（2026-11-08）：合并分支、Amend、Hunk 级暂存、Remotes / Worktree 管理、分支文件夹树、命令日志、提交与代码搜索、Fixup / Autosquash、导出补丁 / 归档、Git Bisect 与批量清理已合并分支；详见 CHANGELOG [0.8.0]。
 
 ---
 
 ## 📋 总体开发大纲
+
+### 核心 Git 能力补齐（已发布 0.8.0，GUI 验收中）
+
+- [x] ~~P0 日常高频闭环：合并分支（`git merge` 普通 / `--no-ff` / `--squash`）、Amend 修正提交、远程分支检出跟踪 / 本地分支重命名 / 删除远程分支、Hunk 级暂存 / 取消暂存 / 丢弃。~~（2026-11-08）
+- [x] ~~P1 协作与多工作区：Remotes 远程管理弹窗与 Fetch Prune / Pull 策略 / Push Force-with-Lease & Tags、Worktree 新建 / 删除 / 锁定 / 清理、左侧分支 `/` 文件夹树折叠与右键加入 `.gitignore`、Git 命令执行日志查看器。~~（2026-11-08）
+- [x] ~~P2 进阶研发效率：后端提交搜索与 `git grep` 代码搜索、快速 Fixup / Squash 提交与 Rebase Autosquash、导出补丁（`format-patch`）与归档（`git archive`）、Git Bisect 可视化二分排错、批量清理已合并分支。~~（2026-11-08）
+- [ ] 完成新增 P0–P2 工作流（Merge / Hunk / Remotes / Worktree / 搜索 / 命令日志 / Bisect / 导出）的真实 GUI 验收。
 
 ### Windows 资源管理器集成与设置分类（代码完成，待实机验收）
 

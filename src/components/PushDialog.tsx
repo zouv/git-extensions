@@ -4,6 +4,7 @@ import { useRepoBusy } from "../useRepoBusy";
 import type { PushInfo } from "../types";
 import Dialog from "../ui/Dialog";
 import { useDirtyClose } from "../ui/useDirtyClose";
+import { useConfirm } from "../ui/Confirm";
 
 interface Props {
   repoPath: string;
@@ -20,8 +21,11 @@ export default function PushDialog(props: Props) {
   const busy = localBusy || repoBusy;
   const [remote, setRemote] = useState("");
   const [target, setTarget] = useState("");
+  const [forceWithLease, setForceWithLease] = useState(false);
+  const [pushTags, setPushTags] = useState(false);
   const [error, setError] = useState("");
-  const dirty = !!info && !info.hasUpstream && (remote !== "" || target !== info.branch);
+  const confirm = useConfirm();
+  const dirty = !!info && (!info.hasUpstream && (remote !== "" || target !== info.branch) || forceWithLease || pushTags);
   const close = useDirtyClose(dirty, busy, props.onClose);
 
   useEffect(() => {
@@ -36,9 +40,27 @@ export default function PushDialog(props: Props) {
 
   const push = async () => {
     if (!info || busy || (!info.hasUpstream && (!remote || !target.trim()))) return;
+    if (forceWithLease) {
+      const ok = await confirm({
+        title: "使用 --force-with-lease 强制推送？",
+        body: "若远端分支自上次抓取后没有被他人更新，将覆盖远端分支历史（常用于 Rebase 或 Amend 之后）。",
+        confirmLabel: "确认强制推送",
+        danger: true,
+        requireAck: true,
+        ackLabel: "我确认重写远端分支历史（带有 lease 保护）",
+      });
+      if (!ok) return;
+    }
     setBusy(true); setError("");
     try {
-      await api.push(props.repoPath, info.hasUpstream ? undefined : remote, info.hasUpstream ? undefined : target.trim(), info);
+      await api.push(
+        props.repoPath,
+        info.hasUpstream ? undefined : remote,
+        info.hasUpstream ? undefined : target.trim(),
+        info,
+        forceWithLease,
+        pushTags,
+      );
       props.onNotify("success", "Push 完成");
       props.onChanged(); props.onClose();
     } catch (e) {
@@ -49,7 +71,7 @@ export default function PushDialog(props: Props) {
 
   return <Dialog title="推送提交" busy={busy} onClose={close} footer={<>
     <button disabled={busy} onClick={close}>取消</button>
-    <button className="primary" disabled={busy || loading || !info || (!info.hasUpstream && (!remote || !target.trim()))} onClick={() => void push()}>{busy ? "推送中…" : info?.hasUpstream ? "Push" : "推送并建立 upstream"}</button>
+    <button className={forceWithLease ? "danger-button" : "primary"} disabled={busy || loading || !info || (!info.hasUpstream && (!remote || !target.trim()))} onClick={() => void push()}>{busy ? "推送中…" : info?.hasUpstream ? (forceWithLease ? "Force Push (with lease)" : "Push") : "推送并建立 upstream"}</button>
   </>}>
     {loading && <p className="panel-hint">正在读取推送配置…</p>}
     {info && <div className="push-options">
@@ -66,8 +88,17 @@ export default function PushDialog(props: Props) {
         <label>目标分支<input value={target} disabled={busy} onChange={(e) => setTarget(e.target.value)} /></label>
         {info.remotes.length === 0 && <p className="panel-hint">仓库没有已配置远程，请先配置远程后重新打开。</p>}
         <p>推送：<code>{info.branchRef}</code> → <strong>{remote || "未选择远程"}/{target || "未填写分支"}</strong></p>
-        <p className="muted">成功后建立 upstream；不使用强制推送。</p>
       </>}
+      <div className="push-flags">
+        <label className="checkbox-row">
+          <input type="checkbox" disabled={busy} checked={pushTags} onChange={(e) => setPushTags(e.target.checked)} />
+          <span>同时推送本地标签 (<code>--tags</code>)</span>
+        </label>
+        <label className="checkbox-row">
+          <input type="checkbox" disabled={busy} checked={forceWithLease} onChange={(e) => setForceWithLease(e.target.checked)} />
+          <span>安全强制推送 (<code>--force-with-lease</code>，Rebase / Amend 后更新远端)</span>
+        </label>
+      </div>
     </div>}
     {error && <pre className="push-error" role="alert">{error}</pre>}
   </Dialog>;

@@ -29,6 +29,13 @@ function loadDiffWrap(key: string): boolean {
   try { return localStorage.getItem(`${DIFF_WRAP_KEY}:${key}`) === "1"; } catch { return false; }
 }
 
+export interface HunkActions {
+  staged: boolean;
+  busy?: boolean;
+  onStageHunk: (file: FileDiff, hunkIndex: number) => void;
+  onDiscardHunk?: (file: FileDiff, hunkIndex: number) => void;
+}
+
 interface Props {
   files: FileDiff[];
   loading?: boolean;
@@ -39,11 +46,13 @@ interface Props {
   showFileHeader?: boolean;
   /** 按仓库保存 Inline / Split 与换行偏好。 */
   prefKey?: string;
+  /** 工作区 / 暂存区预览时的 Hunk 级暂存、取消暂存与丢弃操作。 */
+  hunkActions?: HunkActions;
 }
 
 type DisplayRow = { kind: "dir"; path: string; depth: number } | { kind: "file"; file: FileDiff; index: number; depth: number };
 
-export default function DiffView({ files, loading, highlightEnabled = true, onFileAction, loadFile, showFileHeader = true, prefKey = "" }: Props) {
+export default function DiffView({ files, loading, highlightEnabled = true, onFileAction, loadFile, showFileHeader = true, prefKey = "", hunkActions }: Props) {
   const [selected, setSelected] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(400);
@@ -271,12 +280,42 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
     </button>
   );
 
+  const renderHunkBar = (line: PatchLine) => {
+    const hunkIdx = line.hunkIndex;
+    if (!hunkActions || !file || hunkIdx === null) return line.text;
+    return (
+      <div className="diff-hunk-bar">
+        <span className="diff-hunk-header-text">{line.text}</span>
+        <span className="diff-hunk-buttons">
+          <button
+            type="button"
+            className="hunk-action-btn"
+            disabled={hunkActions.busy}
+            onClick={(e) => { e.stopPropagation(); hunkActions.onStageHunk(file, hunkIdx); }}
+          >
+            {hunkActions.staged ? "取消暂存块" : "暂存块"}
+          </button>
+          {!hunkActions.staged && hunkActions.onDiscardHunk && (
+            <button
+              type="button"
+              className="hunk-action-btn danger"
+              disabled={hunkActions.busy}
+              onClick={(e) => { e.stopPropagation(); hunkActions.onDiscardHunk?.(file, hunkIdx); }}
+            >
+              丢弃块…
+            </button>
+          )}
+        </span>
+      </div>
+    );
+  };
+
   const renderInlineRow = (row: InlineRow, index: number) => {
     if (row.kind === "fold") return renderFold(row, index);
     const line = row.line;
     const style = effectiveWrap ? undefined : { top: index * LINE_H, height: LINE_H };
     const className = `diff-line line-${line.kind}${effectiveWrap ? " wrapped" : ""}`;
-    if (line.kind === "hunk") return <div key={`line-${line.sourceIndex}`} className={className} style={style} data-hunk-row="">{line.text}</div>;
+    if (line.kind === "hunk") return <div key={`line-${line.sourceIndex}`} className={className} style={style} data-hunk-row="">{renderHunkBar(line)}</div>;
     if (line.kind === "meta" || line.kind === "note") return <div key={`line-${line.sourceIndex}`} className={className} style={style}>{line.text}</div>;
     return <div key={`line-${line.sourceIndex}`} className={className} style={style} onContextMenu={(e) => openLineMenu(e, line)}>{renderContent(line)}</div>;
   };
@@ -301,7 +340,7 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
     const style = effectiveWrap ? undefined : { top: index * LINE_H, height: LINE_H };
     if (row.kind === "whole") {
       const line = row.line;
-      return <div key={`whole-${line.sourceIndex}`} className={`diff-line line-${line.kind}${effectiveWrap ? " wrapped" : ""}`} style={style} data-hunk-row={line.kind === "hunk" ? "" : undefined}>{line.text}</div>;
+      return <div key={`whole-${line.sourceIndex}`} className={`diff-line line-${line.kind}${effectiveWrap ? " wrapped" : ""}`} style={style} data-hunk-row={line.kind === "hunk" ? "" : undefined}>{line.kind === "hunk" ? renderHunkBar(line) : line.text}</div>;
     }
     return <div key={`pair-${index}`} className={`diff-row${effectiveWrap ? " wrapped" : ""}`} style={style}>{renderCell(row.left, "old")}{renderCell(row.right, "new")}</div>;
   };

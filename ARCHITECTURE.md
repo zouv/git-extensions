@@ -33,7 +33,8 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 |---|---|---|---|
 | 改提交日志 / 分支图数据 | `src-tauri/src/git/log.rs`、`src/components/RevisionGrid.tsx` | 其它后端模块、diff / changes 组件 | §2.1、§3；`arch/ui.md §2` |
 | 改 diff 获取或渲染 | `src-tauri/src/git/diff.rs`、`src/components/DiffView.tsx`、`src/viewState.ts` 与调用方 loader | log.rs、写路径 | §2、§3、§4；`arch/ui.md §2–§3` |
-| 改暂存 / 提交 / 分支 / Push 或写调度 | `src-tauri/src/git/cli.rs`、`commands.rs`、`operations.rs`；`src/api.ts`、`repoOperations.ts` / `useRepoBusy.ts` 与对应写操作组件 | 读路径模块 | §2、§3、§4；`arch/ui.md §2–§3` |
+| 改暂存 / 提交 / 分支 / 远程 / Worktree / Merge / Bisect 或写调度 | `src-tauri/src/git/cli.rs`、`commands.rs`、`operations.rs`、`repo.rs`；`src/api.ts`、`repoOperations.ts` / `useRepoBusy.ts` 与对应写操作组件 | 读路径模块 | §2、§3、§4；`arch/ui.md §2–§3` |
+| 改提交搜索 / 代码搜索 / 导出补丁与归档 / 命令日志 | `src-tauri/src/git/history.rs`、`cli.rs`、`commands.rs`；`src/components/{Search,CommandLog}Dialog.tsx`、`RevisionGrid.tsx` | 分支图渲染与写锁 | §2、§4；`arch/ui.md §1–§2` |
 | 改后台读调度 / 失效与刷新 | `operations.rs`、`commands.rs`、`log.rs`；`src/api.ts`、`repoOperations.ts`、`RepoWorkspace.tsx`、`ChangesPanel.tsx` | 无关写组件 | §2、§3、§7；`arch/ui.md §3` |
 | 改 Reset / 恢复 | `src-tauri/src/git/reset.rs`、`commands.rs`；`src/components/ResetDialog.tsx`、`RecoveryDialog.tsx`、`RepoWorkspace.tsx` | 分支图与高亮 Worker | §2、§3、§4；`arch/ui.md §2` |
 | 改页面布局 / 状态流转 | `src/App.tsx`、`src/RepoWorkspace.tsx`、`src/ui/`、`src/styles.css` | 后端 git 模块 | `arch/ui.md §1–§3` |
@@ -58,18 +59,18 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | `src-tauri/src/lib.rs` | Tauri 命令注册、插件与窗口生命周期；最后一个窗口销毁后退出 | 新增 / 删除 IPC 命令、改应用生命周期 |
 | `src-tauri/src/error.rs` | 统一错误类型 `GitError`（可序列化给前端） | 新增错误类别 |
 | `src-tauri/src/git/mod.rs` | `open()`：按路径 discover 打开仓库 | 改仓库打开策略 |
-| `src-tauri/src/git/repo.rs` | 仓库信息、分支列表、linked worktree 列表 | 改仓库概览 / 分支 / worktree 字段 |
+| `src-tauri/src/git/repo.rs` | 仓库信息、分支列表、远程列表、已合并本地分支、linked worktree 列表 | 改仓库概览 / 分支 / remote / worktree 字段 |
 | `src-tauri/src/git/log.rs` | revwalk 流式日志、refs 收集、分支图 lane 布局、代际取消 | 改日志加载 / 图数据 |
 | `src-tauri/src/git/diff.rs` | 提交 / 工作区 / 双端文件清单与单文件 patch、大小保护 | 改 diff 数据 |
-| `src-tauri/src/git/status.rs` | 状态快照、真实 operation state、冲突四方内容 | 改状态分类 / 冲突读取 |
-| `src-tauri/src/git/cli.rs` | 同步 Git 写实现与参数校验、冲突保存 / 继续 / 中止、文件丢弃 | 改任何 Git 写操作 |
+| `src-tauri/src/git/status.rs` | 状态快照、真实 operation state（含 Bisect）、冲突四方内容 | 改状态分类 / 冲突读取 |
+| `src-tauri/src/git/cli.rs` | 同步 Git 写实现与参数校验（含 Hunk 暂存、Amend/Fixup、Merge、Remote、Worktree、Bisect、导出与命令日志环形缓冲） | 改任何 Git 写操作或 CLI 命令记录 |
 | `src-tauri/src/git/commands.rs` / `operations.rs` | 全部 Git 读写 IPC 适配；有界后台读取与 common Git dir 写互斥 | 改写操作执行调度 |
 | `src-tauri/src/git/reset.rs` | Reset 预览、状态指纹、CLI HEAD 备份、执行与 reflog / 备份恢复列表 | 改 Reset / 恢复保护 |
 | `src-tauri/src/git/rebase.rs` | 线性计划校验、真实 `rebase -i`、内部 sequence/message editor | 改交互式 Rebase |
 | `src-tauri/src/system.rs` / `system/explorer.rs` | 安全解析仓库内路径并调用 OS 打开 / 显示；可选 HKCU 资源管理器菜单 | 改系统集成；菜单详见 `arch/explorer.md` |
 | `src-tauri/src/launch.rs` | 固定 Explorer 动作与受控启动参数解析 | 改外部启动协议 |
 | `src-tauri/src/window_host.rs` | 单实例请求队列、主窗口聚焦、轻量动作窗口创建与最后窗口退出 | 改外部启动 / 多窗口路由 |
-| `src-tauri/src/git/history.rs` | git2 逐行 blame、CLI `--follow` 单文件历史、目录 / 文件范围 changelog | 改文件历史 / 行数上限 |
+| `src-tauri/src/git/history.rs` | git2 逐行 blame、CLI `--follow` 单文件历史、目录 / 文件范围 changelog、提交搜索与 `git grep` | 改文件历史 / 搜索 / 行数上限 |
 | `src/types.ts` / `src/api.ts` | 前后端共享 TS 类型、在途读取去重 / `writeInvoke`、log-batch 订阅 | 改 IPC 字段 / 调用方式 |
 | 前端页面、组件、交互原语、持久化与样式 | 见 [`arch/ui.md §1`](./arch/ui.md) | 改布局 / 交互 / 前端状态 |
 | `src-tauri/tests/smoke.rs` / `workflows.rs` / `safety.rs` / `repository_capabilities.rs` | 临时真实仓库测试：基础流程、文件 / 冲突、Rebase、参数 / Push 安全、写互斥与新增仓库能力 | 改命令行为时补对应用例 |
@@ -105,8 +106,10 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | 写互斥 / 后台执行 | `operations.rs` 的 `acquire_write`、`run_blocking`；`commands.rs` | 同仓库及 linked worktree 拒绝并发写；不同仓库可并行 |
 | 有界后台读取 | `operations.rs` 的 `run_read`、`ReadPermit`；`commands.rs` 读适配、`log.rs::start_log` | 四令牌 FIFO 异步等待；令牌由 blocking 工作持有 |
 | Reset / 恢复备份 | `reset.rs` 的 `get_reset_preview`、`reset`、`get_recovery_entries`、`create_backup` | 原 HEAD 与 branch / index / dirty 内容指纹；Hard clean 保护 |
-| Push 目标与预览 | `cli.rs` 的 `get_push_info`、`push` | 不 fallback；确认后的 branch / HEAD 必须匹配 |
-| blame / 文件历史 | `history.rs` 的 `blame_file`、`file_log` | blame 上限 2 MiB / 20000 行；工作区使用 blame buffer；历史 NUL 协议携带改名前路径 |
+| Push 目标与预览 / 远程管理 | `cli.rs` 的 `get_push_info`、`push_ex`、`fetch_ex`、`pull_ex`、`remote_*`；`repo.rs::remote_list` | 不 fallback；支持 `--force-with-lease`、`--tags`、fetch `--prune`、pull 策略与 `--autostash` |
+| 分支扩展 / Merge / Worktree / Bisect | `cli.rs` 的 `checkout_remote_branch`、`rename_branch`、`delete_branches`、`delete_remote_branch`、`merge_branch`、`worktree_*`、`bisect_*`；`repo.rs::get_merged_branches` | 均经 `acquire_write` 与参数验证；`get_merged_branches` 自动排除当前 HEAD 与常见主干分支 |
+| Hunk 暂存 / Fixup / 忽略 / 导出 / 命令日志 | `cli.rs` 的 `apply_diff_patch`、`commit_ex`、`commit_fixup`、`ignore_file`、`format_patch`、`archive_commit`、`get_command_log` | `apply_diff_patch` 通过 stdin 传给 `git apply`；命令日志保留最近 200 条 CLI 记录 |
+| blame / 文件历史 / 提交与代码搜索 | `history.rs` 的 `blame_file`、`file_log`、`search_commits`、`git_grep` | blame 上限 2 MiB / 20000 行；搜索经受控 CLI NUL 协议解析 |
 
 ### 2.2 前端（`src/`）
 
@@ -168,8 +171,12 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | 前端 → 后端 | `prepare_interactive_rebase` / `start_interactive_rebase` | 线性非根范围；prepare 返回 onto、originalHead、完整 branch ref、entries；start 接收原完整 `plan`，不得重建 branch，执行前重新校验 |
 | 前端 → 后端 | `discard_files` / `delete_untracked_files` / `open_path` / `reveal_path` | 仅仓库内相对路径；丢弃保留 staged；删除拒绝 tracked / ignored / 目录 |
 | 前端 → 后端 | `get_worktree_diff` | `staged`：true=HEAD vs index，false=index vs workdir |
-| 前端 → 后端 | `stage_files` / `unstage_files` / `commit` / `create_branch` / `checkout_branch` / `delete_branch` | 走 CLI，stderr 原文返回给前端 |
-| 前端 → 后端 | `fetch` / `pull` / `push` / `stash_*` / `cherry_pick` / `revert` / `rebase` / `create_tag` / `delete_tag` / `submodule_update` | 写操作经后台 IPC 与仓库写互斥，仍走 CLI；Push 契约见下一行 |
+| 前端 → 后端 | `stage_files` / `unstage_files` / `commit` / `commit_fixup` / `apply_diff_patch` / `ignore_file` | 走 CLI，stderr 原文返回；`commit` 支持 `amend`；`apply_diff_patch` 支持 `cached` 与 `reverse`（Hunk 暂存/取消暂存/丢弃） |
+| 前端 → 后端 | `create_branch` / `checkout_branch` / `checkout_remote_branch` / `rename_branch` / `delete_branch` / `delete_branches` / `delete_remote_branch` / `get_merged_branches` / `merge_branch` | 远程检出自动创建跟踪分支；批量删除与远程删除需确认；`merge_branch` 支持 `default` / `no-ff` / `ff-only` / `squash` |
+| 前端 → 后端 | `fetch` / `pull` / `push` / `remote_list` / `remote_add` / `remote_set_url` / `remote_rename` / `remote_remove` | `fetch` 支持 `remote` / `prune`；`pull` 支持 `mode`（`merge`/`rebase`/`ff-only`）与 `autostash`；`push` 支持 `forceWithLease` 与 `pushTags` |
+| 前端 → 后端 | `worktree_list` / `worktree_add` / `worktree_remove` / `worktree_lock` / `worktree_prune` | 管理 linked worktree，写操作均走 CLI 并受仓库写互斥保护 |
+| 前端 → 后端 | `search_commits` / `git_grep` / `format_patch` / `archive_commit` / `bisect_start` / `bisect_mark` / `bisect_reset` / `get_command_log` / `clear_command_log` | 提交搜索支持 message/author/path/allRefs；`git_grep` 支持 revision 与大小写；导出补丁/归档经 `dialog:allow-save` 选择目标路径；命令日志返回耗时、退出码与输出摘要 |
+| 前端 → 后端 | `stash_*` / `cherry_pick` / `revert` / `rebase` / `create_tag` / `delete_tag` / `submodule_update` | 写操作经后台 IPC 与仓库写互斥，仍走 CLI；Push 契约见下一行 |
 | 前端 → 后端 | `get_push_info` / `push` | 信息含 branch、branchRef、headOid、hasUpstream、upstream、remotes；push 可传 remote / branch 和 expectedHead / expectedBranch。明确目标必须携带预览，未指定则须有 upstream 并保留 Git 配置 |
 | 前端 → 后端 | `get_reset_preview` / `reset` / `get_recovery_entries` | target + mode 返回 ResetPreview（branch / headOid / targetOid / fingerprint / 影响）；reset 必须传完整预览，返回 backupRef / previousHead / newHead / output；RecoveryEntry 含 oid / label / time / backupRef |
 | 前端 → 后端 | `stash_apply` / `stash_drop` | 合法 stash@{n} + expectedOid，索引移动或对象变化时拒绝过期选择 |

@@ -1,7 +1,10 @@
+use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use git2::RepositoryState;
 use serde::Serialize;
@@ -12,6 +15,79 @@ use super::{
     resolve_worktree_path, validate_relative_path,
 };
 use crate::error::{GitError, GitResult};
+
+const MAX_COMMAND_LOG_ENTRIES: usize = 200;
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandLogEntry {
+    pub timestamp: i64,
+    pub repo_path: String,
+    pub args: Vec<String>,
+    pub duration_ms: u64,
+    pub exit_code: Option<i32>,
+    pub success: bool,
+    pub stderr: String,
+}
+
+static COMMAND_LOG: OnceLock<Mutex<VecDeque<CommandLogEntry>>> = OnceLock::new();
+
+fn command_log_store() -> &'static Mutex<VecDeque<CommandLogEntry>> {
+    COMMAND_LOG.get_or_init(|| Mutex::new(VecDeque::with_capacity(MAX_COMMAND_LOG_ENTRIES)))
+}
+
+fn record_command_log(
+    repo_path: &str,
+    args: &[String],
+    duration_ms: u64,
+    output: &std::process::Output,
+) {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let mut stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.len() > 1024 {
+        stderr.truncate(stderr.floor_char_boundary(1024));
+        stderr.push('…');
+    }
+    if let Ok(mut guard) = command_log_store().lock() {
+        if guard.len() >= MAX_COMMAND_LOG_ENTRIES {
+            guard.pop_front();
+        }
+        guard.push_back(CommandLogEntry {
+            timestamp,
+            repo_path: repo_path.to_string(),
+            args: args.to_vec(),
+            duration_ms,
+            exit_code: output.status.code(),
+            success: output.status.success(),
+            stderr,
+        });
+    }
+}
+
+pub fn get_command_log(path: Option<String>) -> GitResult<Vec<CommandLogEntry>> {
+    let filter_path = path.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let guard = command_log_store()
+        .lock()
+        .map_err(|_| GitError::Cli("command log lock poisoned".into()))?;
+    let mut items: Vec<CommandLogEntry> = guard
+        .iter()
+        .filter(|entry| filter_path.is_none_or(|p| entry.repo_path == p))
+        .cloned()
+        .collect();
+    items.reverse();
+    Ok(items)
+}
+
+pub fn clear_command_log() -> GitResult<()> {
+    let mut guard = command_log_store()
+        .lock()
+        .map_err(|_| GitError::Cli("command log lock poisoned".into()))?;
+    guard.clear();
+    Ok(())
+}
 
 /// 写操作统一走 git CLI：hooks 会执行，行为与命令行完全一致。
 /// GUI 程序派生控制台进程时不弹出黑色控制台窗口。
@@ -65,9 +141,16 @@ pub struct CommandOutput {
 }
 
 fn capture_git(repo_path: &str, args: &[String]) -> GitResult<CommandOutput> {
+    let started = Instant::now();
     let output = git_command(repo_path, args, &[])
         .stdin(Stdio::null())
         .output()?;
+    record_command_log(
+        repo_path,
+        args,
+        started.elapsed().as_millis() as u64,
+        &output,
+    );
     if !output.status.success() {
         return Err(GitError::Cli(command_failure_details(&output)));
     }
@@ -84,9 +167,16 @@ pub(crate) fn run_git_with_env(
     args: &[String],
     envs: &[(&str, &OsStr)],
 ) -> GitResult<String> {
+    let started = Instant::now();
     let output = git_command(repo_path, args, envs)
         .stdin(Stdio::null())
         .output()?;
+    record_command_log(
+        repo_path,
+        args,
+        started.elapsed().as_millis() as u64,
+        &output,
+    );
     git_output(output)
 }
 
@@ -96,6 +186,7 @@ pub(crate) fn run_git_with_stdin(
     args: &[String],
     input: &[u8],
 ) -> GitResult<String> {
+    let started = Instant::now();
     let mut child = git_command(repo_path, args, &[])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -112,6 +203,12 @@ pub(crate) fn run_git_with_stdin(
         (output, written)
     });
     let output = output?;
+    record_command_log(
+        repo_path,
+        args,
+        started.elapsed().as_millis() as u64,
+        &output,
+    );
     match written {
         Ok(Ok(())) => {}
         // Git 校验失败提前退出时，BrokenPipe 的真实原因在 stderr 中。
@@ -566,11 +663,66 @@ pub fn unstage_files(path: String, paths: Vec<String>) -> GitResult<String> {
 }
 
 pub fn commit(path: String, message: String) -> GitResult<String> {
+    commit_ex(path, message, false)
+}
+
+pub fn commit_ex(path: String, message: String, amend: bool) -> GitResult<String> {
     let _write = acquire_write(&path)?;
     if message.trim().is_empty() {
         return Err(GitError::InvalidInput("commit message is empty".into()));
     }
-    run_git(&path, &["commit".to_string(), "-m".to_string(), message])
+    let mut args = vec!["commit".to_string()];
+    if amend {
+        args.push("--amend".to_string());
+    }
+    args.push("-m".to_string());
+    args.push(message);
+    run_git(&path, &args)
+}
+
+pub fn commit_fixup(path: String, target_oid: String, squash: bool) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let repo = open(&path)?;
+    let oid = commit_argument(&repo, &target_oid)?;
+    let args = if squash {
+        vec![
+            "commit".to_string(),
+            "--no-edit".to_string(),
+            format!("--squash={oid}"),
+        ]
+    } else {
+        vec!["commit".to_string(), format!("--fixup={oid}")]
+    };
+    run_git(&path, &args)
+}
+
+pub fn apply_diff_patch(
+    path: String,
+    patch: String,
+    cached: bool,
+    reverse: bool,
+) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    if patch.trim().is_empty() {
+        return Err(GitError::InvalidInput("hunk patch is empty".into()));
+    }
+    let repo = open(&path)?;
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| GitError::InvalidInput("bare repository has no worktree".into()))?;
+    let mut args = vec![
+        "apply".to_string(),
+        "--recount".to_string(),
+        "--unidiff-zero".to_string(),
+    ];
+    if cached {
+        args.push("--cached".to_string());
+    }
+    if reverse {
+        args.push("-R".to_string());
+    }
+    args.push("-".to_string());
+    run_git_with_stdin(&path_string(workdir), &args, patch.as_bytes())
 }
 
 pub fn create_branch(path: String, name: String, start_point: Option<String>) -> GitResult<String> {
@@ -594,6 +746,46 @@ pub fn checkout_branch(path: String, name: String) -> GitResult<String> {
     )
 }
 
+pub fn checkout_remote_branch(
+    path: String,
+    remote_branch: String,
+    local_name: Option<String>,
+) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let repo = open(&path)?;
+    repo.find_branch(&remote_branch, git2::BranchType::Remote)?;
+    let default_local = remote_branch
+        .split_once('/')
+        .map(|(_, rest)| rest.to_string())
+        .ok_or_else(|| GitError::InvalidInput("invalid remote branch name".into()))?;
+    let local = local_name
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(default_local);
+    validate_ref_name(&local, "heads")?;
+    run_git(
+        &path,
+        &[
+            "switch".into(),
+            "-c".into(),
+            local,
+            "--track".into(),
+            format!("refs/remotes/{remote_branch}"),
+        ],
+    )
+}
+
+pub fn rename_branch(path: String, old_name: String, new_name: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    validate_ref_name(&old_name, "heads")?;
+    validate_ref_name(&new_name, "heads")?;
+    open(&path)?.find_branch(&old_name, git2::BranchType::Local)?;
+    run_git(
+        &path,
+        &["branch".into(), "-m".into(), "--".into(), old_name, new_name],
+    )
+}
+
 pub fn delete_branch(path: String, name: String, force: bool) -> GitResult<String> {
     let _write = acquire_write(&path)?;
     validate_ref_name(&name, "heads")?;
@@ -608,10 +800,168 @@ pub fn delete_branch(path: String, name: String, force: bool) -> GitResult<Strin
     )
 }
 
+pub fn delete_branches(path: String, names: Vec<String>, force: bool) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    if names.is_empty() {
+        return Err(GitError::InvalidInput("no branches selected".into()));
+    }
+    for name in &names {
+        validate_ref_name(name, "heads")?;
+    }
+    let mut args = vec![
+        "branch".to_string(),
+        if force { "-D" } else { "-d" }.to_string(),
+        "--".into(),
+    ];
+    args.extend(names);
+    run_git(&path, &args)
+}
+
+pub fn delete_remote_branch(path: String, remote_branch: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let repo = open(&path)?;
+    repo.find_branch(&remote_branch, git2::BranchType::Remote)?;
+    let mut matched: Option<(String, String)> = None;
+    for remote in repo.remotes()?.iter().flatten() {
+        let prefix = format!("{remote}/");
+        if let Some(branch) = remote_branch.strip_prefix(&prefix) {
+            if matched.as_ref().is_none_or(|(r, _)| remote.len() > r.len()) {
+                matched = Some((remote.to_string(), branch.to_string()));
+            }
+        }
+    }
+    let (remote_name, branch_name) =
+        matched.ok_or_else(|| GitError::InvalidInput("cannot resolve remote for branch".into()))?;
+    validate_remote(&repo, &remote_name)?;
+    validate_ref_name(&branch_name, "heads")?;
+    run_git(
+        &path,
+        &[
+            "push".into(),
+            "--delete".into(),
+            "--".into(),
+            remote_name,
+            branch_name,
+        ],
+    )
+}
+
+pub fn merge_branch(
+    path: String,
+    target: String,
+    mode: Option<String>,
+    message: Option<String>,
+) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let repo = open(&path)?;
+    if repo.state() != RepositoryState::Clean {
+        return Err(GitError::InvalidInput(
+            "finish or abort the current operation before merging".into(),
+        ));
+    }
+    let target = target.trim().to_string();
+    if target.is_empty() || target.starts_with('-') || target.contains(['\0', '\n', '\r']) {
+        return Err(GitError::InvalidInput("invalid merge target".into()));
+    }
+    repo.revparse_single(&target)?.peel_to_commit()?;
+    let mode_str = mode.as_deref().unwrap_or("default");
+    let mut args = vec!["merge".to_string()];
+    match mode_str {
+        "default" => {}
+        "no-ff" => args.push("--no-ff".into()),
+        "ff-only" => args.push("--ff-only".into()),
+        "squash" => args.push("--squash".into()),
+        other => {
+            return Err(GitError::InvalidInput(format!(
+                "unsupported merge mode: {other}"
+            )))
+        }
+    }
+    if mode_str != "squash" {
+        if let Some(msg) = message.filter(|m| !m.trim().is_empty()) {
+            args.push("-m".into());
+            args.push(msg);
+        } else {
+            args.push("--no-edit".into());
+        }
+    }
+    args.push("--".into());
+    args.push(target);
+    run_git(&path, &args)
+}
+
+fn validate_new_remote_name(name: &str) -> GitResult<()> {
+    if name.trim() != name
+        || name.is_empty()
+        || name.starts_with('-')
+        || name.contains(['\0', '\n', '\r', ' ', '\t'])
+        || !git2::Reference::is_valid_name(&format!("refs/remotes/{name}/main"))
+    {
+        return Err(GitError::InvalidInput(format!(
+            "invalid remote name: {name}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_remote_url(url: &str) -> GitResult<()> {
+    if url.trim().is_empty() || url.starts_with('-') || url.contains(['\0', '\n', '\r']) {
+        return Err(GitError::InvalidInput("invalid remote URL".into()));
+    }
+    Ok(())
+}
+
+pub fn remote_add(path: String, name: String, url: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    validate_new_remote_name(&name)?;
+    validate_remote_url(&url)?;
+    run_git(&path, &["remote".into(), "add".into(), "--".into(), name, url])
+}
+
+pub fn remote_set_url(
+    path: String,
+    name: String,
+    url: String,
+    push: bool,
+) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    validate_remote(&open(&path)?, &name)?;
+    validate_remote_url(&url)?;
+    let mut args = vec!["remote".into(), "set-url".into()];
+    if push {
+        args.push("--push".into());
+    }
+    args.extend(["--".into(), name, url]);
+    run_git(&path, &args)
+}
+
+pub fn remote_rename(path: String, old_name: String, new_name: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    validate_remote(&open(&path)?, &old_name)?;
+    validate_new_remote_name(&new_name)?;
+    run_git(
+        &path,
+        &["remote".into(), "rename".into(), "--".into(), old_name, new_name],
+    )
+}
+
+pub fn remote_remove(path: String, name: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    validate_remote(&open(&path)?, &name)?;
+    run_git(&path, &["remote".into(), "remove".into(), "--".into(), name])
+}
+
 pub fn fetch(path: String, remote: Option<String>) -> GitResult<String> {
+    fetch_ex(path, remote, false)
+}
+
+pub fn fetch_ex(path: String, remote: Option<String>, prune: bool) -> GitResult<String> {
     let _write = acquire_write(&path)?;
     let mut args = vec!["fetch".to_string()];
-    if let Some(remote) = remote {
+    if prune {
+        args.push("--prune".to_string());
+    }
+    if let Some(remote) = remote.filter(|r| !r.trim().is_empty()) {
         validate_remote(&open(&path)?, &remote)?;
         args.push("--".into());
         args.push(remote);
@@ -620,8 +970,27 @@ pub fn fetch(path: String, remote: Option<String>) -> GitResult<String> {
 }
 
 pub fn pull(path: String) -> GitResult<String> {
+    pull_ex(path, None, false)
+}
+
+pub fn pull_ex(path: String, mode: Option<String>, autostash: bool) -> GitResult<String> {
     let _write = acquire_write(&path)?;
-    run_git(&path, &["pull".to_string()])
+    let mut args = vec!["pull".to_string()];
+    match mode.as_deref().unwrap_or("default") {
+        "default" => {}
+        "rebase" => args.push("--rebase".into()),
+        "ff-only" => args.push("--ff-only".into()),
+        "no-ff" => args.push("--no-ff".into()),
+        other => {
+            return Err(GitError::InvalidInput(format!(
+                "unsupported pull mode: {other}"
+            )))
+        }
+    }
+    if autostash {
+        args.push("--autostash".into());
+    }
+    run_git(&path, &args)
 }
 
 /// Pull 的工作流窗口需要分别展示 stdout / stderr；失败仍沿用统一原始错误。
@@ -637,6 +1006,26 @@ pub fn push(
     expected_head: Option<String>,
     expected_branch: Option<String>,
 ) -> GitResult<String> {
+    push_ex(
+        path,
+        remote,
+        branch,
+        expected_head,
+        expected_branch,
+        false,
+        false,
+    )
+}
+
+pub fn push_ex(
+    path: String,
+    remote: Option<String>,
+    branch: Option<String>,
+    expected_head: Option<String>,
+    expected_branch: Option<String>,
+    force_with_lease: bool,
+    push_tags: bool,
+) -> GitResult<String> {
     let _write = acquire_write(&path)?;
     let info = get_push_info(path.clone())?;
     if expected_head
@@ -650,6 +1039,13 @@ pub fn push(
             "push preview is stale; branch or HEAD changed".into(),
         ));
     }
+    let mut flags = Vec::new();
+    if force_with_lease {
+        flags.push("--force-with-lease".to_string());
+    }
+    if push_tags {
+        flags.push("--tags".to_string());
+    }
     match (remote, branch) {
         (None, None) => {
             if !info.has_upstream {
@@ -658,7 +1054,9 @@ pub fn push(
                 ));
             }
             // 尊重 Git push 配置；任何失败原样返回，不换远程、不修改 upstream。
-            run_git(&path, &["push".into()])
+            let mut args = vec!["push".into()];
+            args.extend(flags);
+            run_git(&path, &args)
         }
         (Some(remote), Some(branch)) => {
             if expected_head.is_none() || expected_branch.is_none() {
@@ -669,16 +1067,10 @@ pub fn push(
             validate_remote(&open(&path)?, &remote)?;
             validate_ref_name(&branch, "heads")?;
             let refspec = format!("{}:refs/heads/{branch}", info.branch_ref);
-            run_git(
-                &path,
-                &[
-                    "push".into(),
-                    "--set-upstream".into(),
-                    "--".into(),
-                    remote,
-                    refspec,
-                ],
-            )
+            let mut args = vec!["push".into(), "--set-upstream".into()];
+            args.extend(flags);
+            args.extend(["--".into(), remote, refspec]);
+            run_git(&path, &args)
         }
         _ => Err(GitError::InvalidInput(
             "remote and target branch must be supplied together".into(),
@@ -990,6 +1382,7 @@ pub fn abort_operation(path: String) -> GitResult<String> {
             &["cherry-pick", "--abort"]
         }
         RepositoryState::Revert | RepositoryState::RevertSequence => &["revert", "--abort"],
+        RepositoryState::Bisect => &["bisect", "reset"],
         RepositoryState::Rebase
         | RepositoryState::RebaseInteractive
         | RepositoryState::RebaseMerge
@@ -1189,3 +1582,262 @@ pub fn skip_operation(path: String, expected: super::status::OperationState) -> 
     }
     Ok(output)
 }
+
+pub fn worktree_add(
+    path: String,
+    worktree_path: String,
+    branch: Option<String>,
+    new_branch: bool,
+    start_point: Option<String>,
+) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let target = validate_new_target(&worktree_path, true)?;
+    let repo = open(&path)?;
+    let mut args = vec!["worktree".to_string(), "add".to_string()];
+    let branch_trimmed = branch
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned);
+    if new_branch {
+        let Some(branch_name) = branch_trimmed else {
+            return Err(GitError::InvalidInput(
+                "new worktree branch name is required".into(),
+            ));
+        };
+        validate_ref_name(&branch_name, "heads")?;
+        args.push("-b".into());
+        args.push(branch_name);
+        args.push("--".into());
+        args.push(path_string(&target.target));
+        if let Some(start) = start_point.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            args.push(commit_argument(&repo, start)?);
+        }
+    } else if let Some(branch_name) = branch_trimmed {
+        validate_ref_name(&branch_name, "heads")?;
+        args.push("--".into());
+        args.push(path_string(&target.target));
+        args.push(branch_name);
+    } else {
+        args.push("--detach".into());
+        args.push("--".into());
+        args.push(path_string(&target.target));
+        if let Some(start) = start_point.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            args.push(commit_argument(&repo, start)?);
+        }
+    }
+    run_git(&path, &args)?;
+    Ok(path_string(&target.target.canonicalize()?))
+}
+
+fn find_linked_worktree_path(repo: &git2::Repository, name: &str) -> GitResult<String> {
+    let name = name.trim();
+    if name.is_empty() || name.starts_with('-') || name.contains(['\0', '\n', '\r']) {
+        return Err(GitError::InvalidInput("invalid worktree name".into()));
+    }
+    let wt = repo.find_worktree(name)?;
+    Ok(path_string(wt.path()))
+}
+
+pub fn worktree_remove(path: String, name: String, force: bool) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let repo = open(&path)?;
+    let wt_path = find_linked_worktree_path(&repo, &name)?;
+    let mut args = vec!["worktree".to_string(), "remove".to_string()];
+    if force {
+        args.push("--force".into());
+    }
+    args.push("--".into());
+    args.push(wt_path);
+    run_git(&path, &args)
+}
+
+pub fn worktree_lock(path: String, name: String, lock: bool) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let repo = open(&path)?;
+    let wt_path = find_linked_worktree_path(&repo, &name)?;
+    let action = if lock { "lock" } else { "unlock" };
+    run_git(&path, &["worktree".into(), action.into(), "--".into(), wt_path])
+}
+
+pub fn worktree_prune(path: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    run_git(&path, &["worktree".into(), "prune".into()])
+}
+
+pub fn ignore_file(path: String, pattern: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let entry = pattern.trim();
+    if entry.is_empty() || entry.contains(['\0', '\n', '\r']) {
+        return Err(GitError::InvalidInput("invalid gitignore pattern".into()));
+    }
+    let repo = open(&path)?;
+    let gitignore_path = resolve_worktree_path(&repo, ".gitignore")?;
+    let existing = match std::fs::read_to_string(&gitignore_path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error.into()),
+    };
+    if existing.lines().any(|line| line.trim() == entry) {
+        return Ok(format!("{entry} already in .gitignore"));
+    }
+    let mut updated = existing;
+    if !updated.is_empty() && !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    updated.push_str(entry);
+    updated.push('\n');
+    std::fs::write(&gitignore_path, updated)?;
+    Ok(format!("Added {entry} to .gitignore"))
+}
+
+pub fn bisect_start(
+    path: String,
+    bad_rev: Option<String>,
+    good_rev: Option<String>,
+) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let repo = open(&path)?;
+    if !matches!(repo.state(), RepositoryState::Clean | RepositoryState::Bisect) {
+        return Err(GitError::InvalidInput(
+            "finish or abort the current operation before starting bisect".into(),
+        ));
+    }
+    let mut out = run_git(&path, &["bisect".into(), "start".into()])?;
+    if let Some(bad) = bad_rev.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let bad_oid = commit_argument(&repo, bad)?;
+        let step = run_git(&path, &["bisect".into(), "bad".into(), bad_oid])?;
+        if !step.trim().is_empty() {
+            out = format!("{}\n{}", out.trim(), step.trim());
+        }
+    }
+    if let Some(good) = good_rev.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let good_oid = commit_argument(&repo, good)?;
+        let step = run_git(&path, &["bisect".into(), "good".into(), good_oid])?;
+        if !step.trim().is_empty() {
+            out = format!("{}\n{}", out.trim(), step.trim());
+        }
+    }
+    Ok(out.trim().to_string())
+}
+
+pub fn bisect_mark(path: String, verdict: String, target: Option<String>) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let repo = open(&path)?;
+    let subcmd = match verdict.as_str() {
+        "good" => "good",
+        "bad" => "bad",
+        "skip" => "skip",
+        other => {
+            return Err(GitError::InvalidInput(format!(
+                "invalid bisect verdict: {other}"
+            )))
+        }
+    };
+    if repo.state() != RepositoryState::Bisect {
+        run_git(&path, &["bisect".into(), "start".into()])?;
+    }
+    let mut args = vec!["bisect".to_string(), subcmd.to_string()];
+    if let Some(rev) = target.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        args.push(commit_argument(&repo, rev)?);
+    }
+    run_git(&path, &args)
+}
+
+pub fn bisect_reset(path: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    run_git(&path, &["bisect".into(), "reset".into()])
+}
+
+fn validate_export_file_path(output_path: &str) -> GitResult<PathBuf> {
+    if output_path.trim().is_empty() || output_path.contains('\0') {
+        return Err(GitError::InvalidInput("output path is empty".into()));
+    }
+    let target = Path::new(output_path);
+    if !target.is_absolute() {
+        return Err(GitError::InvalidInput(
+            "output path must be an absolute path".into(),
+        ));
+    }
+    let name = target
+        .file_name()
+        .ok_or_else(|| GitError::InvalidInput("invalid output file name".into()))?;
+    let parent = target
+        .parent()
+        .ok_or_else(|| GitError::InvalidInput("output parent directory is missing".into()))?
+        .canonicalize()?;
+    if !parent.is_dir() {
+        return Err(GitError::InvalidInput(
+            "output parent is not a directory".into(),
+        ));
+    }
+    if let Ok(meta) = std::fs::symlink_metadata(target) {
+        if meta.is_dir() || meta.file_type().is_symlink() {
+            return Err(GitError::InvalidInput(
+                "refusing to overwrite a directory or symlink".into(),
+            ));
+        }
+    }
+    Ok(parent.join(name))
+}
+
+pub fn format_patch(path: String, oid: String, output_path: String) -> GitResult<String> {
+    let repo = open(&path)?;
+    let oid = commit_argument(&repo, &oid)?;
+    let out_file = validate_export_file_path(&output_path)?;
+    let patch_content = run_git(
+        &path,
+        &[
+            "format-patch".into(),
+            "-1".into(),
+            oid,
+            "--stdout".into(),
+        ],
+    )?;
+    std::fs::write(&out_file, patch_content.as_bytes())?;
+    Ok(path_string(&out_file))
+}
+
+pub fn archive_commit(
+    path: String,
+    oid: String,
+    output_path: String,
+    format: Option<String>,
+) -> GitResult<String> {
+    let repo = open(&path)?;
+    let oid = commit_argument(&repo, &oid)?;
+    let out_file = validate_export_file_path(&output_path)?;
+    let fmt = match format.as_deref() {
+        Some("tar.gz") | Some("tgz") => "tar.gz",
+        Some("tar") => "tar",
+        Some("zip") => "zip",
+        None => {
+            let lower = out_file.to_string_lossy().to_ascii_lowercase();
+            if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
+                "tar.gz"
+            } else if lower.ends_with(".tar") {
+                "tar"
+            } else {
+                "zip"
+            }
+        }
+        Some(other) => {
+            return Err(GitError::InvalidInput(format!(
+                "unsupported archive format: {other}"
+            )))
+        }
+    };
+    let out_str = path_string(&out_file);
+    run_git(
+        &path,
+        &[
+            "archive".into(),
+            format!("--format={fmt}"),
+            "-o".into(),
+            out_str.clone(),
+            oid,
+        ],
+    )?;
+    Ok(out_str)
+}
+

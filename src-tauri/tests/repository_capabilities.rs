@@ -393,3 +393,147 @@ fn explorer_targets_keep_file_scope_and_scoped_history_filters_paths() {
     fs::write(&outside, "outside").unwrap();
     assert!(git::repo::resolve_explorer_target(outside.to_string_lossy().into_owned()).is_err());
 }
+
+#[test]
+fn merge_amend_hunk_branch_remotes_worktree_search_export_and_bisect_capabilities() {
+    let workspace = Workspace::new();
+    let repo = workspace.repo("advanced");
+    let first_oid = repo.commit("file.txt", "line1\nline2\nline3\n");
+
+    // 1. Amend commit
+    repo.write("file.txt", "line1-amended\nline2\nline3\n");
+    git::cli::stage_files(repo.path(), vec!["file.txt".into()]).unwrap();
+    git::cli::commit_ex(repo.path(), "amended initial commit".into(), true).unwrap();
+    let amended_oid = repo.head();
+    assert_ne!(first_oid, amended_oid);
+    let detail = git::diff::get_commit(repo.path(), amended_oid.clone()).unwrap();
+    assert!(detail.message.contains("amended initial commit"));
+
+    // 2. Hunk-level stage & unstage via apply_diff_patch
+    let hunk_patch = "\
+diff --git a/file.txt b/file.txt
+--- a/file.txt
++++ b/file.txt
+@@ -1,3 +1,3 @@
+-line1-amended
++line1-hunk
+ line2
+ line3
+";
+    git::cli::apply_diff_patch(repo.path(), hunk_patch.into(), true, false).unwrap();
+    let status = git::status::get_status(repo.path()).unwrap();
+    assert_eq!(status.staged.len(), 1);
+    git::cli::apply_diff_patch(repo.path(), hunk_patch.into(), true, true).unwrap();
+    let status_after = git::status::get_status(repo.path()).unwrap();
+    assert_eq!(status_after.staged.len(), 0);
+
+    // 3. Branch rename, merge, get_merged_branches & batch delete_branches
+    git::cli::create_branch(repo.path(), "feat-old".into(), None).unwrap();
+    git::cli::rename_branch(repo.path(), "feat-old".into(), "feat-new".into()).unwrap();
+    git::cli::checkout_branch(repo.path(), "feat-new".into()).unwrap();
+    let feat_oid = repo.commit("feature.txt", "feature content\n");
+    git::cli::checkout_branch(repo.path(), "main".into()).unwrap();
+    git::cli::merge_branch(
+        repo.path(),
+        "feat-new".into(),
+        Some("no-ff".into()),
+        Some("merge feat-new".into()),
+    )
+    .unwrap();
+    let merged = git::repo::get_merged_branches(repo.path()).unwrap();
+    assert!(merged.contains(&"feat-new".to_string()));
+    git::cli::delete_branches(repo.path(), vec!["feat-new".into()], false).unwrap();
+
+    // 4. Fixup commit
+    repo.write("feature.txt", "feature content v2\n");
+    git::cli::stage_files(repo.path(), vec!["feature.txt".into()]).unwrap();
+    git::cli::commit_fixup(repo.path(), feat_oid, false).unwrap();
+    let fixup_detail = git::diff::get_commit(repo.path(), repo.head()).unwrap();
+    assert!(fixup_detail.message.starts_with("fixup! "));
+
+    // 5. Ignore file (.gitignore)
+    git::cli::ignore_file(repo.path(), "*.log".into()).unwrap();
+    git::cli::ignore_file(repo.path(), "*.log".into()).unwrap();
+    let gitignore = fs::read_to_string(repo.root.join(".gitignore")).unwrap();
+    assert_eq!(gitignore.lines().filter(|l| *l == "*.log").count(), 1);
+
+    // 6. Remotes CRUD
+    git::cli::remote_add(repo.path(), "upstream".into(), "https://example.com/repo.git".into())
+        .unwrap();
+    let remotes = git::repo::remote_list(repo.path()).unwrap();
+    assert_eq!(remotes.len(), 1);
+    assert_eq!(remotes[0].name, "upstream");
+    git::cli::remote_set_url(
+        repo.path(),
+        "upstream".into(),
+        "https://example.com/new.git".into(),
+        false,
+    )
+    .unwrap();
+    git::cli::remote_rename(repo.path(), "upstream".into(), "origin".into()).unwrap();
+    git::cli::remote_remove(repo.path(), "origin".into()).unwrap();
+    assert!(git::repo::remote_list(repo.path()).unwrap().is_empty());
+
+    // 7. Worktree add / lock / unlock / remove
+    let wt_dir = workspace.path("wt-linked");
+    git::cli::worktree_add(
+        repo.path(),
+        wt_dir.clone(),
+        Some("wt-branch".into()),
+        true,
+        None,
+    )
+    .unwrap();
+    let wts = git::repo::worktree_list(repo.path()).unwrap();
+    assert_eq!(wts.len(), 1);
+    let wt_name = wts[0].name.clone();
+    git::cli::worktree_lock(repo.path(), wt_name.clone(), true).unwrap();
+    assert!(git::repo::worktree_list(repo.path()).unwrap()[0].locked);
+    git::cli::worktree_lock(repo.path(), wt_name.clone(), false).unwrap();
+    git::cli::worktree_remove(repo.path(), wt_name, true).unwrap();
+
+    // 8. Search commits & git grep
+    let found_commits = git::history::search_commits(
+        repo.path(),
+        Some("merge feat-new".into()),
+        None,
+        None,
+        true,
+        Some(50),
+    )
+    .unwrap();
+    assert_eq!(found_commits.len(), 1);
+    let grep_matches = git::history::git_grep(
+        repo.path(),
+        "feature content".into(),
+        None,
+        true,
+        Some(50),
+    )
+    .unwrap();
+    assert!(!grep_matches.is_empty());
+    assert_eq!(grep_matches[0].path, "feature.txt");
+
+    // 9. Export patch & archive
+    let patch_out = workspace.path("exported.patch");
+    git::cli::format_patch(repo.path(), amended_oid.clone(), patch_out.clone()).unwrap();
+    assert!(Path::new(&patch_out).exists());
+    let zip_out = workspace.path("exported.zip");
+    git::cli::archive_commit(repo.path(), amended_oid.clone(), zip_out.clone(), Some("zip".into()))
+        .unwrap();
+    assert!(Path::new(&zip_out).exists());
+
+    // 10. Bisect start / mark / state / reset & command log
+    git::cli::bisect_start(repo.path(), Some("HEAD".into()), Some(amended_oid)).unwrap();
+    let op_state = git::status::get_operation_state(repo.path()).unwrap();
+    assert_eq!(op_state.kind, "bisect");
+    git::cli::bisect_reset(repo.path()).unwrap();
+    assert_eq!(
+        git::status::get_operation_state(repo.path()).unwrap().kind,
+        "none"
+    );
+
+    let logs = git::cli::get_command_log(Some(repo.path())).unwrap();
+    assert!(!logs.is_empty());
+}
+

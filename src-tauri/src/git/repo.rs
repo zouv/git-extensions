@@ -232,3 +232,67 @@ pub fn get_ahead_behind(path: String) -> GitResult<Option<AheadBehind>> {
     let (ahead, behind) = repo.graph_ahead_behind(local_oid, upstream_oid)?;
     Ok(Some(AheadBehind { ahead, behind }))
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteInfo {
+    pub name: String,
+    pub fetch_url: String,
+    pub push_url: String,
+}
+
+/// 列出仓库已配置的全部远程及其 fetch/push URL。
+pub fn remote_list(path: String) -> GitResult<Vec<RemoteInfo>> {
+    let repo = open(&path)?;
+    let mut remotes = Vec::new();
+    for name in repo.remotes()?.iter().flatten() {
+        let Ok(remote) = repo.find_remote(name) else {
+            continue;
+        };
+        let fetch_url = remote.url().unwrap_or_default().to_string();
+        let push_url = remote
+            .pushurl()
+            .or_else(|| remote.url())
+            .unwrap_or_default()
+            .to_string();
+        remotes.push(RemoteInfo {
+            name: name.to_string(),
+            fetch_url,
+            push_url,
+        });
+    }
+    remotes.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(remotes)
+}
+
+/// 列出已完全合并到当前 HEAD 的本地分支（排除当前 HEAD 分支及主干保护名 main/master/develop/dev）。
+pub fn get_merged_branches(path: String) -> GitResult<Vec<String>> {
+    let repo = open(&path)?;
+    let head_commit = match repo.head().and_then(|h| h.peel_to_commit()) {
+        Ok(commit) => commit,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let head_id = head_commit.id();
+    let mut merged = Vec::new();
+    for item in repo.branches(Some(git2::BranchType::Local))? {
+        let (branch, _) = item?;
+        if branch.is_head() {
+            continue;
+        }
+        let Some(name) = branch.name()? else {
+            continue;
+        };
+        if matches!(name, "main" | "master" | "develop" | "dev") {
+            continue;
+        }
+        let Some(branch_oid) = branch.get().target() else {
+            continue;
+        };
+        if branch_oid == head_id || repo.graph_descendant_of(head_id, branch_oid)? {
+            merged.push(name.to_string());
+        }
+    }
+    merged.sort();
+    Ok(merged)
+}
+

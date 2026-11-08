@@ -210,6 +210,7 @@ pub fn get_operation_state(path: String) -> GitResult<OperationState> {
         RepositoryState::Merge => ("merge", false),
         RepositoryState::CherryPick | RepositoryState::CherryPickSequence => ("cherryPick", false),
         RepositoryState::Revert | RepositoryState::RevertSequence => ("revert", false),
+        RepositoryState::Bisect => ("bisect", false),
         RepositoryState::Rebase
         | RepositoryState::RebaseInteractive
         | RepositoryState::RebaseMerge
@@ -242,6 +243,20 @@ pub fn get_operation_state(path: String) -> GitResult<OperationState> {
             read_metadata(&dir.join("onto")),
             branch,
         )
+    } else if operation == "bisect" {
+        let branch = read_metadata(&git_dir.join("BISECT_START")).or_else(|| head_label(&repo));
+        let steps = fs::read_to_string(git_dir.join("BISECT_LOG"))
+            .ok()
+            .map(|log| {
+                log.lines()
+                    .filter(|line| {
+                        line.starts_with("git bisect good")
+                            || line.starts_with("git bisect bad")
+                            || line.starts_with("git bisect skip")
+                    })
+                    .count()
+            });
+        (steps, None, None, branch)
     } else {
         (None, None, None, head_label(&repo))
     };
@@ -250,6 +265,10 @@ pub fn get_operation_state(path: String) -> GitResult<OperationState> {
         "merge" => read_metadata(&git_dir.join("MERGE_HEAD")),
         "cherryPick" => read_metadata(&git_dir.join("CHERRY_PICK_HEAD")),
         "revert" => read_metadata(&git_dir.join("REVERT_HEAD")),
+        "bisect" => repo
+            .head()
+            .ok()
+            .and_then(|h| h.target().map(|oid| oid.to_string())),
         "rebase" => branch
             .clone()
             .or_else(|| read_metadata(&rebase_merge.join("orig-head"))),
