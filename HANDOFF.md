@@ -19,7 +19,7 @@
 
 ## 验证状态
 
-- 2026-11-08 P0–P2 核心能力补齐：`pnpm test` Node 68/68、`pnpm build`（tsc + Vite）通过、`cargo test` Rust 92/92（含新增 `merge_amend_hunk_branch_remotes_worktree_search_export_and_bisect_capabilities` 集成测试）与 `sh check-docs.sh` 全部通过。
+- 2026-11-08 0.8.0（P0–P2 核心能力补齐）发布验证：`pnpm test` Node 68/68、`pnpm build`（tsc + Vite）通过、`cargo test` Rust 92/92（含新增 `merge_amend_hunk_branch_remotes_worktree_search_export_and_bisect_capabilities` 集成测试）与 `sh check-docs.sh` 全部通过；release 打包生成 NSIS 0.8.0（3.30 MiB）、MSI 0.8.0（5.59 MiB）、unpack 目录、便携 zip（4.6 MiB）与 `SHA256SUMS.txt`；GitHub Release `v0.8.0` 已创建并上传全部 4 个资产。
 - 2026-11-07 UI 优化本轮：`pnpm test` Node 65/65、`pnpm build`（tsc + Vite）通过、`cargo check` 通过（含 `tauri-plugin-dialog`）、`cargo test` Rust 91/91（36 + 5 + 21 + 14 + 15）、`cargo fmt --check` 与 `sh check-docs.sh` 通过。
 - 2026-11-07 UI 实机（WebView2 远程调试驱动，非完整人工验收）：弹窗初始焦点落在路径输入框，等待 6 秒轮询后不跳；`Ctrl+K` 面板可搜索并执行刷新；错误通知进入通知抽屉；嵌套删除确认按 Esc 只关一层；dirty 弹窗关闭确认 / 取消 / 放弃均正确；变更预览跨轮询保留 DiffView 与滚动状态；Split 偏好写入按仓库 key。原生目录选择、拖放打开、150% / 200% DPI 仍需人工验收。
 - 2026-11-07 dev.bat 修复验证：0.7.0 便携版运行中执行 `dev.bat` 仍会先编译并启动独立 dev 实例（`com.gitextensions.dev.dev`），release 实例保持运行；非 0 退出时批处理保留窗口显示错误。
