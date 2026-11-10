@@ -10,16 +10,23 @@ import CloneDialog from "../components/CloneDialog";
 import CreateRepositoryDialog from "../components/CreateRepositoryDialog";
 import DiffToolDialog from "../components/DiffToolDialog";
 import PushDialog from "../components/PushDialog";
-import StashDialog from "../components/StashDialog";
+import PullDialog from "../components/PullDialog";
+import AddFilesDialog from "../components/AddFilesDialog";
 import CommitWindow from "./CommitWindow";
 import HistoryWindow from "./HistoryWindow";
-import PullWindow from "./PullWindow";
+import ResetChangesDialog from "./ResetChangesDialog";
+import StashWindow from "./StashWindow";
+import RepositorySettingsWindow from "./RepositorySettingsWindow";
+import ViewFilesWindow from "./ViewFilesWindow";
+import RenamePathDialog from "./RenamePathDialog";
+import { watchExplorerWindowSize } from "../explorerWindowState";
 import { closeCurrentWindow, usePortableCloseGuard } from "./portableWindow";
 
 const PORTABLE_ACTIONS: ExplorerAction[] = [
   "clone", "create-repository", "commit", "pull", "push", "view-stash", "view-changes",
   "checkout-branch", "checkout-revision", "create-branch", "open-with-difftool",
-  "file-history", "reset-file-changes", "add-files", "apply-patch",
+  "file-history", "view-files", "reset-file-changes", "add-files", "apply-patch",
+  "repository-settings", "rename",
 ];
 
 function actionLabel(action: ExplorerAction) {
@@ -90,6 +97,30 @@ function DiffToolWindow({ target, initialFile }: { target: ExplorerTarget; initi
   />;
 }
 
+/** 文件上下文直接对选中文件启动 difftool；窗口保持打开，避免闪一下就消失。 */
+function DirectDiffToolWindow({ repoPath, file }: { repoPath: string; file: string }) {
+  const [state, setState] = useState<"running" | "done">("running");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let alive = true;
+    api.openDifftool(repoPath, file, false)
+      .then(() => { if (alive) setState("done"); })
+      .catch((reason) => { if (alive) setError(String(reason)); });
+    return () => { alive = false; };
+  }, [repoPath, file]);
+  if (error) return <div className="empty-state" role="alert"><strong>无法启动外部 difftool</strong><span>{error}</span></div>;
+  if (state === "running") return <div className="empty-state">
+    <span className="spinner" />
+    <span>正在启动外部 difftool…</span>
+    <span className="settings-note">{file}</span>
+  </div>;
+  return <div className="empty-state">
+    <strong>外部 difftool 已退出</strong>
+    <span className="settings-note">{file}</span>
+    <span className="settings-note">可以关闭本窗口。</span>
+  </div>;
+}
+
 export default function ExplorerWindow({ launch }: { launch: LaunchRequest }) {
   const [target, setTarget] = useState<ExplorerTarget | null>(null);
   const [error, setError] = useState("");
@@ -102,6 +133,19 @@ export default function ExplorerWindow({ launch }: { launch: LaunchRequest }) {
   useEffect(() => {
     document.body.classList.add("portable-window");
     return () => document.body.classList.remove("portable-window");
+  }, []);
+  // 每个动作窗口记住自己的尺寸；下次从资源管理器打开时由 main.tsx 恢复。
+  useEffect(() => watchExplorerWindowSize(launch.action), [launch.action]);
+  // 所有资源管理器动作窗口都支持 Esc 关闭；顶层 Dialog / ContextMenu 会先
+  // 在捕获阶段拦下 Esc，因此不会误关它们下面的窗口。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      void closeCurrentWindow();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
   usePortableCloseGuard(busy || repoBusy, dirty, "当前窗口有未提交的编辑内容，关闭会丢弃这些内容。确定关闭？");
 
@@ -139,7 +183,7 @@ export default function ExplorerWindow({ launch }: { launch: LaunchRequest }) {
   }
   if (launch.action === "create-repository") {
     return <Frame action={launch.action} target={null} message={message}>
-      <CreateRepositoryDialog initialPath={launch.path ?? ""} onOpen={openInMain} onClose={() => void closeCurrentWindow()} onBusyChange={setBusy} />
+      <CreateRepositoryDialog initialPath={launch.path ?? ""} onOpen={openInMain} onClose={() => void closeCurrentWindow()} onBusyChange={setBusy} onMessage={(text) => notify("info", text)} />
     </Frame>;
   }
   if (error) {
@@ -160,19 +204,48 @@ export default function ExplorerWindow({ launch }: { launch: LaunchRequest }) {
   let content: React.ReactNode;
   switch (launch.action) {
     case "commit":
-    case "view-changes":
-    case "reset-file-changes":
-    case "add-files":
       content = <CommitWindow
-        action={launch.action}
+        action="commit"
         target={target}
         onDirtyChange={setDirty}
         onBusyChange={setBusy}
         setMessage={(text) => notify("info", text)}
       />;
       break;
+    case "view-changes":
+      content = <HistoryWindow
+        target={target.scope === "repository" ? target : { ...target, scope: "repository", relativePath: null }}
+        onBusyChange={setBusy}
+        mode="view-changes"
+      />;
+      break;
+    case "add-files":
+      content = <AddFilesDialog
+        repoPath={repoPath}
+        initialFilter={initialPath ?? "."}
+        onClose={() => void closeCurrentWindow()}
+        onChanged={() => undefined}
+        setMessage={(text) => notify("info", text)}
+      />;
+      break;
+    case "reset-file-changes":
+      content = <ResetChangesDialog
+        repoPath={repoPath}
+        initialPath={initialPath}
+        onClose={() => void closeCurrentWindow()}
+        onChanged={() => undefined}
+        setMessage={(text) => notify("info", text)}
+      />;
+      break;
     case "pull":
-      content = <PullWindow target={target} onBusyChange={setBusy} />;
+      content = <PullDialog
+        repoPath={repoPath}
+        headBranch={target.repo.headBranch}
+        onClose={() => void closeCurrentWindow()}
+        onChanged={() => undefined}
+        onConflict={() => { void openInMain("Pull 产生冲突，已转到主窗口继续处理"); }}
+        onNotify={(kind, text, details) => notify(kind, details ? `${text}\n${details}` : text)}
+      />;
       break;
     case "push":
       content = <PushDialog
@@ -183,7 +256,12 @@ export default function ExplorerWindow({ launch }: { launch: LaunchRequest }) {
       />;
       break;
     case "view-stash":
-      content = <StashDialog repoPath={repoPath} onClose={() => void closeCurrentWindow()} onChanged={() => undefined} setMessage={(text) => notify("info", text)} />;
+      content = <StashWindow
+        target={target}
+        onBusyChange={setBusy}
+        onDirtyChange={setDirty}
+        setMessage={(text) => notify("info", text)}
+      />;
       break;
     case "checkout-branch":
     case "create-branch":
@@ -193,7 +271,9 @@ export default function ExplorerWindow({ launch }: { launch: LaunchRequest }) {
       content = <CheckoutRevisionDialog repoPath={repoPath} onClose={() => void closeCurrentWindow()} onChanged={() => undefined} setMessage={(text) => notify("info", text)} />;
       break;
     case "open-with-difftool":
-      content = <DiffToolWindow target={target} initialFile={initialPath} />;
+      content = target.scope === "file" && initialPath
+        ? <DirectDiffToolWindow repoPath={repoPath} file={initialPath} />
+        : <DiffToolWindow target={target} initialFile={initialPath} />;
       break;
     case "file-history":
       content = <HistoryWindow target={target} onBusyChange={setBusy} />;
@@ -206,6 +286,24 @@ export default function ExplorerWindow({ launch }: { launch: LaunchRequest }) {
         onChanged={() => undefined}
         setMessage={(text) => notify("info", text)}
       />;
+      break;
+    case "repository-settings":
+      content = <RepositorySettingsWindow target={target} setMessage={(text) => notify("info", text)} />;
+      break;
+    case "view-files":
+      content = <ViewFilesWindow target={target} setMessage={(text) => notify("info", text)} />;
+      break;
+    case "rename":
+      content = target.relativePath
+        ? <RenamePathDialog
+          repoPath={repoPath}
+          relativePath={target.relativePath}
+          onClose={() => void closeCurrentWindow()}
+          onChanged={() => undefined}
+          onDirtyChange={setDirty}
+          setMessage={(text) => notify("info", text)}
+        />
+        : <div className="empty-state" role="alert"><strong>无法重命名仓库根目录</strong><span>请在资源管理器中右键具体的文件或子目录。</span></div>;
       break;
     default:
       content = <div className="empty-state">不支持的动作</div>;

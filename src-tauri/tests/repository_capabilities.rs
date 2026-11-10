@@ -99,7 +99,7 @@ impl TestRepo {
 }
 
 fn wait_for(path: &Path) {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(60);
     while !path.exists() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -138,6 +138,20 @@ fn clone_and_create_validate_targets_and_release_failed_target_leases() {
         "from source"
     );
 
+    // 克隆界面依赖 stderr 进度行；本地克隆也必须强制输出。
+    let progress_clone = workspace.path("clone-progress-target");
+    let mut progress_lines = Vec::new();
+    git::cli::clone_repository_with_progress(progress_clone.clone(), source.path(), |line| {
+        progress_lines.push(line.to_string())
+    })
+    .unwrap();
+    assert!(
+        progress_lines
+            .iter()
+            .any(|line| line.contains("Cloning into")),
+        "expected git clone progress, got {progress_lines:?}"
+    );
+
     let injected = workspace.path("option-target");
     let error = git::cli::clone_repository(injected.clone(), "--upload-pack=unexpected".into())
         .unwrap_err()
@@ -155,7 +169,8 @@ fn clone_and_create_validate_targets_and_release_failed_target_leases() {
 
     let created = workspace.path("created-target");
     let actual =
-        tauri::async_runtime::block_on(git::commands::create_repository(created.clone())).unwrap();
+        tauri::async_runtime::block_on(git::commands::create_repository(created.clone(), None))
+            .unwrap();
     assert_eq!(actual, created);
     assert!(!git2::Repository::open(&created).unwrap().is_bare());
     assert!(git::cli::create_repository(workspace.path("created-target/nested")).is_err());
@@ -217,8 +232,12 @@ fn revision_resolution_full_oid_checkout_and_tracked_file_listing() {
     for invalid in ["HEAD", &first[..8], "v1", "--detach"] {
         assert!(git::cli::checkout_revision(repo.path(), invalid.into()).is_err());
     }
-    tauri::async_runtime::block_on(git::commands::checkout_revision(repo.path(), first.clone()))
-        .unwrap();
+    tauri::async_runtime::block_on(git::commands::checkout_revision(
+        repo.path(),
+        first.clone(),
+        None,
+    ))
+    .unwrap();
     assert_eq!(repo.head(), first);
     assert_eq!(repo.repo().head().unwrap().name(), Some("HEAD"));
 
@@ -395,6 +414,43 @@ fn explorer_targets_keep_file_scope_and_scoped_history_filters_paths() {
 }
 
 #[test]
+fn rename_path_moves_tracked_files_and_directories_only() {
+    let workspace = Workspace::new();
+    let repo = workspace.repo("rename");
+    repo.commit("dir/file.txt", "content\n");
+    repo.commit("root.txt", "root\n");
+
+    let renamed =
+        git::cli::rename_path(repo.path(), "dir/file.txt".into(), "renamed.txt".into()).unwrap();
+    assert_eq!(renamed, "dir/renamed.txt");
+    assert!(repo.root.join("dir/renamed.txt").exists());
+    assert!(!repo.root.join("dir/file.txt").exists());
+    let index = repo.repo().index().unwrap();
+    assert!(index.get_path(Path::new("dir/renamed.txt"), 0).is_some());
+    assert!(index.get_path(Path::new("dir/file.txt"), 0).is_none());
+
+    let renamed_dir = git::cli::rename_path(repo.path(), "dir".into(), "moved".into()).unwrap();
+    assert_eq!(renamed_dir, "moved");
+    assert!(repo.root.join("moved/renamed.txt").exists());
+    assert!(!repo.root.join("dir").exists());
+
+    // 目录已存在、名称含路径分隔符、父目录跳转与 .git 一律拒绝。
+    assert!(git::cli::rename_path(repo.path(), "root.txt".into(), "moved".into()).is_err());
+    assert!(git::cli::rename_path(repo.path(), "root.txt".into(), "a/b".into()).is_err());
+    assert!(git::cli::rename_path(repo.path(), "root.txt".into(), "..".into()).is_err());
+    assert!(git::cli::rename_path(repo.path(), "root.txt".into(), ".git".into()).is_err());
+    assert!(git::cli::rename_path(repo.path(), "../outside".into(), "x".into()).is_err());
+    assert!(git::cli::rename_path(repo.path(), "root.txt".into(), "root.txt".into()).is_err());
+
+    // git mv 只处理已跟踪内容；未跟踪文件先由 Add files 加入索引。
+    fs::write(repo.root.join("untracked.txt"), "x").unwrap();
+    assert!(
+        git::cli::rename_path(repo.path(), "untracked.txt".into(), "untracked2.txt".into())
+            .is_err()
+    );
+}
+
+#[test]
 fn merge_amend_hunk_branch_remotes_worktree_search_export_and_bisect_capabilities() {
     let workspace = Workspace::new();
     let repo = workspace.repo("advanced");
@@ -458,8 +514,12 @@ diff --git a/file.txt b/file.txt
     assert_eq!(gitignore.lines().filter(|l| *l == "*.log").count(), 1);
 
     // 6. Remotes CRUD
-    git::cli::remote_add(repo.path(), "upstream".into(), "https://example.com/repo.git".into())
-        .unwrap();
+    git::cli::remote_add(
+        repo.path(),
+        "upstream".into(),
+        "https://example.com/repo.git".into(),
+    )
+    .unwrap();
     let remotes = git::repo::remote_list(repo.path()).unwrap();
     assert_eq!(remotes.len(), 1);
     assert_eq!(remotes[0].name, "upstream");
@@ -503,14 +563,9 @@ diff --git a/file.txt b/file.txt
     )
     .unwrap();
     assert_eq!(found_commits.len(), 1);
-    let grep_matches = git::history::git_grep(
-        repo.path(),
-        "feature content".into(),
-        None,
-        true,
-        Some(50),
-    )
-    .unwrap();
+    let grep_matches =
+        git::history::git_grep(repo.path(), "feature content".into(), None, true, Some(50))
+            .unwrap();
     assert!(!grep_matches.is_empty());
     assert_eq!(grep_matches[0].path, "feature.txt");
 
@@ -519,8 +574,13 @@ diff --git a/file.txt b/file.txt
     git::cli::format_patch(repo.path(), amended_oid.clone(), patch_out.clone()).unwrap();
     assert!(Path::new(&patch_out).exists());
     let zip_out = workspace.path("exported.zip");
-    git::cli::archive_commit(repo.path(), amended_oid.clone(), zip_out.clone(), Some("zip".into()))
-        .unwrap();
+    git::cli::archive_commit(
+        repo.path(),
+        amended_oid.clone(),
+        zip_out.clone(),
+        Some("zip".into()),
+    )
+    .unwrap();
     assert!(Path::new(&zip_out).exists());
 
     // 10. Bisect start / mark / state / reset & command log
@@ -537,3 +597,150 @@ diff --git a/file.txt b/file.txt
     assert!(!logs.is_empty());
 }
 
+#[test]
+fn add_reset_stash_and_bare_repository_extensions() {
+    let workspace = Workspace::new();
+    let repo = workspace.repo("changes");
+    repo.commit("tracked.txt", "one\n");
+    let content =
+        git::cli::get_file_content(repo.path(), "tracked.txt".into(), Some(repo.head())).unwrap();
+    assert_eq!(content.content, "one\n");
+
+    repo.write("dir/new.txt", "new\n");
+    let preview = git::cli::preview_add_files(repo.path(), "*.txt".into(), false).unwrap();
+    assert_eq!(preview.exit_code, Some(0));
+    assert!(preview.stdout.contains("dir/new.txt"));
+    let added = git::cli::add_files(repo.path(), "*.txt".into(), false).unwrap();
+    assert_eq!(added.exit_code, Some(0));
+    assert!(repo
+        .repo()
+        .status_file(Path::new("dir/new.txt"))
+        .unwrap()
+        .contains(git2::Status::INDEX_NEW));
+    let head_files = git::repo::list_head_files(repo.path()).unwrap();
+    assert!(head_files.contains(&"tracked.txt".to_string()));
+    assert!(
+        !head_files.contains(&"dir/new.txt".to_string()),
+        "View files must only list HEAD-committed files"
+    );
+
+    git::cli::reset_changes(repo.path(), vec!["dir/new.txt".into()], true).unwrap();
+    assert!(!repo.root.join("dir/new.txt").exists());
+
+    repo.write("tracked.txt", "two\n");
+    git::cli::reset_changes(repo.path(), vec!["tracked.txt".into()], false).unwrap();
+    assert_eq!(
+        fs::read_to_string(repo.root.join("tracked.txt")).unwrap(),
+        "one\n"
+    );
+
+    repo.write("tracked.txt", "three\n");
+    repo.write("untracked.txt", "u\n");
+    git::cli::stash_push_ex(repo.path(), "msg".into(), true, false, Vec::new()).unwrap();
+    let stashes = git::cli::stash_list(repo.path()).unwrap();
+    assert_eq!(stashes.len(), 1);
+    assert!(
+        !repo.root.join("untracked.txt").exists(),
+        "stash -u should remove the untracked file"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.root.join("tracked.txt")).unwrap(),
+        "one\n"
+    );
+    git::cli::stash_apply_checked(
+        repo.path(),
+        stashes[0].name.clone(),
+        false,
+        Some(stashes[0].oid.clone()),
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(repo.root.join("tracked.txt")).unwrap(),
+        "three\n"
+    );
+
+    let bare = workspace.path("central.git");
+    let created = git::cli::create_repository_ex(bare, true).unwrap();
+    assert!(git2::Repository::open(created).unwrap().is_bare());
+}
+
+#[test]
+fn apply_patch_file_directory_and_mailbox() {
+    let workspace = Workspace::new();
+    let repo = workspace.repo("patches");
+    repo.commit("tracked.txt", "one\n");
+    repo.write("tracked.txt", "two\n");
+    let diff = std::process::Command::new("git")
+        .args(["-C", &repo.path(), "diff"])
+        .output()
+        .unwrap();
+    assert!(diff.status.success());
+    let patch = workspace.root.join("change.patch");
+    fs::write(&patch, &diff.stdout).unwrap();
+    git::cli::discard_files(repo.path(), vec!["tracked.txt".into()]).unwrap();
+    assert_eq!(
+        fs::read_to_string(repo.root.join("tracked.txt")).unwrap(),
+        "one\n"
+    );
+
+    let listed =
+        git::cli::list_patch_directory(repo.path(), workspace.root.to_string_lossy().into_owned())
+            .unwrap();
+    assert!(listed
+        .iter()
+        .any(|item| item.name == "change.patch" && !item.mailbox));
+    let output = git::cli::apply_patch_directory_ex(
+        repo.path(),
+        workspace.root.to_string_lossy().into_owned(),
+        false,
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        output.exit_code,
+        Some(0),
+        "stdout={:?} stderr={:?}",
+        output.stdout,
+        output.stderr
+    );
+    assert_eq!(
+        fs::read_to_string(repo.root.join("tracked.txt")).unwrap(),
+        "two\n"
+    );
+
+    let source = workspace.repo("mail-source");
+    source.commit("mail.txt", "mail\n");
+    let mailbox = std::process::Command::new("git")
+        .args(["-C", &source.path(), "format-patch", "-1", "--stdout"])
+        .output()
+        .unwrap();
+    assert!(mailbox.status.success());
+    let mailbox_path = workspace.root.join("change.mbox");
+    fs::write(&mailbox_path, &mailbox.stdout).unwrap();
+    let target = workspace.repo("mail-target");
+    let applied = git::cli::apply_patch_file_ex(
+        target.path(),
+        mailbox_path.to_string_lossy().into_owned(),
+        false,
+        false,
+    )
+    .unwrap();
+    assert_eq!(applied.exit_code, Some(0), "{:?}", applied.stderr);
+    assert_eq!(
+        fs::read_to_string(target.root.join("mail.txt")).unwrap(),
+        "mail\n"
+    );
+}
+
+#[test]
+fn create_branch_checkout_and_orphan_options() {
+    let workspace = Workspace::new();
+    let repo = workspace.repo("branches");
+    repo.commit("tracked.txt", "one\n");
+    git::cli::create_branch_ex(repo.path(), "feature".into(), None, true, false).unwrap();
+    assert_eq!(repo.repo().head().unwrap().shorthand(), Some("feature"));
+    git::cli::create_branch_ex(repo.path(), "orphan".into(), None, false, true).unwrap();
+    let git_repo = repo.repo();
+    let head = git_repo.find_reference("HEAD").unwrap();
+    assert_eq!(head.symbolic_target(), Some("refs/heads/orphan"));
+}

@@ -24,7 +24,8 @@
 | `src/components/TitleBar.tsx` | 自绘顶部栏：应用菜单（打开 / 克隆 / 新建 / 命令面板 / 设置 / 最近仓库 / 关于 / 关闭）、分组多选弹层、Pin、页签、窗口控制 | 改顶部栏 / 窗口行为 |
 | `src/components/RepositoryTabs.tsx` / `NotificationCenter.tsx` | 多仓库页签（拖拽排序、关闭、右键、方向键、加载 / 错误徽标）；通知 toast、通知中心抽屉与错误详情 | 改全局反馈 |
 | `src/components/RepoGroupsDialog.tsx` / `GroupAvatar.tsx` | 分组管理器（CRUD、Pin、色板、逐页签分组 / 别名）与组头像 | 改分组管理交互 |
-| `src/ui/Dialog.tsx` | 统一弹窗：初始焦点、焦点陷阱、浮层栈、busy / dirty 关闭保护、焦点恢复 | 改所有弹窗的共同行为 |
+| `src/ui/Dialog.tsx` / `dialogSize.ts` | 统一弹窗：初始焦点、焦点陷阱、浮层栈、busy / dirty 关闭保护、焦点恢复；可选四边 / 四角拖拽调整尺寸并按 `sizeKey` 持久化；`closeOnBackdrop=false` 可禁止遮罩关闭 | 改所有弹窗的共同行为 |
+| `src/explorerWindowState.ts` | 资源管理器轻量动作窗口按 action 保存 / 恢复原生窗口尺寸 | 改轻量窗口尺寸规则 |
 | `src/ui/ContextMenu.tsx` | 统一右键菜单：视口定位、焦点循环、`keepOpen` 多选菜单、浮层栈 | 改菜单行为 |
 | `src/ui/Confirm.tsx` | 应用内危险确认；危险操作默认聚焦“取消”，requireAck 聚焦勾选框 | 改危险确认策略 |
 | `src/ui/SplitHandle.tsx` / `Icon.tsx` | 可拖拽分栏与本地 SVG 图标 | 改共享交互原语 |
@@ -39,13 +40,13 @@
 | `src/components/CompareView.tsx` | 双端提交 / 分支 / 标签对比；保留上一次结果、Enter 触发、内联错误 | 改对比交互 |
 | `src/components/ConflictCenter.tsx` | 冲突草稿、来源快照校验、冲突标记提示、合并两侧、继续 / 跳过 / 中止 | 改冲突工作流 |
 | `src/components/RebasePlanner.tsx` | 会话内线性 Rebase 计划、批量动作 / 重排 / Autosquash 自动重排 / 拖放指示、执行 | 改 Rebase 交互 |
-| `src/components/{Branch,Merge,Pull,Remotes,Worktree,CommandLog,Search,Stash,Tag,Submodule,CheckoutRevision,DiffTool,ApplyPatch,Clone,CreateRepository,Push,Reset,Recovery,Blame,FileHistory,TrackedFile}Dialog.tsx` | 各类任务弹窗；表单弹窗使用 dirty 关闭守卫，错误内联并保留 Git 原始输出 | 改对应工作流 |
-| `src/components/SettingsDialog.tsx` | 行为设置、分类键盘导航、未保存修改保护、快捷键帮助（由 `SHORTCUT_HELP` 生成） | 改设置交互 |
+| `src/components/{Branch,Merge,Pull,Remotes,Worktree,CommandLog,Search,Stash,Tag,Submodule,CheckoutRevision,DiffTool,ApplyPatch,AddFiles,Clone,CreateRepository,Push,Reset,Recovery,Blame,BlameView,FileHistory,TrackedFile}Dialog.tsx` | 各类任务弹窗 / 共用视图；表单弹窗使用 dirty 关闭守卫，错误内联并保留 Git 原始输出 | 改对应工作流 |
+| `src/components/SettingsDialog.tsx` | 行为设置、分类键盘导航、未保存修改保护、快捷键帮助；可拖拽边框调整并记住尺寸；「应用」生效但不关闭面板、点击遮罩不关闭 | 改设置交互 |
 | `src/explorer/` | 单任务窗口 Host、Commit / Pull / History 轻量界面与原生关闭保护 | 改 Explorer 轻量工作流 |
 | `src/repoGroups.ts` | 页签分组纯数据层：组 CRUD、Pin、颜色、分配、多选并集、别名 | 改分组规则 |
 | `src/openRepos.ts` | 打开页签持久化：路径白名单、缺失 / 空列表语义、恢复候选 | 改启动恢复规则 |
 | `src/tabOrder.ts` | 页签拖拽插入位置与重排纯函数 | 改拖拽排序规则 |
-| `src/settings.ts` / `windowState.ts` / `explorerMenu.ts` | 行为设置、按仓库布局、窗口 bounds、资源管理器菜单配置；localStorage 白名单与离屏修正 | 改持久化规则 |
+| `src/settings.ts` / `windowState.ts` / `explorerWindowState.ts` / `explorerMenu.ts` | 行为设置、按仓库布局、主窗口 bounds、轻量动作窗口尺寸、资源管理器菜单配置；localStorage 白名单与离屏修正 | 改持久化规则 |
 | `src/repoOperations.ts` / `useRepoBusy.ts` | 仓库级写状态同步与共享 busy | 改写状态与关闭保护 |
 | `src/api.ts` | 在途读取去重、`writeInvoke`、log-batch 订阅、日期格式化 | 改 IPC 调用方式 |
 | `src/types.ts` | 前后端共享 TS 类型 | 改 IPC 字段 |
@@ -72,7 +73,8 @@
 | 对比基准 | `RepoWorkspace.tsx` 的 `compareBase`、`onRevisionAction("compare-base")`；`Toolbar.tsx` 的 `compare-base-chip`；`RevisionGrid.tsx` 菜单标签 | 基准 chip 可清除；Esc 先清基准 |
 | 任务视图 / 草稿 | `RepoWorkspace.tsx` 的 `conflictDrafts`、`rebaseDrafts`、`saveConflictDraft`、`saveRebaseDraft`、`switchWorkspace` | 草稿存在会话 maps；关闭页签确认 |
 | 分组管理 / 页签别名 | `repoGroups.ts`；`RepoGroupsDialog.tsx`；`TitleBar.tsx`；`RepositoryTabs.tsx` | 全局持久化；别名只改显示 |
-| 设置 / 布局 | `settings.ts` 的 `loadSettings` / `loadLayout`；`SettingsDialog.tsx` | 行为全局、布局按仓库；dirty 关闭确认 |
+| 设置 / 布局 | `settings.ts` 的 `loadSettings` / `loadLayout`；`SettingsDialog.tsx`；`ui/dialogSize.ts` | 行为全局、布局按仓库；dirty 关闭确认；设置弹窗尺寸独立保存 |
+| 轻量窗口尺寸 | `explorerWindowState.ts` 的 `restoreExplorerWindowSize` / `watchExplorerWindowSize`；`main.tsx` | 按 action 存独立 localStorage 键；窗口创建后先恢复尺寸再 show |
 | 共享 busy / 写调度 | `api.ts` 的 `writeInvoke`；`repoOperations.ts` 的 `runRepoWrite`；`useRepoBusy.ts` | 写组件共享 busy；关闭前复核实时状态 |
 | 原生目录 / 文件选择 | `nativeDialog.ts` 的 `pickDirectory` / `pickFile` | Tauri dialog 插件；权限 `dialog:allow-open` |
 | 列表键盘 / 树键盘 | `ui/listNav.ts`；`LeftPanel.tsx` 的 `treeKeyDown`；`RevisionGrid.tsx` 容器 keydown；`ChangesPanel.tsx` 的 `listKeyDown` | 行用 Enter/Space/Shift+F10 |
@@ -88,6 +90,9 @@
 - 焦点陷阱在焦点落到弹窗外时主动拉回；busy 时无可用焦点则聚焦 `.modal` 容器。
 - 表单类弹窗用 `useDirtyClose`：busy 时不关闭；dirty 时先确认。它同时把 dirty 登记到 `dialogState`，`App.closeWindow` 的窗口关闭守卫会汇总弹窗输入与仓库草稿。
 - `Dialog` 的 `dirty` prop 仍保留给通用场景，但表单弹窗统一走 `useDirtyClose`，避免底部按钮绕过 Esc 守卫。
+- `Dialog` 的 `resizable` 在四边 / 四角渲染透明拖拽带，pointermove 时把尺寸夹在 `minWidth/minHeight` 与视口之间；`sizeKey` 存在时把尺寸写到 `git-extensions.dialog-size.v1.<key>`。设置弹窗使用 `sizeKey="settings"`；轻量动作窗口的尺寸由 `explorerWindowState.ts` 按 action 单独保存。
+- 设置弹窗的「应用」与「保存」共用保存逻辑，但「应用」只更新父级 `settings`（并重新注册菜单）不关闭面板；父级状态更新后 `dirty` 变 false，应用按钮自动置灰。设置弹窗传 `closeOnBackdrop={false}`，点遮罩不关闭；Esc / 取消 / 关闭按钮仍按 dirty 守卫处理。
+- `main.tsx` 在捕获阶段拦截 F5 / Ctrl+R，阻止 WebView 刷新；窗口启动请求由 `window_host` 的 `initial` 保存，刷新后重新 bootstrap 仍能拿到同一份动作。
 
 ### 命令注册与命令面板
 
@@ -149,7 +154,8 @@
 - **对比基准是 UI 状态**：`compareBase` 不是 Git 状态；Esc 清基准、右键第二提交执行对比后清空、工具栏 chip 可关闭，避免留下看不见的待对比状态。
 - **关闭其它页签要说明保留原因**：dirty / busy 页签不能静默跳过；一次确认列出将关闭与将保留的页签。
 - **高亮与历史限量**：Worker 结果按 id 丢弃，超过 5000 行或未知语言跳过；巨型 patch 的换行状态同时用于行与容器，短 patch 的虚拟窗口要 clamp；Blame 2 MiB / 20000 行；工作区使用真实 buffer，不误用 HEAD。
-- **设置输入按白名单恢复**：localStorage 可被手工修改，`loadSettings` 只接受布尔值与预定义轮询间隔 / 日志上限；布局数值按范围夹紧。
+- **设置输入按白名单恢复**：localStorage 可被手工修改，`loadSettings` 只接受布尔值与预定义轮询间隔 / 日志上限；布局数值与弹窗 / 轻量窗口尺寸都按范围夹紧。
+- **弹窗尺寸与原生窗口尺寸是两套状态**：设置弹窗拖拽只改 HTML `.modal` 的内联宽高并写 `dialogSize` 键；轻量动作窗口拖拽原生边框后由 `onResized` 写独立 action 键。不要把两者混进主窗口 `windowState`，否则多窗口会互相覆盖。
 - **布局与草稿按仓库隔离**：已访问的 RepoWorkspace 与提交面板持久挂载；冲突 / Rebase 草稿保留在会话 maps（含空内容、删除意图、原来源），关闭页签才丢失；不持久化仓库内容草稿。
 - **读取去重不是长期缓存**：`api.pendingReads` 只合并同参数在途 Promise，完成 / 失败立即释放；动态 ref 固定到 OID 后才给单文件 loader。
 - **自绘顶部栏与窗口生命周期**：`decorations: false`；`data-tauri-drag-region` 只作用于直接元素；窗口控制权限在 capabilities；系统关闭统一走 `closeWindow`，`allowCloseRef` 防循环，关闭失败恢复标记并显示错误；主窗口 `Destroyed` 后显式 `exit(0)`。

@@ -53,10 +53,13 @@
 - [x] ~~HKCU 目录/目录背景完整级联菜单，启用注册、关闭注销，覆盖安装版与便携版。~~（2026-11-04）
 - [x] ~~新实例启动动作路由，接入现有提交、远程、分支、Stash、变更与历史工作流。~~（2026-11-04）
 - [x] ~~补齐 Clone、Create repository、Checkout revision、外部 difftool、Apply patch 与 tracked-file 选择器。~~（2026-11-04）
-- [x] ~~窗口普通尺寸 / 位置 / 最大化状态恢复，设置弹窗固定外框与面板独立滚动。~~（2026-11-04）
+- [x] ~~窗口普通尺寸 / 位置 / 最大化状态恢复，设置弹窗可拖拽边框缩放并记住尺寸，面板独立滚动。~~（2026-11-04，2026-11-10 补充缩放）
 - [x] ~~Shell extension 三态命令配置、全部展开、实时预览与正确 ExtendedSubCommandsKey 级联注册 / 旧布局迁移。~~（2026-11-04）
 - [x] ~~单实例多窗口：轻量动作独立窗口，Open repository / Settings 聚焦主窗口；Clone / Commit / Pull 输出 / View changelog 等单任务界面。~~（2026-11-04）
 - [x] ~~文件右键菜单与统一 View changelog：仓库根 / 子目录 / 文件范围，查看提交文件、差异与 Reset / Rebase 等操作。~~（2026-11-04）
+- [x] ~~资源管理器菜单与参考项目对齐：View changes 只读 diff、View stash 工作区窗口、Add files、Reset、Apply patch 冲突流程、Create repository 类型、文件历史 Blame、Pull/Push/分支选项、菜单文案与上下文规则、Repository settings 面板、View files 文件树、一级/二级/三级菜单配置与超限提示、Esc 关闭；含克隆进度页与「最近打开」修复。~~（2026-11-09）
+- [x] ~~修复 Others 被 Windows 整棵级联树 16 项上限截断的问题并清理旧键；轻量动作窗口拖拽缩放并记住尺寸；设置弹窗四边缩放并记住尺寸；新增 Rename（`git mv`）菜单项。~~（2026-11-10）
+- [x] ~~修复动作窗口 F5 刷新后无法启动 / 无法关闭、Open with difftool 闪退；Create/Open repository 归入 Branches & Repos；设置新增「应用」按钮并禁止遮罩关闭。~~（2026-11-10）
 - [ ] 完成 Windows 真实菜单、窗口状态、轻量窗口、单实例及安装版/便携版 GUI 验收。
 
 ### M5 专业 UI 与新工作流（平台验收中）

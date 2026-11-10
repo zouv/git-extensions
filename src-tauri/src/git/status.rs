@@ -204,6 +204,7 @@ pub fn get_operation_state(path: String) -> GitResult<OperationState> {
     let git_dir = repo.path();
     let rebase_merge = git_dir.join("rebase-merge");
     let rebase_apply = git_dir.join("rebase-apply");
+    let applying_patch = rebase_apply.join("applying").exists();
     let state = repo.state();
     let (operation, interactive) = match state {
         RepositoryState::Clean => ("none", false),
@@ -211,16 +212,13 @@ pub fn get_operation_state(path: String) -> GitResult<OperationState> {
         RepositoryState::CherryPick | RepositoryState::CherryPickSequence => ("cherryPick", false),
         RepositoryState::Revert | RepositoryState::RevertSequence => ("revert", false),
         RepositoryState::Bisect => ("bisect", false),
+        RepositoryState::ApplyMailbox => ("applyPatch", false),
+        RepositoryState::ApplyMailboxOrRebase if applying_patch => ("applyPatch", false),
         RepositoryState::Rebase
         | RepositoryState::RebaseInteractive
         | RepositoryState::RebaseMerge
         | RepositoryState::ApplyMailboxOrRebase => {
             ("rebase", rebase_merge.join("interactive").exists())
-        }
-        other => {
-            return Err(GitError::InvalidInput(format!(
-                "unsupported repository operation state: {other:?}"
-            )));
         }
     };
 

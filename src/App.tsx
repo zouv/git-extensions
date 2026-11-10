@@ -20,7 +20,7 @@ import { loadSettings, saveSettings } from "./settings";
 import { hasDirtyDialogs } from "./dialogState";
 import { fitWindowState, loadWindowState, saveWindowState } from "./windowState";
 import type { WindowState } from "./windowState";
-import { loadOpenRepos, pickActivePath, restoreCandidates, saveOpenRepos } from "./openRepos";
+import { loadOpenRepos, pickActivePath, restoreCandidates, sanitizeRecentRepos, saveOpenRepos } from "./openRepos";
 import type { RepoGroupConfig } from "./repoGroups";
 import {
   DEFAULT_GROUP_ID, ensureGroupActive, groupForRepo, loadRepoGroups, primaryGroupId,
@@ -47,7 +47,12 @@ const EMPTY_META: SessionMeta = { busy: false, dirty: false, conflictCount: 0, l
 function recentRepos(): string[] {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(RECENT_REPOS_KEY) ?? "[]");
-    return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string").slice(0, 12) : [];
+    const paths = sanitizeRecentRepos(value);
+    // 旧版本可能写入空路径 / 重复项；过滤后顺手回写，避免菜单出现空的「最近打开」。
+    if (Array.isArray(value) && paths.length !== value.length) {
+      try { localStorage.setItem(RECENT_REPOS_KEY, JSON.stringify(paths)); } catch { /* 存储不可用时仅影响回写 */ }
+    }
+    return paths;
   } catch { return []; }
 }
 
@@ -223,7 +228,7 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       setActivePath(info.path);
       rememberActive(info.path);
       setRecent((prev) => {
-        const next = [info.path, ...prev.filter((p) => p !== info.path)].slice(0, 12);
+        const next = sanitizeRecentRepos([info.path, ...prev]);
         if (!TEST_REPO) localStorage.setItem(RECENT_REPOS_KEY, JSON.stringify(next));
         return next;
       });
@@ -330,12 +335,10 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       });
   }, [beginOpen, notify, openRepo, opening, sessionRestored, launchTick]);
 
-  const saveSettingsDialog = useCallback(async (next: typeof settings) => {
-    const explorerChanged = next.explorerContextMenuEnabled !== settings.explorerContextMenuEnabled
-      || next.explorerAlwaysShowAllCommands !== settings.explorerAlwaysShowAllCommands
-      || JSON.stringify(next.explorerContextMenuPlacements) !== JSON.stringify(settings.explorerContextMenuPlacements);
-    if ((next.explorerContextMenuEnabled || settings.explorerContextMenuEnabled)
-      && (next.explorerContextMenuEnabled || explorerChanged)) {
+  const persistSettings = useCallback(async (next: typeof settings) => {
+    // 每次应用 / 保存都重新注册已启用的菜单：应用升级后无需改动配置也能应用
+    // 新的分组、图标与命令表；关闭菜单时同样走一次注销。
+    if (next.explorerContextMenuEnabled || settings.explorerContextMenuEnabled) {
       if (TEST_REPO) throw new Error("测试模式不允许修改资源管理器菜单");
       await api.setExplorerContextMenuEnabled(
         next.explorerContextMenuEnabled,
@@ -344,8 +347,12 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       );
     }
     setSettings(next);
-    setShowSettings(false);
   }, [settings]);
+
+  const saveSettingsDialog = useCallback(async (next: typeof settings) => {
+    await persistSettings(next);
+    setShowSettings(false);
+  }, [persistSettings]);
 
   // 启动恢复上次打开的全部仓库页签；只取 RepoInfo，Git 数据等页签激活后再加载。
   useEffect(() => {
@@ -692,10 +699,10 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
         </label>
         {recent.length > 0 && <div className="recent-repos"><div className="section-label">最近打开</div>{recent.map((path) => <button key={path} onClick={() => setOpenPath(path)} onDoubleClick={() => void openRepo(path)} title={`${path}（双击直接打开）`}><Icon name="history" /><span>{path}</span></button>)}</div>}
       </Dialog>}
-      {showSettings && <SettingsDialog settings={settings} explorerIntegrationSupported={!TEST_REPO && explorerIntegrationSupported} onSave={saveSettingsDialog} onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsDialog settings={settings} explorerIntegrationSupported={!TEST_REPO && explorerIntegrationSupported} onSave={saveSettingsDialog} onApply={persistSettings} onClose={() => setShowSettings(false)} />}
       {showPalette && <CommandPalette onClose={() => setShowPalette(false)} />}
       {cloneParent !== null && <CloneDialog initialParent={cloneParent} onOpen={openRepo} onClose={() => setCloneParent(null)} onBusyChange={setLifecycleBusy} />}
-      {createRepositoryPath !== null && <CreateRepositoryDialog initialPath={createRepositoryPath} onOpen={openRepo} onClose={() => setCreateRepositoryPath(null)} onBusyChange={setLifecycleBusy} />}
+      {createRepositoryPath !== null && <CreateRepositoryDialog initialPath={createRepositoryPath} onOpen={openRepo} onClose={() => setCreateRepositoryPath(null)} onBusyChange={setLifecycleBusy} onMessage={(text) => notify(createRepositoryPath, "info", text)} />}
       <NotificationCenter notices={notices} onDismiss={dismissNotice} onClear={clearNotices} />
     </div>
   );

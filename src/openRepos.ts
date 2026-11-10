@@ -1,9 +1,10 @@
 /** 打开的仓库页签：只持久化有序路径，恢复时再逐个校验仓库是否仍可打开。 */
 export const OPEN_REPOS_KEY = "git-extensions.openRepos.v1";
 export const MAX_OPEN_REPOS = 32;
+/** 最近打开列表复用同一套清洗规则；空路径 / 重复项会让应用菜单出现空行。 */
+export const MAX_RECENT_REPOS = 12;
 
-/** localStorage 可能被手工修改：只接受非空字符串，去重、保序并限制数量。 */
-export function sanitizeOpenRepos(value: unknown): string[] {
+function sanitizePaths(value: unknown, max: number): string[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
   const paths: string[] = [];
@@ -13,9 +14,18 @@ export function sanitizeOpenRepos(value: unknown): string[] {
     if (!path || seen.has(path)) continue;
     seen.add(path);
     paths.push(path);
-    if (paths.length >= MAX_OPEN_REPOS) break;
+    if (paths.length >= max) break;
   }
   return paths;
+}
+
+export function sanitizeRecentRepos(value: unknown): string[] {
+  return sanitizePaths(value, MAX_RECENT_REPOS);
+}
+
+/** localStorage 可能被手工修改：只接受非空字符串，去重、保序并限制数量。 */
+export function sanitizeOpenRepos(value: unknown): string[] {
+  return sanitizePaths(value, MAX_OPEN_REPOS);
 }
 
 /** null = 键缺失或内容不可用（回退旧版单仓库）；[] = 用户已关闭全部页签。 */

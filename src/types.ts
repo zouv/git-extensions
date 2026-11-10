@@ -156,7 +156,7 @@ export interface CompareResult {
   files: FileDiff[];
 }
 
-export type OperationKind = "none" | "merge" | "cherryPick" | "revert" | "rebase" | "bisect";
+export type OperationKind = "none" | "merge" | "cherryPick" | "revert" | "rebase" | "bisect" | "applyPatch";
 
 export interface RemoteInfo {
   name: string;
@@ -244,12 +244,16 @@ export interface RecoveryEntry { oid: string; label: string; time: number; backu
 export interface ConflictDraft { file: ConflictFile; result: string; resolveAsDeletion: boolean }
 export interface RebaseDraft { plan: RebasePlan; entries: RebaseTodoEntry[]; dirty: boolean }
 
-export type ExplorerAction = "clone" | "create-repository" | "commit" | "open-repository" | "pull" | "push" | "view-stash" | "view-changes" | "checkout-branch" | "checkout-revision" | "create-branch" | "open-with-difftool" | "file-history" | "reset-file-changes" | "add-files" | "apply-patch" | "settings";
-export type ExplorerMenuPlacement = "top" | "cascade" | "hidden";
+export type ExplorerAction = "clone" | "create-repository" | "commit" | "open-repository" | "pull" | "push" | "view-stash" | "view-changes" | "checkout-branch" | "checkout-revision" | "create-branch" | "open-with-difftool" | "file-history" | "reset-file-changes" | "add-files" | "apply-patch" | "settings" | "repository-settings" | "view-files" | "rename";
+export type ExplorerMenuPlacement = "top" | "cascade" | "others" | "hidden";
 export type ExplorerMenuPlacements = Record<ExplorerAction, ExplorerMenuPlacement>;
 export interface ExplorerMenuItem { action: ExplorerAction; placement: ExplorerMenuPlacement }
 export interface LaunchRequest { action: ExplorerAction; path: string | null }
-export type WorkspaceLaunchAction = Exclude<ExplorerAction, "clone" | "create-repository" | "open-repository" | "settings">;
+export type WorkspaceLaunchAction = Exclude<ExplorerAction, "clone" | "create-repository" | "open-repository" | "settings" | "repository-settings" | "view-files" | "rename">;
 export interface WorkspaceLaunchRequest { id: number; action: WorkspaceLaunchAction }
 export interface ExplorerIntegrationInfo { supported: boolean }
+export interface CloneProgress { operationId: string; line: string }
 export interface PatchPreview { patchOid: string; summary: string }
+export interface FileContent { content: string; binary: boolean; truncated: boolean; size: number }
+export interface PatchFileInfo { path: string; name: string; subject: string; author: string; date: string; mailbox: boolean }
+export interface PatchApplyState { inProgress: boolean; conflicts: string[] }

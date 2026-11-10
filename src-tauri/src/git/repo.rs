@@ -77,6 +77,28 @@ pub fn list_tracked_files(path: String) -> GitResult<Vec<String>> {
     Ok(files)
 }
 
+/// View files 只列出当前分支已提交进 HEAD 的文件，不含暂存区里尚未提交的新文件。
+pub fn list_head_files(path: String) -> GitResult<Vec<String>> {
+    let repo = open(&path)?;
+    let head = match repo.head() {
+        Ok(head) => head,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let tree = head.peel_to_tree()?;
+    let mut files = Vec::new();
+    tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+        if entry.kind() == Some(git2::ObjectType::Blob) {
+            if let Some(name) = entry.name() {
+                files.push(format!("{root}{name}"));
+            }
+        }
+        0
+    })?;
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
 pub fn open_repo(path: String) -> GitResult<RepoInfo> {
     let repo = open(&path)?;
     repo_info(&repo)
@@ -295,4 +317,3 @@ pub fn get_merged_branches(path: String) -> GitResult<Vec<String>> {
     merged.sort();
     Ok(merged)
 }
-

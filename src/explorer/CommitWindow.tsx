@@ -7,7 +7,7 @@ import { loadSettings } from "../settings";
 import { useConfirm } from "../ui/Confirm";
 
 interface Props {
-  action: Extract<ExplorerAction, "commit" | "view-changes" | "add-files" | "reset-file-changes">;
+  action: Extract<ExplorerAction, "commit">;
   target: ExplorerTarget;
   onDirtyChange: (dirty: boolean) => void;
   onBusyChange: (busy: boolean) => void;

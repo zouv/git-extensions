@@ -29,10 +29,13 @@ pub enum ExplorerAction {
     AddFiles,
     ApplyPatch,
     Settings,
+    RepositorySettings,
+    ViewFiles,
+    Rename,
 }
 
 impl ExplorerAction {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 20] = [
         Self::Clone,
         Self::CreateRepository,
         Self::Commit,
@@ -50,6 +53,9 @@ impl ExplorerAction {
         Self::AddFiles,
         Self::ApplyPatch,
         Self::Settings,
+        Self::RepositorySettings,
+        Self::ViewFiles,
+        Self::Rename,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -71,6 +77,9 @@ impl ExplorerAction {
             Self::AddFiles => "add-files",
             Self::ApplyPatch => "apply-patch",
             Self::Settings => "settings",
+            Self::RepositorySettings => "repository-settings",
+            Self::ViewFiles => "view-files",
+            Self::Rename => "rename",
         }
     }
 
@@ -103,6 +112,9 @@ impl ExplorerAction {
             Self::AddFiles => "Add files",
             Self::ApplyPatch => "Apply patch",
             Self::Settings => "Settings",
+            Self::RepositorySettings => "Repository settings",
+            Self::ViewFiles => "View files",
+            Self::Rename => "Rename",
         }
     }
 }

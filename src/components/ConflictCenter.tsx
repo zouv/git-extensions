@@ -17,7 +17,14 @@ interface Props {
   onNotify: (kind: "success" | "error" | "info", message: string, details?: string) => void;
 }
 
-const operationNames: Record<string, string> = { merge: "Merge", cherryPick: "Cherry-pick", revert: "Revert", rebase: "Rebase", bisect: "Bisect", none: "操作" };
+const operationNames: Record<string, string> = { merge: "Merge", cherryPick: "Cherry-pick", revert: "Revert", rebase: "Rebase", bisect: "Bisect", applyPatch: "补丁应用", none: "操作" };
+
+function ensureCommandOutput(output: { exitCode: number | null; stdout: string; stderr: string }) {
+  if (output.exitCode !== 0) {
+    throw new Error(output.stderr.trim() || output.stdout.trim() || `git 退出码 ${output.exitCode ?? "未知"}`);
+  }
+  return output;
+}
 
 export default function ConflictCenter(props: Props) {
   const [state, setState] = useState<OperationState | null>(null);
@@ -109,7 +116,8 @@ export default function ConflictCenter(props: Props) {
     setBusy(true); setError("");
     let continued = false;
     try {
-      await api.continueOperation(props.repoPath);
+      if (state?.kind === "applyPatch") ensureCommandOutput(await api.continuePatch(props.repoPath));
+      else await api.continueOperation(props.repoPath);
       continued = true;
       props.onNotify("success", `${state ? operationNames[state.kind] : "操作"}已继续`);
       props.onChanged();
@@ -137,10 +145,11 @@ export default function ConflictCenter(props: Props) {
   };
 
   const skip = async () => {
-    if (busy || !state || !await confirm({ title: "跳过当前提交？", body: "将丢弃当前步骤的补丁和冲突解决进度，继续下一个提交。这不是暂时忽略某个文件。", confirmLabel: "跳过当前提交", danger: true, requireAck: true, ackLabel: "我确认丢弃当前步骤的修改与解决进度" })) return;
+    if (busy || !state || !await confirm({ title: state.kind === "applyPatch" ? "跳过当前补丁？" : "跳过当前提交？", body: "将丢弃当前步骤的补丁和冲突解决进度，继续后续步骤。这不是暂时忽略某个文件。", confirmLabel: state.kind === "applyPatch" ? "跳过补丁" : "跳过当前提交", danger: true, requireAck: true, ackLabel: "我确认丢弃当前步骤的修改与解决进度" })) return;
     setBusy(true); setError("");
     try {
-      await api.skipOperation(props.repoPath, state);
+      if (state.kind === "applyPatch") ensureCommandOutput(await api.skipPatch(props.repoPath));
+      else await api.skipOperation(props.repoPath, state);
       for (const path of props.drafts.keys()) props.onDraftChange(path, null);
       setDirty(false); setContent(null); setSelected(null); props.onChanged();
       const next = await api.getOperationState(props.repoPath); setState(next);
@@ -153,7 +162,11 @@ export default function ConflictCenter(props: Props) {
   const abort = async () => {
     if (busy || !state || !await confirm({ title: `中止 ${operationNames[state.kind]}？`, body: "中止将放弃本次操作及冲突解决进度，Git 会尝试恢复操作前状态；已有本地修改时可能拒绝。HEAD 备份不包含未提交内容。", confirmLabel: "中止操作", danger: true, requireAck: true, ackLabel: "我确认放弃本次操作与解决进度" })) return;
     setBusy(true);
-    try { await api.abortOperation(props.repoPath); for (const path of props.drafts.keys()) props.onDraftChange(path, null); setDirty(false); setContent(null); props.onNotify("success", "操作已中止"); props.onChanged(); props.onExit(); }
+    try {
+      if (state?.kind === "applyPatch") ensureCommandOutput(await api.abortPatch(props.repoPath));
+      else await api.abortOperation(props.repoPath);
+      for (const path of props.drafts.keys()) props.onDraftChange(path, null); setDirty(false); setContent(null); props.onNotify("success", "操作已中止"); props.onChanged(); props.onExit();
+    }
     catch (e) { setError(String(e)); }
     finally { setBusy(false); }
   };
@@ -186,7 +199,7 @@ export default function ConflictCenter(props: Props) {
         {continueBlocked && <span className="continue-hint">{dirty ? "先保存当前文件" : `${state?.conflicts.length ?? 0} 个文件未解决`}</span>}
         <button onClick={() => void reload()} disabled={busy} title="重新读取操作状态与来源，保留当前会话草稿"><Icon name="refresh" />刷新状态</button>
         <button className="primary" disabled={busy || !state || state.kind === "none" || state.conflicts.length > 0 || dirty} title={dirty ? "先保存当前文件" : state?.conflicts.length ? "仍有未解决冲突" : `继续 ${name}`} onClick={() => void continueOperation()}>继续 {name}</button>
-        {state && ["rebase", "cherryPick", "revert"].includes(state.kind) && <button disabled={busy} onClick={() => void skip()}>跳过当前提交…</button>}
+        {state && ["rebase", "cherryPick", "revert", "applyPatch"].includes(state.kind) && <button disabled={busy} onClick={() => void skip()}>跳过{state.kind === "applyPatch" ? "补丁" : "当前提交"}…</button>}
         <button className="danger-button" disabled={busy || !state || state.kind === "none"} onClick={() => void abort()}>中止…</button>
       </div>
       {error && <div className="inline-error"><Icon name="warning" /><span>{error}</span><button onClick={() => { void navigator.clipboard?.writeText(error); }}>复制</button></div>}

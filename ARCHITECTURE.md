@@ -44,7 +44,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | 改命令面板 / 统一快捷键 | `src/commands.ts`、`src/components/CommandPalette.tsx`、`src/App.tsx`、`src/RepoWorkspace.tsx` | 后端 git 模块 | `arch/ui.md §2–§3` |
 | 改弹窗焦点 / 关闭保护 / 通知 | `src/ui/Dialog.tsx`、`src/ui/layerStack.ts`、`src/ui/useDirtyClose.ts`、`src/ui/Confirm.tsx`、`src/components/NotificationCenter.tsx`、`src/App.tsx`、`src/dialogState.ts` | Git 读写模块 | `arch/ui.md §2–§3、§5` |
 | 改原生目录选择 / 拖放打开 | `src/nativeDialog.ts`、`src/App.tsx`、`src/components/{Clone,CreateRepository,ApplyPatch}Dialog.tsx`、`src-tauri/src/lib.rs`、`Cargo.toml`、`capabilities/default.json` | Git 读写模块 | `arch/ui.md §2–§3` |
-| 改资源管理器菜单 / 外部启动 | [`arch/explorer.md`](./arch/explorer.md)，按分册定位源码 | 无关 Git 读路径与 Diff 组件 | 分册 §1–§5 |
+| 改资源管理器菜单 / 外部启动 / 克隆进度 / Rename | [`arch/explorer.md`](./arch/explorer.md)，按分册定位源码 | 无关 Git 读路径与 Diff 组件 | 分册 §1–§5 |
 | 改对比 / 冲突 / 交互式 Rebase | `src/components/CompareView.tsx`、`ConflictCenter.tsx`、`RebasePlanner.tsx`；后端 `diff.rs`、`status.rs`、`rebase.rs` | 提交图与高亮 Worker | §2、§3、§4；`arch/ui.md §1–§3` |
 | 改文档 / 流程 | 对应的 `docs/` 篇章或根目录文档 | 源码 | AGENTS §5 |
 
@@ -63,11 +63,11 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | `src-tauri/src/git/log.rs` | revwalk 流式日志、refs 收集、分支图 lane 布局、代际取消 | 改日志加载 / 图数据 |
 | `src-tauri/src/git/diff.rs` | 提交 / 工作区 / 双端文件清单与单文件 patch、大小保护 | 改 diff 数据 |
 | `src-tauri/src/git/status.rs` | 状态快照、真实 operation state（含 Bisect）、冲突四方内容 | 改状态分类 / 冲突读取 |
-| `src-tauri/src/git/cli.rs` | 同步 Git 写实现与参数校验（含 Hunk 暂存、Amend/Fixup、Merge、Remote、Worktree、Bisect、导出与命令日志环形缓冲） | 改任何 Git 写操作或 CLI 命令记录 |
+| `src-tauri/src/git/cli.rs` | 同步 Git 写实现与参数校验（含 Hunk 暂存、Amend/Fixup、Merge、Remote、Worktree、Bisect、导出、命令日志、Clone 进度流、Add/Reset/Patch/Stash 扩展、Rename 与 Pull/Push 选项） | 改任何 Git 写操作或 CLI 命令记录 |
 | `src-tauri/src/git/commands.rs` / `operations.rs` | 全部 Git 读写 IPC 适配；有界后台读取与 common Git dir 写互斥 | 改写操作执行调度 |
 | `src-tauri/src/git/reset.rs` | Reset 预览、状态指纹、CLI HEAD 备份、执行与 reflog / 备份恢复列表 | 改 Reset / 恢复保护 |
 | `src-tauri/src/git/rebase.rs` | 线性计划校验、真实 `rebase -i`、内部 sequence/message editor | 改交互式 Rebase |
-| `src-tauri/src/system.rs` / `system/explorer.rs` | 安全解析仓库内路径并调用 OS 打开 / 显示；可选 HKCU 资源管理器菜单 | 改系统集成；菜单详见 `arch/explorer.md` |
+| `src-tauri/src/system.rs` / `system/explorer.rs` | 安全解析仓库内路径并调用 OS 打开 / 显示；可选 HKCU 平铺分组资源管理器菜单与内嵌图标；同步后清理旧布局遗留键 | 改系统集成；菜单详见 `arch/explorer.md` |
 | `src-tauri/src/launch.rs` | 固定 Explorer 动作与受控启动参数解析 | 改外部启动协议 |
 | `src-tauri/src/window_host.rs` | 单实例请求队列、主窗口聚焦、轻量动作窗口创建与最后窗口退出 | 改外部启动 / 多窗口路由 |
 | `src-tauri/src/git/history.rs` | git2 逐行 blame、CLI `--follow` 单文件历史、目录 / 文件范围 changelog、提交搜索与 `git grep` | 改文件历史 / 搜索 / 行数上限 |
@@ -109,6 +109,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | Push 目标与预览 / 远程管理 | `cli.rs` 的 `get_push_info`、`push_ex`、`fetch_ex`、`pull_ex`、`remote_*`；`repo.rs::remote_list` | 不 fallback；支持 `--force-with-lease`、`--tags`、fetch `--prune`、pull 策略与 `--autostash` |
 | 分支扩展 / Merge / Worktree / Bisect | `cli.rs` 的 `checkout_remote_branch`、`rename_branch`、`delete_branches`、`delete_remote_branch`、`merge_branch`、`worktree_*`、`bisect_*`；`repo.rs::get_merged_branches` | 均经 `acquire_write` 与参数验证；`get_merged_branches` 自动排除当前 HEAD 与常见主干分支 |
 | Hunk 暂存 / Fixup / 忽略 / 导出 / 命令日志 | `cli.rs` 的 `apply_diff_patch`、`commit_ex`、`commit_fixup`、`ignore_file`、`format_patch`、`archive_commit`、`get_command_log` | `apply_diff_patch` 通过 stdin 传给 `git apply`；命令日志保留最近 200 条 CLI 记录 |
+| 重命名工作区文件 / 目录 | `cli.rs` 的 `rename_path`、`validate_rename_name` | 只允许同目录改名；`git mv` 仅处理已跟踪内容；拒绝路径分隔符、`.git`、Windows 保留名与已存在目标 |
 | blame / 文件历史 / 提交与代码搜索 | `history.rs` 的 `blame_file`、`file_log`、`search_commits`、`git_grep` | blame 上限 2 MiB / 20000 行；搜索经受控 CLI NUL 协议解析 |
 
 ### 2.2 前端（`src/`）
@@ -171,9 +172,10 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | 前端 → 后端 | `prepare_interactive_rebase` / `start_interactive_rebase` | 线性非根范围；prepare 返回 onto、originalHead、完整 branch ref、entries；start 接收原完整 `plan`，不得重建 branch，执行前重新校验 |
 | 前端 → 后端 | `discard_files` / `delete_untracked_files` / `open_path` / `reveal_path` | 仅仓库内相对路径；丢弃保留 staged；删除拒绝 tracked / ignored / 目录 |
 | 前端 → 后端 | `get_worktree_diff` | `staged`：true=HEAD vs index，false=index vs workdir |
-| 前端 → 后端 | `stage_files` / `unstage_files` / `commit` / `commit_fixup` / `apply_diff_patch` / `ignore_file` | 走 CLI，stderr 原文返回；`commit` 支持 `amend`；`apply_diff_patch` 支持 `cached` 与 `reverse`（Hunk 暂存/取消暂存/丢弃） |
+| 前端 → 后端 | `stage_files` / `unstage_files` / `preview_add_files` / `add_files` / `reset_changes` / `commit` / `commit_fixup` / `apply_diff_patch` / `ignore_file` | 走 CLI，stderr 原文返回；`preview_add_files` 执行 `git add --dry-run`；`add_files` 的 Filter 按 Git pathspec 语义；`reset_changes` 支持 deleteNew；`commit` 支持 `amend`；`apply_diff_patch` 支持 `cached` 与 `reverse`（Hunk 暂存/取消暂存/丢弃） |
 | 前端 → 后端 | `create_branch` / `checkout_branch` / `checkout_remote_branch` / `rename_branch` / `delete_branch` / `delete_branches` / `delete_remote_branch` / `get_merged_branches` / `merge_branch` | 远程检出自动创建跟踪分支；批量删除与远程删除需确认；`merge_branch` 支持 `default` / `no-ff` / `ff-only` / `squash` |
-| 前端 → 后端 | `fetch` / `pull` / `push` / `remote_list` / `remote_add` / `remote_set_url` / `remote_rename` / `remote_remove` | `fetch` 支持 `remote` / `prune`；`pull` 支持 `mode`（`merge`/`rebase`/`ff-only`）与 `autostash`；`push` 支持 `forceWithLease` 与 `pushTags` |
+| 前端 → 后端 | `fetch` / `pull` / `push` / `remote_list` / `remote_add` / `remote_set_url` / `remote_rename` / `remote_remove` | `fetch` 支持 `remote` / `prune`；`pull` 支持 `mode`、`autostash`、`remote` / `branch`、`fetchOnly`、`prune`、`tagsMode`；`push` 支持 `forceWithLease`、`force`、`pushTags`、`recurseSubmodules` |
+| 前端 → 后端 | `list_patch_directory` / `apply_patch_file` / `apply_patch_directory` / `get_patch_apply_state` / `continue_patch` / `skip_patch` / `abort_patch` | 文件按内容自动选 `git apply` / `git am`；目录按文件名顺序；返回输出与退出码；am 冲突映射为 `applyPatch` 操作状态 |
 | 前端 → 后端 | `worktree_list` / `worktree_add` / `worktree_remove` / `worktree_lock` / `worktree_prune` | 管理 linked worktree，写操作均走 CLI 并受仓库写互斥保护 |
 | 前端 → 后端 | `search_commits` / `git_grep` / `format_patch` / `archive_commit` / `bisect_start` / `bisect_mark` / `bisect_reset` / `get_command_log` / `clear_command_log` | 提交搜索支持 message/author/path/allRefs；`git_grep` 支持 revision 与大小写；导出补丁/归档经 `dialog:allow-save` 选择目标路径；命令日志返回耗时、退出码与输出摘要 |
 | 前端 → 后端 | `stash_*` / `cherry_pick` / `revert` / `rebase` / `create_tag` / `delete_tag` / `submodule_update` | 写操作经后台 IPC 与仓库写互斥，仍走 CLI；Push 契约见下一行 |
@@ -181,7 +183,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | 前端 → 后端 | `get_reset_preview` / `reset` / `get_recovery_entries` | target + mode 返回 ResetPreview（branch / headOid / targetOid / fingerprint / 影响）；reset 必须传完整预览，返回 backupRef / previousHead / newHead / output；RecoveryEntry 含 oid / label / time / backupRef |
 | 前端 → 后端 | `stash_apply` / `stash_drop` | 合法 stash@{n} + expectedOid，索引移动或对象变化时拒绝过期选择 |
 | 前端 → 后端 | `get_contained_in` / `tag_list` / `submodule_list` / `worktree_list` / `get_ahead_behind` | 只读；contained-in 的分支 / 标签各限 100 条 |
-| 前端 → 后端 | `blame_file` / `file_log` | blame 可选 oid 指定版本，默认对真实工作区 buffer 计算，未提交行 OID 为零；file_log 经 CLI --follow + NUL 字段协议，FileLogEntry.filePath 为该提交时期路径 |
+| 前端 → 后端 | `blame_file` / `file_log` / `list_head_files` / `get_file_content` | blame 可选 oid 指定版本，默认对真实工作区 buffer 计算，未提交行 OID 为零；file_log 经 CLI --follow + NUL 字段协议，FileLogEntry.filePath 为该提交时期路径；list_head_files 只列 HEAD 已提交文件；get_file_content 读取指定 revision 内容（2 MiB 截断） |
 
 **数据 / 单位约定**：时间戳为 Unix 秒，前端 `formatDate` 转本地时间；文件路径用 git 输出的 UTF-8 正斜杠形式；serde 结构统一 `rename_all = "camelCase"`；单 patch 512 KiB / 一次全量 patch 总计 4 MiB，单文件内容超过 8 MiB 则生成 patch 前跳过；超限置 truncated，不伪装 binary。
 
@@ -200,6 +202,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 - Linux / macOS 用 `sh test.sh`；三平台 CI 矩阵在 `.github/workflows/build-and-test.yml`。
 - 大仓库性能测量：`cd src-tauri && cargo run --release --example bench -- <仓库路径> 3`；测量沿用正式同步读实现；输出首批 / 全日志、全量 diff、文件清单 / 首文件 patch 与两类选中链路 P95（不含 IPC / WebView 绘制）。历史基线见 `docs/03-性能与平台验证.md`。
 - 文档机械体检：`sh check-docs.sh`。
+- 资源管理器菜单图标：`powershell -File scripts/generate-menu-icons.ps1` 重新生成 `src-tauri/icons/menu/*.ico`（由 `include_bytes!` 内嵌，运行时物化到 `%LOCALAPPDATA%`）。
 
 ---
 
@@ -224,6 +227,8 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 - **Stash 选择不是稳定索引**：应用 / 弹出 / 删除必须校验 expectedOid，stash@{n} 变动后拒绝旧预览；不能只凭索引误操作另一条。
 - **文件历史路径属于对应提交**：--follow 的 rename 状态用 NUL 分隔解析，不用作者 / subject 可包含的文本哨兵；返回 filePath，查看历史 diff 使用该时期路径并从清单取得 oldPath。
 - **图标资源必须跨平台齐全**：即使 bundle 未显式引用，`generate_context!` 在非 Windows 构建也需要 PNG；`icons/` 同时保留 ICO / PNG / ICNS，并在 bundle 配置中引用。
+- **窗口启动请求必须可重复读取**：`get_window_bootstrap` 不能 `mem::take` 初始请求，否则 WebView 刷新（F5 / Ctrl+R / 前端重载）后拿不到动作，窗口停在「无法启动窗口」；`WindowSession` 分离 `initial` 与 `pending`，前端同时在捕获阶段拦截 F5 / Ctrl+R。轻量窗口隐藏创建，若前端页面加载失败会永远不显示，`show_after_timeout` 3 秒兜底 show，至少让用户看到错误页并可关闭。
 - **前端交互取舍见分册**：顶部栏 / 页签拖拽 / 分组 / 启动恢复 / 草稿隔离 / 设置白名单 / 高亮限量 / 读取去重等 UI 规则见 [`arch/ui.md §5`](./arch/ui.md)；窗口生命周期与 capabilities 仍以本节和后端代码为准。
+- **Explorer 文件/目录动作不同**：Commit/Pull/Push/Stash/View changes/Checkout 只在目录上下文，Difftool/File history/Apply patch 只在文件上下文，Rename 只在具体文件 / 目录（不进目录背景）；注册表菜单无法判断目录是否为有效 Git 仓库。**Windows 的 16 项上限作用于整棵级联菜单（Git Extensions 子菜单 + Others 及其子项合计），不是每层 16 项**；超出部分被系统静默丢弃。`validate_levels` 按目录 / 文件上下文分别统计并阻止保存，不自动迁移命令；一级项用 `GitExt.Top.*` 键紧跟 Git Extensions；二级分组为 Repository & sync / Branches & Repos / Files & history / Settings，Create new repository 与 Open repository 归在 Branches & Repos。成功同步后会清理 `GitExt.*` 命名空间里带所有权标记但不在 known 计划中的遗留键（旧开发版分组顺序会留下 `30.03.reset-file-changes` 之类重复项，既重复显示又占用 16 项容量）。Add files 的 Filter 是唯一按 Git pathspec 展开的写入口；`git stash push -u` 不能带 `--literal-pathspecs`，否则未跟踪文件不会被 stash。
 - **打包产物只导本次构建**：NSIS / MSI 每次构建都会内嵌时间戳，大小与 SHA256 都会变，不能靠「文件已存在 + 版本号」判断新包。`package.bat` 先 `snapshot` 记录 bundle 内安装包的 size / mtime / birthtime，构建后 `collect` 只导出指纹变化且版本匹配的产物，否则报错而不是发布旧包。`dist/release/` 整目录重建（旧产物清理），unpack 直接取 `target/release` 的 exe（写入 bundle 信息后仍可独立运行），zip 用 `Compress-Archive` 以应用根为根目录并回读校验。
 - **前端产物与发布产物目录分离**：vite `build.outDir` 设为 `.runtime/dist`，`tauri.conf.json` 的 `frontendDist` 指向 `../.runtime/dist`；项目根 `dist/release/` 只放打包成品。若前端仍输出到 `dist/`，`vite build` 会清空整个目录，把安装包、便携 zip 和 unpack 一起删掉。`clean.bat` 因此保留 `dist/release/`，只清 `.runtime/dist`、打包临时状态与 `src-tauri/target`。

@@ -379,7 +379,11 @@ pub fn git_grep(
         if rev.starts_with('-') {
             return Err(GitError::InvalidInput("invalid revision".into()));
         }
-        let oid = repo.revparse_single(rev)?.peel_to_commit()?.id().to_string();
+        let oid = repo
+            .revparse_single(rev)?
+            .peel_to_commit()?
+            .id()
+            .to_string();
         args.push(oid);
     }
     let mut cmd = std::process::Command::new("git");
@@ -420,7 +424,11 @@ pub fn git_grep(
         else {
             continue;
         };
-        if revision.as_deref().map(str::trim).is_some_and(|s| !s.is_empty()) {
+        if revision
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|s| !s.is_empty())
+        {
             if let Some((_, rest)) = file_part.split_once(':') {
                 file_part = rest;
             }
@@ -436,4 +444,3 @@ pub fn git_grep(
     }
     Ok(matches)
 }
-

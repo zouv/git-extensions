@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { AppSettings } from "../settings";
 import type { ExplorerAction, ExplorerMenuPlacement } from "../types";
 import {
-  EXPLORER_MENU_ACTIONS, explorerMenuPreview, nextExplorerMenuPlacement,
+  EXPLORER_MENU_ACTIONS, EXPLORER_MENU_GROUPS, explorerMenuLevelCounts, explorerMenuPreview,
+  MAX_MENU_LEVEL_ITEMS,
 } from "../explorerMenu";
 import Dialog from "../ui/Dialog";
 import { useDirtyClose } from "../ui/useDirtyClose";
@@ -11,29 +12,13 @@ import { SHORTCUT_HELP } from "../commands";
 interface Props {
   settings: AppSettings;
   onSave: (settings: AppSettings) => Promise<void>;
+  /** 应用但不关闭设置面板；App 会更新 settings，面板据此重新计算 dirty。 */
+  onApply: (settings: AppSettings) => Promise<void>;
   onClose: () => void;
   explorerIntegrationSupported: boolean;
 }
 
 type Category = "general" | "interface" | "system" | "shortcuts";
-
-function PlacementCheckbox({ action, placement, disabled, onChange }: {
-  action: ExplorerAction;
-  placement: ExplorerMenuPlacement;
-  disabled: boolean;
-  onChange: (action: ExplorerAction, placement: ExplorerMenuPlacement) => void;
-}) {
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => { if (ref.current) ref.current.indeterminate = placement === "cascade"; }, [placement]);
-  return <input
-    ref={ref}
-    type="checkbox"
-    checked={placement === "top"}
-    aria-checked={placement === "cascade" ? "mixed" : placement === "top"}
-    disabled={disabled}
-    onChange={() => onChange(action, nextExplorerMenuPlacement(placement))}
-  />;
-}
 
 const CATEGORIES: { id: Category; label: string }[] = [
   { id: "general", label: "常规" },
@@ -42,16 +27,18 @@ const CATEGORIES: { id: Category; label: string }[] = [
   { id: "shortcuts", label: "快捷键" },
 ];
 
-export default function SettingsDialog({ settings, onSave, onClose, explorerIntegrationSupported }: Props) {
+export default function SettingsDialog({ settings, onSave, onApply, onClose, explorerIntegrationSupported }: Props) {
   const [draft, setDraft] = useState<AppSettings>({
     ...settings,
     explorerContextMenuPlacements: { ...settings.explorerContextMenuPlacements },
   });
   const [category, setCategory] = useState<Category>("general");
   const [saving, setSaving] = useState(false);
+  const [applied, setApplied] = useState(false);
   const [saveError, setSaveError] = useState("");
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setDraft((prev) => ({ ...prev, [key]: value }));
+    setApplied(false);
     setSaveError("");
   };
   const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
@@ -61,15 +48,25 @@ export default function SettingsDialog({ settings, onSave, onClose, explorerInte
       ...prev,
       explorerContextMenuPlacements: { ...prev.explorerContextMenuPlacements, [action]: placement },
     }));
+    setApplied(false);
     setSaveError("");
   };
   const preview = explorerMenuPreview(draft.explorerContextMenuPlacements, draft.explorerAlwaysShowAllCommands);
-  const save = async () => {
+  const levels = explorerMenuLevelCounts(draft.explorerContextMenuPlacements, draft.explorerAlwaysShowAllCommands);
+  const hasLevelIssue = !draft.explorerAlwaysShowAllCommands && levels.issues.length > 0;
+  // 关闭菜单时应允许保存超限配置；只有启用时才阻止注册。
+  const levelIssue = draft.explorerContextMenuEnabled && hasLevelIssue;
+  const applyOrSave = async (mode: "apply" | "save") => {
     if (saving) return;
+    if (levelIssue) {
+      setSaveError(`菜单层级超出限制：${levels.issues.join("；")}`);
+      return;
+    }
     setSaving(true);
     setSaveError("");
     try {
-      await onSave(draft);
+      await (mode === "apply" ? onApply(draft) : onSave(draft));
+      if (mode === "apply") setApplied(true);
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -77,11 +74,24 @@ export default function SettingsDialog({ settings, onSave, onClose, explorerInte
     }
   };
 
-  return <Dialog title="设置" wide className="settings-dialog" onClose={requestClose} busy={saving} footer={<>
+  return <Dialog
+    title="设置"
+    wide
+    className="settings-dialog"
+    onClose={requestClose}
+    busy={saving}
+    resizable
+    sizeKey="settings"
+    minWidth={720}
+    minHeight={480}
+    closeOnBackdrop={false}
+    footer={<>
     {saveError && <div className="settings-error" role="alert">保存失败：{saveError}</div>}
+    {applied && !dirty && <div className="settings-applied" role="status">设置已应用</div>}
     <div className="settings-footer-actions">
       <button type="button" disabled={saving} onClick={requestClose}>取消</button>
-      <button type="button" className="primary" disabled={saving} onClick={() => void save()}>{saving ? "保存中…" : "保存"}</button>
+      <button type="button" disabled={saving || levelIssue || !dirty} title={levelIssue ? "请先调整菜单层级到限制以内" : undefined} onClick={() => void applyOrSave("apply")}>{saving ? "处理中…" : "应用"}</button>
+      <button type="button" className="primary" disabled={saving || levelIssue} title={levelIssue ? "请先调整菜单层级到限制以内" : undefined} onClick={() => void applyOrSave("save")}>{saving ? "保存中…" : "保存"}</button>
     </div>
   </>}>
     <div className="settings-layout">
@@ -131,24 +141,69 @@ export default function SettingsDialog({ settings, onSave, onClose, explorerInte
             <legend>Cascaded context menu</legend>
             <label className="shell-always-row"><input type="checkbox" checked={draft.explorerAlwaysShowAllCommands} onChange={(e) => update("explorerAlwaysShowAllCommands", e.target.checked)} /><span>始终显示全部命令</span></label>
             <div className="settings-note">勾选后，未隐藏的命令全部展开到顶级，不再放入 Git Extensions 二级菜单。</div>
+            <div className="shell-level-counts">
+              <span>一级 {levels.level1} 项（系统菜单）</span>
+              <span>二级 {levels.level2} 项（含 Others）</span>
+              <span>三级 {levels.level3} 项</span>
+              <span>级联合计：目录 {levels.directoryTotal} / 文件 {levels.fileTotal} 项（上限 {MAX_MENU_LEVEL_ITEMS}）</span>
+              {draft.explorerAlwaysShowAllCommands && <span>已启用“始终显示全部命令”，层级设置不生效</span>}
+            </div>
+            {hasLevelIssue && <div className="shell-level-warning" role="alert">
+              {levels.issues.map((issue) => <div key={issue}>⚠ {issue}。</div>)}
+              {!draft.explorerContextMenuEnabled && <div>当前菜单未启用，可先保存；启用前需调整到上限以内。</div>}
+            </div>}
             <div className="shell-command-columns">
               <div className="shell-command-list" role="group" aria-label="资源管理器命令">
-                {EXPLORER_MENU_ACTIONS.map((spec) => <label className="shell-command-row" key={spec.action}>
-                  <PlacementCheckbox action={spec.action} placement={draft.explorerContextMenuPlacements[spec.action]} disabled={saving || !explorerIntegrationSupported} onChange={updatePlacement} />
-                  <span>{spec.label}</span>
-                </label>)}
+                {EXPLORER_MENU_GROUPS.map((group) => <div className="shell-command-group" key={group.id}>
+                  <div className="shell-command-group-label">{group.label}</div>
+                  {EXPLORER_MENU_ACTIONS.filter((spec) => spec.group === group.id).map((spec) => <div className="shell-command-row" key={spec.action}>
+                    <span className="shell-command-label">{spec.label}</span>
+                    <select
+                      className="shell-level-select"
+                      aria-label={`${spec.label} 菜单位置`}
+                      disabled={saving || !explorerIntegrationSupported}
+                      value={draft.explorerContextMenuPlacements[spec.action]}
+                      onChange={(e) => updatePlacement(spec.action, e.target.value as ExplorerMenuPlacement)}
+                    >
+                      <option value="top">一级</option>
+                      <option value="cascade">二级</option>
+                      <option value="others">三级（Others）</option>
+                      <option value="hidden">隐藏</option>
+                    </select>
+                  </div>)}
+                </div>)}
               </div>
               <div className="shell-menu-preview" aria-label="Context menu preview">
                 <h5>Context menu preview</h5>
                 {!draft.explorerContextMenuEnabled && <div className="settings-note">当前未启用，以下为保存并启用后的预览。</div>}
-                {preview.topLevel.map((spec) => <div key={spec.action}>GitExt {spec.label}</div>)}
-                {preview.cascade.length > 0 && <div>Git Extensions &gt;
-                  <div className="shell-menu-preview-children">{preview.cascade.map((spec) => <div key={spec.action}>{spec.label}</div>)}</div>
+                {(preview.groups.length > 0 || preview.otherGroups.length > 0) && <div>Git Extensions &gt;
+                  <div className="shell-menu-preview-children">
+                    {preview.groups.map((group, groupIndex) => <div key={group.id}>
+                      {groupIndex > 0 && <div className="shell-menu-preview-separator" />}
+                      {group.items.map((spec) => <div key={spec.action}>{spec.label}</div>)}
+                    </div>)}
+                    {preview.otherGroups.length > 0 && <div>
+                      <div className="shell-menu-preview-separator" />
+                      <div>Others &gt;
+                        <div className="shell-menu-preview-children">
+                          {preview.otherGroups.map((group, groupIndex) => <div key={group.id}>
+                            {groupIndex > 0 && <div className="shell-menu-preview-separator" />}
+                            {group.items.map((spec) => <div key={spec.action}>{spec.label}</div>)}
+                          </div>)}
+                        </div>
+                      </div>
+                    </div>}
+                  </div>
                 </div>}
-                {preview.topLevel.length === 0 && preview.cascade.length === 0 && <div className="settings-note">（无菜单项）</div>}
+                {preview.topLevel.length > 0 && <>
+                  <div className="shell-menu-preview-separator" />
+                  <div className="settings-note">一级（紧贴 Git Extensions 下方，按设置顺序）</div>
+                  {preview.topLevel.map((spec) => <div key={spec.action}>GitExt {spec.label}</div>)}
+                </>}
+                {preview.topLevel.length === 0 && preview.groups.length === 0 && preview.otherGroups.length === 0 && <div className="settings-note">（无菜单项）</div>}
               </div>
             </div>
-            <div className="settings-note">三态复选框：勾选 = 顶级显示；半选 = 二级菜单；不勾选 = 不显示。便携版移动程序位置后，请重新启用菜单。</div>
+            <div className="settings-note">菜单位置：一级 = 系统右键菜单（紧贴 Git Extensions 下方）；二级 = Git Extensions 子菜单；三级 = Others 子菜单；隐藏 = 不显示。Windows 对整棵级联菜单（Git Extensions 子菜单 + Others 子菜单）合计最多渲染 16 个命令，超出部分会被系统静默丢弃；设置页按目录 / 文件上下文分别提示，不会自动移动其它命令。一级是系统右键菜单，不受此限制。便携版移动程序位置后，请重新启用菜单。</div>
           </fieldset>
           {!explorerIntegrationSupported && <div className="settings-note" role="status">当前操作系统不支持资源管理器右键菜单集成。</div>}
         </>}

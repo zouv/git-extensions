@@ -85,7 +85,12 @@ test("全部正式写 API 都经过共享调度", async () => {
     ["saveResolvedFile", [path, "a", "resolved"]], ["continueOperation", [path]], ["abortOperation", [path]],
     ["discardFiles", [path, ["a"]]], ["deleteUntrackedFiles", [path, ["a"]]], ["startInteractiveRebase", [path, { branch: "refs/heads/main", entries: [] }]],
     ["cloneRepository", [path, "https://example.com/repo.git"]], ["createRepository", [path]],
+    ["cloneRepositoryWithProgress", [path, "https://example.com/repo.git", "clone-op"]],
+    ["addFiles", [path, "*.txt", false]], ["resetChanges", [path, ["a"], false]],
     ["checkoutRevision", [path, "abc"]], ["applyPatch", [path, "change.patch", "patch-oid"]],
+    ["applyPatchFile", [path, "C:\\change.patch", false, false]],
+    ["applyPatchDirectory", [path, "C:\\patches", false, false]],
+    ["continuePatch", [path]], ["skipPatch", [path]], ["abortPatch", [path]],
     ["commitFixup", [path, "abc", false]], ["applyDiffPatch", [path, "diff", true, false]],
     ["checkoutRemoteBranch", [path, "origin/main", "main"]], ["renameBranch", [path, "old", "new"]],
     ["deleteBranches", [path, ["a", "b"], false]], ["deleteRemoteBranch", [path, "origin/feat"]],
@@ -122,13 +127,26 @@ test("新增资源管理器能力完整传递 IPC 命令与参数", async () => 
     [() => api.getExplorerIntegrationInfo(), "get_explorer_integration_info", {}],
     [() => api.setExplorerContextMenuEnabled(true, [{ action: "pull", placement: "top" }], true), "set_explorer_context_menu_enabled", { enabled: true, items: [{ action: "pull", placement: "top" }], alwaysShowAllCommands: true }],
     [() => api.cloneRepository("C:\\parent\\repo", "https://example.com/repo.git"), "clone_repository", { path: "C:\\parent\\repo", url: "https://example.com/repo.git" }],
-    [() => api.createRepository("C:\\repo"), "create_repository", { path: "C:\\repo" }],
+    [() => api.cloneRepositoryWithProgress("C:\\parent\\repo", "https://example.com/repo.git", "clone-op"), "clone_repository_with_progress", { path: "C:\\parent\\repo", url: "https://example.com/repo.git", operationId: "clone-op" }],
+    [() => api.createRepository("C:\\repo"), "create_repository", { path: "C:\\repo", bare: false }],
+    [() => api.previewAddFiles("C:\\repo", "*.txt", true), "preview_add_files", { path: "C:\\repo", filter: "*.txt", force: true }],
+    [() => api.addFiles("C:\\repo", "*.txt", true), "add_files", { path: "C:\\repo", filter: "*.txt", force: true }],
+    [() => api.resetChanges("C:\\repo", ["a"], true), "reset_changes", { path: "C:\\repo", paths: ["a"], deleteNew: true }],
     [() => api.resolveRevision("C:\\repo", "HEAD~1"), "resolve_revision", { path: "C:\\repo", revision: "HEAD~1" }],
-    [() => api.checkoutRevision("C:\\repo", "abc"), "checkout_revision", { path: "C:\\repo", oid: "abc" }],
+    [() => api.checkoutRevision("C:\\repo", "abc", true), "checkout_revision", { path: "C:\\repo", oid: "abc", force: true }],
     [() => api.openDifftool("C:\\repo", "dir/a.txt", true), "open_difftool", { path: "C:\\repo", file: "dir/a.txt", staged: true }],
     [() => api.listTrackedFiles("C:\\repo"), "list_tracked_files", { path: "C:\\repo" }],
+    [() => api.listHeadFiles("C:\\repo"), "list_head_files", { path: "C:\\repo" }],
     [() => api.previewPatch("C:\\repo", "C:\\change.patch"), "preview_patch", { path: "C:\\repo", patchPath: "C:\\change.patch" }],
     [() => api.applyPatch("C:\\repo", "C:\\change.patch", "patch-oid"), "apply_patch", { path: "C:\\repo", patchPath: "C:\\change.patch", expectedPatchOid: "patch-oid" }],
+    [() => api.listPatchDirectory("C:\\repo", "C:\\patches"), "list_patch_directory", { path: "C:\\repo", directory: "C:\\patches" }],
+    [() => api.applyPatchFile("C:\\repo", "C:\\change.patch", true, false), "apply_patch_file", { path: "C:\\repo", patchPath: "C:\\change.patch", ignoreWhitespace: true, signOff: false }],
+    [() => api.applyPatchDirectory("C:\\repo", "C:\\patches", false, true), "apply_patch_directory", { path: "C:\\repo", directory: "C:\\patches", ignoreWhitespace: false, signOff: true }],
+    [() => api.getPatchApplyState("C:\\repo"), "get_patch_apply_state", { path: "C:\\repo" }],
+    [() => api.getFileContent("C:\\repo", "a.txt", "abc"), "get_file_content", { path: "C:\\repo", file: "a.txt", oid: "abc" }],
+    [() => api.continuePatch("C:\\repo"), "continue_patch", { path: "C:\\repo" }],
+    [() => api.skipPatch("C:\\repo"), "skip_patch", { path: "C:\\repo" }],
+    [() => api.abortPatch("C:\\repo"), "abort_patch", { path: "C:\\repo" }],
   ];
   for (const [invokeApi, command, args] of cases) {
     const before = received.length;
@@ -145,7 +163,7 @@ test("只读 API 不占写状态，Rebase 与 Push 预览完整传递", async ()
   assert.deepEqual(received.at(-1), ["start_interactive_rebase", { path: "repo-read", plan }]);
   const preview = { branchRef: "refs/heads/main", headOid: "old" };
   await api.push("repo-read", "chosen", "target", preview);
-  assert.deepEqual(received.at(-1), ["push", { path: "repo-read", remote: "chosen", branch: "target", expectedHead: "old", expectedBranch: "refs/heads/main", forceWithLease: false, pushTags: false }]);
+  assert.deepEqual(received.at(-1), ["push", { path: "repo-read", remote: "chosen", branch: "target", expectedHead: "old", expectedBranch: "refs/heads/main", forceWithLease: false, pushTags: false, force: false, recurseSubmodules: false }]);
 });
 
 

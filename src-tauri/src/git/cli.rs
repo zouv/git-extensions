@@ -97,13 +97,24 @@ pub(crate) fn run_git(repo_path: &str, args: &[String]) -> GitResult<String> {
 }
 
 fn git_command(repo_path: &str, args: &[String], envs: &[(&str, &OsStr)]) -> Command {
+    git_command_mode(repo_path, args, envs, true)
+}
+
+/// 绝大多数写操作都用 `--literal-pathspecs` 禁止 glob；Add files 的 Filter
+/// 是用户显式输入的 Git pathspec，需要按 Git 原生语义展开，因此单独走
+/// `literal_pathspecs = false` 的命令。
+fn git_command_mode(
+    repo_path: &str,
+    args: &[String],
+    envs: &[(&str, &OsStr)],
+    literal_pathspecs: bool,
+) -> Command {
     let mut cmd = Command::new("git");
-    cmd.arg("-C")
-        .arg(repo_path)
-        // 所有用户文件参数都按字面值解释，禁用 glob 和 pathspec magic。
-        .arg("--literal-pathspecs")
-        .args(args)
-        .envs(envs.iter().copied());
+    cmd.arg("-C").arg(repo_path);
+    if literal_pathspecs {
+        cmd.arg("--literal-pathspecs");
+    }
+    cmd.args(args).envs(envs.iter().copied());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -132,6 +143,20 @@ fn git_output(output: std::process::Output) -> GitResult<String> {
     }
 }
 
+fn run_git_mode(repo_path: &str, args: &[String], literal_pathspecs: bool) -> GitResult<String> {
+    let started = Instant::now();
+    let output = git_command_mode(repo_path, args, &[], literal_pathspecs)
+        .stdin(Stdio::null())
+        .output()?;
+    record_command_log(
+        repo_path,
+        args,
+        started.elapsed().as_millis() as u64,
+        &output,
+    );
+    git_output(output)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandOutput {
@@ -154,6 +179,30 @@ fn capture_git(repo_path: &str, args: &[String]) -> GitResult<CommandOutput> {
     if !output.status.success() {
         return Err(GitError::Cli(command_failure_details(&output)));
     }
+    Ok(CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        exit_code: output.status.code(),
+    })
+}
+
+/// 保留退出码和输出的捕获入口；Add files 的 Show/Add 需要把 Git 的原始
+/// 结果展示给用户，而不是在非 0 时直接变成异常。
+fn capture_git_output(
+    repo_path: &str,
+    args: &[String],
+    literal_pathspecs: bool,
+) -> GitResult<CommandOutput> {
+    let started = Instant::now();
+    let output = git_command_mode(repo_path, args, &[], literal_pathspecs)
+        .stdin(Stdio::null())
+        .output()?;
+    record_command_log(
+        repo_path,
+        args,
+        started.elapsed().as_millis() as u64,
+        &output,
+    );
     Ok(CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -219,6 +268,98 @@ pub(crate) fn run_git_with_stdin(
     git_output(output)
 }
 
+/// Git progress uses `\r` to rewrite the same line; split on both `\r` and `\n`
+/// and forward each non-empty line while still collecting the raw stderr for
+/// error reporting.
+fn read_git_progress(
+    mut reader: impl Read,
+    progress: &mut dyn FnMut(&str),
+) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    let mut line = Vec::new();
+    let mut buffer = [0u8; 4096];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+        for &byte in &buffer[..read] {
+            if byte == b'\r' || byte == b'\n' {
+                let text = String::from_utf8_lossy(&line);
+                let text = text.trim();
+                if !text.is_empty() {
+                    progress(text);
+                }
+                line.clear();
+            } else {
+                line.push(byte);
+                if line.len() >= 4096 {
+                    let text = String::from_utf8_lossy(&line);
+                    let text = text.trim();
+                    if !text.is_empty() {
+                        progress(text);
+                    }
+                    line.clear();
+                }
+            }
+        }
+    }
+    let text = String::from_utf8_lossy(&line);
+    let text = text.trim();
+    if !text.is_empty() {
+        progress(text);
+    }
+    Ok(bytes)
+}
+
+/// 与 `run_git_with_env` 语义一致，但把 stderr 的进度行实时交给调用方。
+fn run_git_with_progress<F>(repo_path: &str, args: &[String], mut progress: F) -> GitResult<String>
+where
+    F: FnMut(&str) + Send,
+{
+    let started = Instant::now();
+    let mut child = git_command(repo_path, args, &[])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| GitError::Cli("cannot open git stdout".into()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| GitError::Cli("cannot open git stderr".into()))?;
+    let (stdout_bytes, stderr_bytes, status) = std::thread::scope(|scope| {
+        let stderr_reader = scope.spawn(|| read_git_progress(stderr, &mut progress));
+        let mut stdout_bytes = Vec::new();
+        let stdout_result = stdout.read_to_end(&mut stdout_bytes);
+        let status = child.wait();
+        let stderr_result = stderr_reader.join();
+        (stdout_result.map(|_| stdout_bytes), stderr_result, status)
+    });
+    let stdout_bytes = stdout_bytes?;
+    let status = status?;
+    let stderr_bytes = match stderr_bytes {
+        Ok(result) => result?,
+        Err(_) => return Err(GitError::Cli("git progress reader failed".into())),
+    };
+    let output = std::process::Output {
+        status,
+        stdout: stdout_bytes,
+        stderr: stderr_bytes,
+    };
+    record_command_log(
+        repo_path,
+        args,
+        started.elapsed().as_millis() as u64,
+        &output,
+    );
+    git_output(output)
+}
+
 /// 分支/标签名与 revision 是不同类型的输入，不能直接当 CLI 选项拼接。
 fn validate_ref_name(name: &str, namespace: &str) -> GitResult<()> {
     if name.trim() != name
@@ -243,6 +384,49 @@ fn commit_argument(repo: &git2::Repository, value: &str) -> GitResult<String> {
         .peel_to_commit()?
         .id()
         .to_string())
+}
+
+const MAX_FILE_CONTENT_BYTES: usize = 2 * 1024 * 1024;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileContent {
+    pub content: String,
+    pub binary: bool,
+    pub truncated: bool,
+    pub size: u64,
+}
+
+/// 文件历史 View 页签：读取指定 revision 的文件内容（默认 HEAD）。
+pub fn get_file_content(path: String, file: String, oid: Option<String>) -> GitResult<FileContent> {
+    let repo = open(&path)?;
+    let relative = validate_relative_path(&file)?;
+    let tree = match oid {
+        Some(oid) => {
+            let oid = commit_argument(&repo, &oid)?;
+            repo.find_commit(git2::Oid::from_str(&oid)?)?.tree()?
+        }
+        None => repo.head()?.peel_to_tree()?,
+    };
+    let entry = tree
+        .get_path(Path::new(&relative))
+        .map_err(|_| GitError::InvalidInput(format!("file not found at revision: {file}")))?;
+    let blob = repo.find_blob(entry.id())?;
+    let bytes = blob.content();
+    let size = bytes.len() as u64;
+    let truncated = bytes.len() > MAX_FILE_CONTENT_BYTES;
+    let limited = &bytes[..bytes.len().min(MAX_FILE_CONTENT_BYTES)];
+    let binary = limited.contains(&0) || std::str::from_utf8(limited).is_err();
+    Ok(FileContent {
+        content: if binary {
+            String::new()
+        } else {
+            String::from_utf8_lossy(limited).into_owned()
+        },
+        binary,
+        truncated,
+        size,
+    })
 }
 
 struct NewRepositoryTarget {
@@ -308,24 +492,41 @@ fn path_string(path: &Path) -> String {
 }
 
 pub fn clone_repository(path: String, url: String) -> GitResult<String> {
+    clone_repository_with_progress(path, url, |_| {})
+}
+
+pub fn clone_repository_with_progress<F>(
+    path: String,
+    url: String,
+    progress: F,
+) -> GitResult<String>
+where
+    F: FnMut(&str) + Send,
+{
     let _write = acquire_target_write(&path)?;
     if url.trim().is_empty() || url.starts_with('-') || url.contains(['\0', '\n', '\r']) {
         return Err(GitError::InvalidInput("invalid clone URL".into()));
     }
     let target = validate_new_target(&path, true)?;
-    run_git(
+    run_git_with_progress(
         &path_string(&target.parent),
         &[
             "clone".into(),
+            "--progress".into(),
             "--".into(),
             url,
             path_string(&target.target),
         ],
+        progress,
     )?;
     Ok(path_string(&target.target.canonicalize()?))
 }
 
 pub fn create_repository(path: String) -> GitResult<String> {
+    create_repository_ex(path, false)
+}
+
+pub fn create_repository_ex(path: String, bare: bool) -> GitResult<String> {
     let _write = acquire_target_write(&path)?;
     let target = validate_new_target(&path, false)?;
     let discovery_start = if target.target.exists() {
@@ -342,10 +543,16 @@ pub fn create_repository(path: String) -> GitResult<String> {
         Err(error) if error.code() == git2::ErrorCode::NotFound => {}
         Err(error) => return Err(error.into()),
     }
-    run_git(
-        &path_string(&target.parent),
-        &["init".into(), "--".into(), path_string(&target.target)],
-    )?;
+    let mut args = vec!["init".to_string()];
+    if bare {
+        // 与 Git Extensions 的 Central repository 对齐：中心仓库无工作区，
+        // 并允许同机用户共享对象库。
+        args.push("--bare".into());
+        args.push("--shared=all".into());
+    }
+    args.push("--".into());
+    args.push(path_string(&target.target));
+    run_git(&path_string(&target.parent), &args)?;
     Ok(path_string(&target.target.canonicalize()?))
 }
 
@@ -366,16 +573,23 @@ fn full_commit_oid(repo: &git2::Repository, value: &str) -> GitResult<String> {
 }
 
 pub fn checkout_revision(path: String, oid: String) -> GitResult<String> {
+    checkout_revision_ex(path, oid, false)
+}
+
+pub fn checkout_revision_ex(path: String, oid: String, force: bool) -> GitResult<String> {
     let _write = acquire_write(&path)?;
     let repo = open(&path)?;
     let oid = full_commit_oid(&repo, &oid)?;
     let workdir = repo
         .workdir()
         .ok_or_else(|| GitError::InvalidInput("bare repository has no worktree".into()))?;
-    run_git(
-        &path_string(workdir),
-        &["switch".into(), "--detach".into(), "--".into(), oid],
-    )
+    let mut args = vec!["switch".to_string(), "--detach".into()];
+    if force {
+        args.push("--force".into());
+    }
+    args.push("--".into());
+    args.push(oid);
+    run_git(&path_string(workdir), &args)
 }
 
 pub fn open_difftool(path: String, file: String, staged: bool) -> GitResult<String> {
@@ -489,6 +703,280 @@ pub fn apply_patch(
     }
     check_patch(&repo_path, &bytes)?;
     run_git_with_stdin(&repo_path, &["apply".into(), "-".into()], &bytes)
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchFileInfo {
+    pub path: String,
+    pub name: String,
+    pub subject: String,
+    pub author: String,
+    pub date: String,
+    pub mailbox: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchApplyState {
+    pub in_progress: bool,
+    pub conflicts: Vec<String>,
+}
+
+fn validate_patch_path(patch_path: &str) -> GitResult<PathBuf> {
+    let bytes = read_patch_file(patch_path)?;
+    let _ = bytes;
+    Ok(PathBuf::from(patch_path))
+}
+
+fn patch_file_metadata(path: &Path) -> GitResult<PatchFileInfo> {
+    let bytes = read_patch_file(&path.to_string_lossy())?;
+    let text = String::from_utf8_lossy(&bytes);
+    let mut subject = String::new();
+    let mut author = String::new();
+    let mut date = String::new();
+    let mut saw_from_line = false;
+    let mut saw_subject = false;
+    for line in text.lines().take(80) {
+        if line.starts_with("From ") || line.starts_with("From:") {
+            saw_from_line = true;
+            author = line.trim_start_matches("From:").trim().to_string();
+        } else if let Some(value) = line.strip_prefix("Subject:") {
+            saw_subject = true;
+            subject = value.trim().to_string();
+        } else if let Some(value) = line.strip_prefix("Date:") {
+            date = value.trim().to_string();
+        } else if line.starts_with("diff --git") || line.starts_with("Index: ") {
+            break;
+        }
+    }
+    let mailbox = saw_from_line && saw_subject;
+    if !mailbox && subject.is_empty() {
+        subject = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+    }
+    Ok(PatchFileInfo {
+        path: path_to_string(path),
+        name: path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        subject,
+        author,
+        date,
+        mailbox,
+    })
+}
+
+fn path_to_string(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+fn patch_files_in_directory(directory: &str) -> GitResult<Vec<PathBuf>> {
+    let directory = Path::new(directory);
+    if !directory.is_absolute() {
+        return Err(GitError::InvalidInput(
+            "patch directory must be an absolute path".into(),
+        ));
+    }
+    if !directory.is_dir() {
+        return Err(GitError::InvalidInput(
+            "patch directory does not exist".into(),
+        ));
+    }
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(directory)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        if name.ends_with(".patch") || name.ends_with(".diff") || name.ends_with(".mbox") {
+            files.push(entry.path());
+        }
+    }
+    files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    Ok(files)
+}
+
+pub fn list_patch_directory(path: String, directory: String) -> GitResult<Vec<PatchFileInfo>> {
+    let _ = open(&path)?;
+    let files = patch_files_in_directory(&directory)?;
+    let mut result = Vec::with_capacity(files.len());
+    for file in files {
+        result.push(patch_file_metadata(&file)?);
+    }
+    Ok(result)
+}
+
+fn patch_apply_args(
+    patch: &Path,
+    mailbox: bool,
+    ignore_whitespace: bool,
+    sign_off: bool,
+) -> Vec<String> {
+    let mut args = if mailbox {
+        vec!["am".to_string()]
+    } else {
+        vec!["apply".to_string()]
+    };
+    if ignore_whitespace {
+        args.push("--ignore-whitespace".into());
+    }
+    if mailbox && sign_off {
+        args.push("--signoff".into());
+    }
+    args.push("--".into());
+    args.push(path_to_string(patch));
+    args
+}
+
+fn detect_mailbox_patch(bytes: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(bytes);
+    let mut saw_from = false;
+    let mut saw_subject = false;
+    for line in text.lines().take(80) {
+        if line.starts_with("From ") || line.starts_with("From:") {
+            saw_from = true;
+        } else if line.starts_with("Subject:") {
+            saw_subject = true;
+        } else if line.starts_with("diff --git") || line.starts_with("Index: ") {
+            break;
+        }
+    }
+    saw_from && saw_subject
+}
+
+fn run_patch_apply_locked(
+    repo_path: &str,
+    patch: &Path,
+    bytes: &[u8],
+    ignore_whitespace: bool,
+    sign_off: bool,
+) -> GitResult<CommandOutput> {
+    let mailbox = detect_mailbox_patch(bytes);
+    let args = patch_apply_args(patch, mailbox, ignore_whitespace, sign_off);
+    capture_git_output(repo_path, &args, true)
+}
+
+pub fn apply_patch_file_ex(
+    path: String,
+    patch_path: String,
+    ignore_whitespace: bool,
+    sign_off: bool,
+) -> GitResult<CommandOutput> {
+    let _write = acquire_write(&path)?;
+    let workdir = repository_workdir(&path)?;
+    let patch = validate_patch_path(&patch_path)?;
+    let bytes = read_patch_file(&patch_path)?;
+    run_patch_apply_locked(&workdir, &patch, &bytes, ignore_whitespace, sign_off)
+}
+
+pub fn apply_patch_directory_ex(
+    path: String,
+    directory: String,
+    ignore_whitespace: bool,
+    sign_off: bool,
+) -> GitResult<CommandOutput> {
+    let _write = acquire_write(&path)?;
+    let workdir = repository_workdir(&path)?;
+    let files = patch_files_in_directory(&directory)?;
+    if files.is_empty() {
+        return Err(GitError::InvalidInput(
+            "patch directory contains no .patch/.diff/.mbox files".into(),
+        ));
+    }
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    let mut exit_code = Some(0);
+    for file in files {
+        let bytes = read_patch_file(&path_to_string(&file))?;
+        stdout.push_str(&format!(
+            "==> {}\n",
+            file.file_name().unwrap_or_default().to_string_lossy()
+        ));
+        let output = run_patch_apply_locked(&workdir, &file, &bytes, ignore_whitespace, sign_off)?;
+        stdout.push_str(&output.stdout);
+        stderr.push_str(&output.stderr);
+        exit_code = output.exit_code;
+        if output.exit_code != Some(0) {
+            break;
+        }
+    }
+    Ok(CommandOutput {
+        stdout,
+        stderr,
+        exit_code,
+    })
+}
+
+pub fn get_patch_apply_state(path: String) -> GitResult<PatchApplyState> {
+    let repo = open(&path)?;
+    let applying = repo.path().join("rebase-apply").join("applying").exists();
+    let in_progress = applying || matches!(repo.state(), RepositoryState::ApplyMailbox);
+    let mut conflicts = Vec::new();
+    if let Ok(index) = repo.index() {
+        if let Ok(iterator) = index.conflicts() {
+            for conflict in iterator.flatten() {
+                for entry in [conflict.ancestor, conflict.our, conflict.their]
+                    .into_iter()
+                    .flatten()
+                {
+                    let path = String::from_utf8_lossy(&entry.path).into_owned();
+                    if !path.is_empty() && !conflicts.contains(&path) {
+                        conflicts.push(path);
+                    }
+                }
+            }
+        }
+    }
+    conflicts.sort();
+    Ok(PatchApplyState {
+        in_progress,
+        conflicts,
+    })
+}
+
+fn continue_patch_args(command: &str) -> Vec<String> {
+    vec!["am".to_string(), command.to_string()]
+}
+
+pub fn continue_patch(path: String) -> GitResult<CommandOutput> {
+    let _write = acquire_write(&path)?;
+    let workdir = repository_workdir(&path)?;
+    let envs = [("GIT_EDITOR", OsStr::new("true"))];
+    let started = Instant::now();
+    let args = continue_patch_args("--continue");
+    let output = git_command_mode(&workdir, &args, &envs, true)
+        .stdin(Stdio::null())
+        .output()?;
+    record_command_log(
+        &workdir,
+        &args,
+        started.elapsed().as_millis() as u64,
+        &output,
+    );
+    Ok(CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        exit_code: output.status.code(),
+    })
+}
+
+pub fn skip_patch(path: String) -> GitResult<CommandOutput> {
+    let _write = acquire_write(&path)?;
+    let workdir = repository_workdir(&path)?;
+    let args = continue_patch_args("--skip");
+    capture_git_output(&workdir, &args, true)
+}
+
+pub fn abort_patch(path: String) -> GitResult<CommandOutput> {
+    let _write = acquire_write(&path)?;
+    let workdir = repository_workdir(&path)?;
+    let args = continue_patch_args("--abort");
+    capture_git_output(&workdir, &args, true)
 }
 
 fn local_branch(repo: &git2::Repository) -> GitResult<String> {
@@ -631,6 +1119,51 @@ fn expand_rename_paths(
     Ok(unique)
 }
 
+fn validate_add_filter(filter: &str) -> GitResult<String> {
+    let filter = filter.trim();
+    if filter.is_empty() || filter.contains(['\0', '\n', '\r']) {
+        return Err(GitError::InvalidInput("invalid add filter".into()));
+    }
+    Ok(filter.to_string())
+}
+
+fn add_files_args(filter: &str, force: bool, dry_run: bool) -> Vec<String> {
+    let mut args = vec!["add".to_string()];
+    if dry_run {
+        args.push("--dry-run".into());
+    }
+    if force {
+        args.push("-f".into());
+    }
+    args.push("--".into());
+    args.push(filter.to_string());
+    args
+}
+
+fn repository_workdir(path: &str) -> GitResult<String> {
+    let repo = open(path)?;
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| GitError::InvalidInput("bare repository has no worktree".into()))?;
+    Ok(path_string(workdir))
+}
+
+/// 预览 `git add` 会添加哪些文件；Filter 按 Git pathspec 语义解释。
+pub fn preview_add_files(path: String, filter: String, force: bool) -> GitResult<CommandOutput> {
+    let filter = validate_add_filter(&filter)?;
+    let workdir = repository_workdir(&path)?;
+    capture_git_output(&workdir, &add_files_args(&filter, force, true), false)
+}
+
+/// 执行 `git add`；Filter 允许目录、文件或通配符，与 Git Extensions 的
+/// Add files 对话框一致。
+pub fn add_files(path: String, filter: String, force: bool) -> GitResult<CommandOutput> {
+    let _write = acquire_write(&path)?;
+    let filter = validate_add_filter(&filter)?;
+    let workdir = repository_workdir(&path)?;
+    capture_git_output(&workdir, &add_files_args(&filter, force, false), false)
+}
+
 pub fn stage_files(path: String, paths: Vec<String>) -> GitResult<String> {
     let write = acquire_write(&path)?;
     stage_files_with_lease(&path, &paths, &write)
@@ -726,30 +1259,120 @@ pub fn apply_diff_patch(
 }
 
 pub fn create_branch(path: String, name: String, start_point: Option<String>) -> GitResult<String> {
+    create_branch_ex(path, name, start_point, false, false)
+}
+
+pub fn create_branch_ex(
+    path: String,
+    name: String,
+    start_point: Option<String>,
+    checkout: bool,
+    orphan: bool,
+) -> GitResult<String> {
     let _write = acquire_write(&path)?;
     validate_ref_name(&name, "heads")?;
+    if orphan {
+        return run_git(&path, &["switch".into(), "--orphan".into(), name]);
+    }
     let repo = open(&path)?;
-    let mut args = vec!["branch".into(), "--".into(), name];
+    let mut args = vec!["branch".into(), "--".into(), name.clone()];
     if let Some(start) = start_point {
         args.push(commit_argument(&repo, &start)?);
     }
-    run_git(&path, &args)
+    let mut output = run_git(&path, &args)?;
+    if checkout {
+        output.push_str(&run_git(
+            &path,
+            &["switch".into(), "--no-guess".into(), "--".into(), name],
+        )?);
+    }
+    Ok(output)
+}
+
+fn stash_before_checkout(path: &str) -> GitResult<bool> {
+    let before = run_git(path, &["stash".into(), "list".into(), "--format=%H".into()])?;
+    run_git_mode(
+        path,
+        &[
+            "stash".into(),
+            "push".into(),
+            "-u".into(),
+            "-m".into(),
+            "git-extensions: auto stash before checkout".into(),
+        ],
+        false,
+    )?;
+    let after = run_git(path, &["stash".into(), "list".into(), "--format=%H".into()])?;
+    Ok(before.lines().next() != after.lines().next())
+}
+
+fn checkout_with_strategy(path: &str, switch_args: &[String], strategy: &str) -> GitResult<String> {
+    match strategy {
+        "" | "default" => run_git(path, switch_args),
+        "stash" => {
+            let stashed = stash_before_checkout(path)?;
+            match run_git(path, switch_args) {
+                Ok(output) => {
+                    let mut result = output;
+                    if stashed {
+                        result.push_str(&run_git(path, &["stash".into(), "pop".into()])?);
+                    }
+                    Ok(result)
+                }
+                Err(error) => {
+                    if stashed {
+                        let _ = run_git(path, &["stash".into(), "pop".into()]);
+                    }
+                    Err(error)
+                }
+            }
+        }
+        "reset" => {
+            let mut forced = Vec::with_capacity(switch_args.len() + 1);
+            if let Some(first) = switch_args.first() {
+                forced.push(first.clone());
+                forced.push("--force".into());
+                forced.extend(switch_args.iter().skip(1).cloned());
+                run_git(path, &forced)
+            } else {
+                Err(GitError::InvalidInput("empty checkout arguments".into()))
+            }
+        }
+        other => Err(GitError::InvalidInput(format!(
+            "unsupported checkout strategy: {other}"
+        ))),
+    }
 }
 
 pub fn checkout_branch(path: String, name: String) -> GitResult<String> {
+    checkout_branch_ex(path, name, None)
+}
+
+pub fn checkout_branch_ex(
+    path: String,
+    name: String,
+    strategy: Option<String>,
+) -> GitResult<String> {
     let _write = acquire_write(&path)?;
     validate_ref_name(&name, "heads")?;
     open(&path)?.find_branch(&name, git2::BranchType::Local)?;
-    run_git(
-        &path,
-        &["switch".into(), "--no-guess".into(), "--".into(), name],
-    )
+    let args = vec!["switch".to_string(), "--no-guess".into(), "--".into(), name];
+    checkout_with_strategy(&path, &args, strategy.as_deref().unwrap_or("default"))
 }
 
 pub fn checkout_remote_branch(
     path: String,
     remote_branch: String,
     local_name: Option<String>,
+) -> GitResult<String> {
+    checkout_remote_branch_ex(path, remote_branch, local_name, None)
+}
+
+pub fn checkout_remote_branch_ex(
+    path: String,
+    remote_branch: String,
+    local_name: Option<String>,
+    strategy: Option<String>,
 ) -> GitResult<String> {
     let _write = acquire_write(&path)?;
     let repo = open(&path)?;
@@ -763,16 +1386,14 @@ pub fn checkout_remote_branch(
         .filter(|s| !s.is_empty())
         .unwrap_or(default_local);
     validate_ref_name(&local, "heads")?;
-    run_git(
-        &path,
-        &[
-            "switch".into(),
-            "-c".into(),
-            local,
-            "--track".into(),
-            format!("refs/remotes/{remote_branch}"),
-        ],
-    )
+    let args = vec![
+        "switch".into(),
+        "-c".into(),
+        local,
+        "--track".into(),
+        format!("refs/remotes/{remote_branch}"),
+    ];
+    checkout_with_strategy(&path, &args, strategy.as_deref().unwrap_or("default"))
 }
 
 pub fn rename_branch(path: String, old_name: String, new_name: String) -> GitResult<String> {
@@ -782,7 +1403,13 @@ pub fn rename_branch(path: String, old_name: String, new_name: String) -> GitRes
     open(&path)?.find_branch(&old_name, git2::BranchType::Local)?;
     run_git(
         &path,
-        &["branch".into(), "-m".into(), "--".into(), old_name, new_name],
+        &[
+            "branch".into(),
+            "-m".into(),
+            "--".into(),
+            old_name,
+            new_name,
+        ],
     )
 }
 
@@ -915,15 +1542,13 @@ pub fn remote_add(path: String, name: String, url: String) -> GitResult<String> 
     let _write = acquire_write(&path)?;
     validate_new_remote_name(&name)?;
     validate_remote_url(&url)?;
-    run_git(&path, &["remote".into(), "add".into(), "--".into(), name, url])
+    run_git(
+        &path,
+        &["remote".into(), "add".into(), "--".into(), name, url],
+    )
 }
 
-pub fn remote_set_url(
-    path: String,
-    name: String,
-    url: String,
-    push: bool,
-) -> GitResult<String> {
+pub fn remote_set_url(path: String, name: String, url: String, push: bool) -> GitResult<String> {
     let _write = acquire_write(&path)?;
     validate_remote(&open(&path)?, &name)?;
     validate_remote_url(&url)?;
@@ -941,14 +1566,23 @@ pub fn remote_rename(path: String, old_name: String, new_name: String) -> GitRes
     validate_new_remote_name(&new_name)?;
     run_git(
         &path,
-        &["remote".into(), "rename".into(), "--".into(), old_name, new_name],
+        &[
+            "remote".into(),
+            "rename".into(),
+            "--".into(),
+            old_name,
+            new_name,
+        ],
     )
 }
 
 pub fn remote_remove(path: String, name: String) -> GitResult<String> {
     let _write = acquire_write(&path)?;
     validate_remote(&open(&path)?, &name)?;
-    run_git(&path, &["remote".into(), "remove".into(), "--".into(), name])
+    run_git(
+        &path,
+        &["remote".into(), "remove".into(), "--".into(), name],
+    )
 }
 
 pub fn fetch(path: String, remote: Option<String>) -> GitResult<String> {
@@ -974,7 +1608,60 @@ pub fn pull(path: String) -> GitResult<String> {
 }
 
 pub fn pull_ex(path: String, mode: Option<String>, autostash: bool) -> GitResult<String> {
+    pull_ex_advanced(path, mode, autostash, None, None, false, false, None)
+}
+
+pub fn pull_ex_advanced(
+    path: String,
+    mode: Option<String>,
+    autostash: bool,
+    remote: Option<String>,
+    branch: Option<String>,
+    fetch_only: bool,
+    prune: bool,
+    tags_mode: Option<String>,
+) -> GitResult<String> {
     let _write = acquire_write(&path)?;
+    let tags_mode = tags_mode.as_deref().unwrap_or("auto");
+    if !matches!(tags_mode, "auto" | "all" | "none") {
+        return Err(GitError::InvalidInput(format!(
+            "unsupported tag mode: {tags_mode}"
+        )));
+    }
+    let remote = remote
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let branch = branch
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if branch.is_some() && remote.is_none() {
+        return Err(GitError::InvalidInput(
+            "a remote branch requires an explicit remote".into(),
+        ));
+    }
+    if let Some(remote) = &remote {
+        validate_remote(&open(&path)?, remote)?;
+    }
+    if let Some(branch) = &branch {
+        if branch.starts_with('-') || branch.contains(['\0', '\n', '\r']) {
+            return Err(GitError::InvalidInput("invalid remote branch".into()));
+        }
+    }
+    if fetch_only {
+        let mut args = vec!["fetch".to_string()];
+        if prune {
+            args.push("--prune".into());
+        }
+        if tags_mode == "all" {
+            args.push("--tags".into());
+        } else if tags_mode == "none" {
+            args.push("--no-tags".into());
+        }
+        if let Some(remote) = remote {
+            args.push(remote);
+        }
+        return run_git(&path, &args);
+    }
     let mut args = vec!["pull".to_string()];
     match mode.as_deref().unwrap_or("default") {
         "default" => {}
@@ -989,6 +1676,20 @@ pub fn pull_ex(path: String, mode: Option<String>, autostash: bool) -> GitResult
     }
     if autostash {
         args.push("--autostash".into());
+    }
+    if prune {
+        args.push("--prune".into());
+    }
+    if tags_mode == "all" {
+        args.push("--tags".into());
+    } else if tags_mode == "none" {
+        args.push("--no-tags".into());
+    }
+    if let Some(remote) = remote {
+        args.push(remote);
+        if let Some(branch) = branch {
+            args.push(branch);
+        }
     }
     run_git(&path, &args)
 }
@@ -1026,6 +1727,35 @@ pub fn push_ex(
     force_with_lease: bool,
     push_tags: bool,
 ) -> GitResult<String> {
+    push_ex_advanced(
+        path,
+        remote,
+        branch,
+        expected_head,
+        expected_branch,
+        force_with_lease,
+        push_tags,
+        false,
+        false,
+    )
+}
+
+pub fn push_ex_advanced(
+    path: String,
+    remote: Option<String>,
+    branch: Option<String>,
+    expected_head: Option<String>,
+    expected_branch: Option<String>,
+    force_with_lease: bool,
+    push_tags: bool,
+    force: bool,
+    recurse_submodules: bool,
+) -> GitResult<String> {
+    if force && force_with_lease {
+        return Err(GitError::InvalidInput(
+            "--force and --force-with-lease are mutually exclusive".into(),
+        ));
+    }
     let _write = acquire_write(&path)?;
     let info = get_push_info(path.clone())?;
     if expected_head
@@ -1040,11 +1770,16 @@ pub fn push_ex(
         ));
     }
     let mut flags = Vec::new();
-    if force_with_lease {
+    if force {
+        flags.push("--force".to_string());
+    } else if force_with_lease {
         flags.push("--force-with-lease".to_string());
     }
     if push_tags {
         flags.push("--tags".to_string());
+    }
+    if recurse_submodules {
+        flags.push("--recurse-submodules=check".to_string());
     }
     match (remote, branch) {
         (None, None) => {
@@ -1112,16 +1847,38 @@ pub fn stash_list(path: String) -> GitResult<Vec<StashInfo>> {
 }
 
 pub fn stash_push(path: String, message: String, include_untracked: bool) -> GitResult<String> {
+    stash_push_ex(path, message, include_untracked, false, Vec::new())
+}
+
+pub fn stash_push_ex(
+    path: String,
+    message: String,
+    include_untracked: bool,
+    keep_index: bool,
+    paths: Vec<String>,
+) -> GitResult<String> {
     let _write = acquire_write(&path)?;
     let mut args = vec!["stash".to_string(), "push".to_string()];
     if include_untracked {
         args.push("-u".to_string());
     }
+    if keep_index {
+        args.push("-k".to_string());
+    }
     if !message.trim().is_empty() {
         args.push("-m".to_string());
         args.push(message);
     }
-    run_git(&path, &args)
+    if !paths.is_empty() {
+        for file in &paths {
+            validate_relative_path(file)?;
+        }
+        args.push("--".into());
+        args.extend(paths.into_iter().map(|file| format!(":(literal){file}")));
+    }
+    // --literal-pathspecs 会让 `git stash -u` 不清理未跟踪文件，因此这条命令
+    // 使用默认 pathspec 模式，并用 `:(literal)` 保护用户路径。
+    run_git_mode(&path, &args, false)
 }
 
 // 限定真实 stash 序号，并用预览 OID 防止列表变化后 apply/drop 错条目。
@@ -1219,6 +1976,196 @@ pub fn discard_files(path: String, paths: Vec<String>) -> GitResult<String> {
     let mut args = vec!["restore".to_string(), "--worktree".to_string()];
     args.extend(paths_args(&paths)?);
     run_git(&path, &args)
+}
+
+fn validate_rename_name(name: &str) -> GitResult<&str> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() || trimmed != name || name.contains('\0') {
+        return Err(GitError::InvalidInput(
+            "new name is empty or has leading/trailing whitespace".into(),
+        ));
+    }
+    if trimmed == "." || trimmed == ".." || trimmed.eq_ignore_ascii_case(".git") {
+        return Err(GitError::InvalidInput(format!(
+            "invalid file name: {trimmed}"
+        )));
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err(GitError::InvalidInput(
+            "new name must be a single file name, not a path".into(),
+        ));
+    }
+    if trimmed.ends_with('.') || trimmed.ends_with(' ') {
+        return Err(GitError::InvalidInput(
+            "Windows does not allow names ending with a dot or space".into(),
+        ));
+    }
+    if trimmed
+        .chars()
+        .any(|character| matches!(character, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
+        || trimmed.chars().any(char::is_control)
+    {
+        return Err(GitError::InvalidInput(format!(
+            "new name contains characters Windows does not allow: {trimmed}"
+        )));
+    }
+    let stem = trimmed
+        .split('.')
+        .next()
+        .unwrap_or(trimmed)
+        .to_ascii_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.as_bytes()[3].is_ascii_digit());
+    if reserved {
+        return Err(GitError::InvalidInput(format!(
+            "new name is reserved on Windows: {trimmed}"
+        )));
+    }
+    Ok(trimmed)
+}
+
+/// 用 `git mv` 重命名工作区中的文件或目录。只接受同一目录下的新名称，
+/// 不跨目录移动；目标已存在、名称非法或路径是仓库根时拒绝执行。
+pub fn rename_path(path: String, relative: String, new_name: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let repo = open(&path)?;
+    if repo.workdir().is_none() {
+        return Err(GitError::InvalidInput(
+            "bare repository has no worktree".into(),
+        ));
+    }
+    let new_name = validate_rename_name(&new_name)?.to_owned();
+    let old_relative = validate_relative_path(&relative)?;
+    if old_relative.components().any(|component| {
+        component
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(".git")
+    }) {
+        return Err(GitError::InvalidInput(
+            "refusing to rename a path inside .git".into(),
+        ));
+    }
+    let old_absolute = resolve_worktree_path(&repo, &relative)?;
+    if !old_absolute.exists() {
+        return Err(GitError::InvalidInput(format!(
+            "path does not exist: {relative}"
+        )));
+    }
+    let parent = old_relative
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty());
+    let new_relative = parent
+        .map(|parent| parent.join(&new_name))
+        .unwrap_or_else(|| std::path::PathBuf::from(&new_name));
+    if new_relative == old_relative {
+        return Err(GitError::InvalidInput("new name is unchanged".into()));
+    }
+    let root = repo
+        .workdir()
+        .ok_or_else(|| GitError::InvalidInput("bare repository has no worktree".into()))?
+        .canonicalize()?;
+    let new_absolute = root.join(&new_relative);
+    if new_absolute.exists() {
+        // Windows 大小写不敏感：仅改大小写时 canonicalize 会得到同一路径。
+        let same_file = new_absolute
+            .canonicalize()
+            .ok()
+            .zip(old_absolute.canonicalize().ok())
+            .is_some_and(|(new_path, old_path)| new_path == old_path);
+        if !same_file {
+            return Err(GitError::InvalidInput(format!(
+                "target already exists: {}",
+                new_relative.to_string_lossy().replace('\\', "/")
+            )));
+        }
+    }
+    let old_arg = old_relative.to_string_lossy().replace('\\', "/");
+    let new_arg = new_relative.to_string_lossy().replace('\\', "/");
+    run_git(
+        &path,
+        &["mv".to_string(), "--".to_string(), old_arg, new_arg.clone()],
+    )?;
+    Ok(new_arg)
+}
+
+/// 重置工作区/暂存区变更（Reset changes 菜单）。paths 为空表示整个仓库；
+/// delete_new 为 true 时同时删除新增（未跟踪）文件。
+pub fn reset_changes(path: String, paths: Vec<String>, delete_new: bool) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let repo = open(&path)?;
+    if paths.is_empty() {
+        let mut output = run_git(&path, &["reset".into(), "--hard".into(), "HEAD".into()])?;
+        if delete_new {
+            output.push_str(&run_git(
+                &path,
+                &["clean".into(), "-f".into(), "-d".into()],
+            )?);
+        }
+        return Ok(output);
+    }
+
+    let mut restore = Vec::new();
+    let mut unstage = Vec::new();
+    let mut delete = Vec::new();
+    for file in paths {
+        let relative = validate_relative_path(&file)?;
+        let status = repo.status_file(&relative)?;
+        if status.contains(git2::Status::CONFLICTED) {
+            return Err(GitError::InvalidInput(format!(
+                "cannot reset conflicted file: {file}"
+            )));
+        }
+        if status.contains(git2::Status::INDEX_NEW) {
+            // 新增文件先取消暂存；用户勾选“同时删除新增文件”时再 clean。
+            unstage.push(file.clone());
+            if delete_new {
+                delete.push(file);
+            }
+        } else if status.contains(git2::Status::WT_NEW) {
+            if delete_new {
+                delete.push(file);
+            }
+        } else {
+            restore.push(file);
+        }
+    }
+
+    let mut output = String::new();
+    if !unstage.is_empty() {
+        let mut args = vec![
+            "reset".to_string(),
+            "-q".to_string(),
+            "HEAD".into(),
+            "--".into(),
+        ];
+        args.extend(unstage);
+        output.push_str(&run_git(&path, &args)?);
+    }
+    if !restore.is_empty() {
+        let mut args = vec![
+            "restore".to_string(),
+            "--source=HEAD".into(),
+            "--staged".into(),
+            "--worktree".into(),
+            "--".into(),
+        ];
+        args.extend(restore);
+        output.push_str(&run_git(&path, &args)?);
+    }
+    if !delete.is_empty() {
+        let mut args = vec![
+            "clean".to_string(),
+            "-f".to_string(),
+            "-d".into(),
+            "--".into(),
+        ];
+        args.extend(delete);
+        output.push_str(&run_git(&path, &args)?);
+    }
+    Ok(output)
 }
 
 /// 只删除 Git 确认过的未跟踪普通文件；目录、ignored 和已跟踪文件一律拒绝。
@@ -1610,7 +2557,11 @@ pub fn worktree_add(
         args.push(branch_name);
         args.push("--".into());
         args.push(path_string(&target.target));
-        if let Some(start) = start_point.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(start) = start_point
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             args.push(commit_argument(&repo, start)?);
         }
     } else if let Some(branch_name) = branch_trimmed {
@@ -1622,7 +2573,11 @@ pub fn worktree_add(
         args.push("--detach".into());
         args.push("--".into());
         args.push(path_string(&target.target));
-        if let Some(start) = start_point.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(start) = start_point
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             args.push(commit_argument(&repo, start)?);
         }
     }
@@ -1657,7 +2612,10 @@ pub fn worktree_lock(path: String, name: String, lock: bool) -> GitResult<String
     let repo = open(&path)?;
     let wt_path = find_linked_worktree_path(&repo, &name)?;
     let action = if lock { "lock" } else { "unlock" };
-    run_git(&path, &["worktree".into(), action.into(), "--".into(), wt_path])
+    run_git(
+        &path,
+        &["worktree".into(), action.into(), "--".into(), wt_path],
+    )
 }
 
 pub fn worktree_prune(path: String) -> GitResult<String> {
@@ -1698,7 +2656,10 @@ pub fn bisect_start(
 ) -> GitResult<String> {
     let _write = acquire_write(&path)?;
     let repo = open(&path)?;
-    if !matches!(repo.state(), RepositoryState::Clean | RepositoryState::Bisect) {
+    if !matches!(
+        repo.state(),
+        RepositoryState::Clean | RepositoryState::Bisect
+    ) {
         return Err(GitError::InvalidInput(
             "finish or abort the current operation before starting bisect".into(),
         ));
@@ -1787,12 +2748,7 @@ pub fn format_patch(path: String, oid: String, output_path: String) -> GitResult
     let out_file = validate_export_file_path(&output_path)?;
     let patch_content = run_git(
         &path,
-        &[
-            "format-patch".into(),
-            "-1".into(),
-            oid,
-            "--stdout".into(),
-        ],
+        &["format-patch".into(), "-1".into(), oid, "--stdout".into()],
     )?;
     std::fs::write(&out_file, patch_content.as_bytes())?;
     Ok(path_string(&out_file))
@@ -1840,4 +2796,3 @@ pub fn archive_commit(
     )?;
     Ok(out_str)
 }
-

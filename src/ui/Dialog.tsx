@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef } from "react";
-import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import Icon from "./Icon";
 import { isTopLayer, popLayer, pushLayer } from "./layerStack";
 import { useConfirm } from "./confirmContext";
 import { addDirtyDialog, removeDirtyDialog } from "../dialogState";
+import { clampDialogSize, loadDialogSize, saveDialogSize } from "./dialogSize";
+import type { DialogSize } from "./dialogSize";
 
 interface Props {
   title: string;
@@ -15,6 +17,13 @@ interface Props {
   /** 有未保存输入时，Esc / 点遮罩 / 关闭按钮先确认，避免静默丢弃草稿。 */
   dirty?: boolean;
   className?: string;
+  /** 允许拖拽四条边和四角调整尺寸；配合 sizeKey 跨会话保存。 */
+  resizable?: boolean;
+  sizeKey?: string;
+  minWidth?: number;
+  minHeight?: number;
+  /** 设置面板等常驻配置界面点击遮罩时不关闭（默认 true）。 */
+  closeOnBackdrop?: boolean;
 }
 
 const FOCUSABLE = [
@@ -25,6 +34,17 @@ const FOCUSABLE = [
   "a[href]",
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
+
+type ResizeDirection = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
+const RESIZE_DIRECTIONS: ResizeDirection[] = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
+const RESIZE_CURSORS: Record<ResizeDirection, string> = {
+  n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize",
+  ne: "nesw-resize", sw: "nesw-resize", nw: "nwse-resize", se: "nwse-resize",
+};
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), Math.max(min, max));
+}
 
 function isUsable(element: HTMLElement): boolean {
   if (element.getAttribute("aria-hidden") === "true") return false;
@@ -45,7 +65,10 @@ function initialTarget(root: HTMLElement): HTMLElement {
 }
 
 /** 应用内弹窗：限制焦点、区分顶层浮层、恢复焦点并阻止忙碌时误关闭。 */
-export default function Dialog({ title, children, footer, onClose, wide = false, busy = false, dirty = false, className = "" }: Props) {
+export default function Dialog({
+  title, children, footer, onClose, wide = false, busy = false, dirty = false, className = "",
+  resizable = false, sizeKey, minWidth = 420, minHeight = 300, closeOnBackdrop = true,
+}: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const confirm = useConfirm();
@@ -55,9 +78,53 @@ export default function Dialog({ title, children, footer, onClose, wide = false,
   const closingRef = useRef(false);
   const layerRef = useRef<symbol | null>(null);
   const dirtyTokenRef = useRef(Symbol("dialog-dirty"));
+  const [size, setSize] = useState<DialogSize | null>(() => {
+    if (!resizable || !sizeKey) return null;
+    const saved = loadDialogSize(sizeKey);
+    return saved ? clampDialogSize(saved, minWidth, minHeight) : null;
+  });
+  const sizeRef = useRef(size);
   busyRef.current = busy;
   dirtyRef.current = dirty;
   onCloseRef.current = onClose;
+  sizeRef.current = size;
+
+  const startResize = useCallback((event: ReactPointerEvent<HTMLDivElement>, direction: ResizeDirection) => {
+    if (event.button !== 0) return;
+    const modal = ref.current;
+    if (!modal) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = modal.getBoundingClientRect();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startWidth = rect.width;
+    const startHeight = rect.height;
+    let latest: DialogSize = sizeRef.current ?? { width: startWidth, height: startHeight };
+    const move = (moveEvent: PointerEvent) => {
+      const width = clamp(
+        startWidth + (direction.includes("e") ? moveEvent.clientX - startX : direction.includes("w") ? startX - moveEvent.clientX : 0),
+        minWidth, window.innerWidth - 24,
+      );
+      const height = clamp(
+        startHeight + (direction.includes("s") ? moveEvent.clientY - startY : direction.includes("n") ? startY - moveEvent.clientY : 0),
+        minHeight, window.innerHeight - 24,
+      );
+      latest = { width: Math.round(width), height: Math.round(height) };
+      setSize(latest);
+    };
+    const stop = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", stop);
+      document.body.classList.remove("dialog-resizing");
+      document.body.style.cursor = "";
+      if (sizeKey) saveDialogSize(sizeKey, latest);
+    };
+    document.body.classList.add("dialog-resizing");
+    document.body.style.cursor = RESIZE_CURSORS[direction];
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", stop);
+  }, [minWidth, minHeight, sizeKey]);
 
   const requestClose = useCallback(async () => {
     if (busyRef.current || closingRef.current) return;
@@ -146,6 +213,7 @@ export default function Dialog({ title, children, footer, onClose, wide = false,
   }, []);
 
   const backdropClose = (event: ReactMouseEvent) => {
+    if (!closeOnBackdrop) return;
     if (event.button !== 0) return;
     const token = layerRef.current;
     if (!token || !isTopLayer(token)) return;
@@ -154,13 +222,33 @@ export default function Dialog({ title, children, footer, onClose, wide = false,
 
   return (
     <div className="modal-backdrop" onMouseDown={backdropClose}>
-      <div className={`modal${wide ? " modal-wide" : ""} ${className}`} ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onMouseDown={(e) => e.stopPropagation()}>
+      <div
+        className={`modal${wide ? " modal-wide" : ""}${resizable ? " modal-resizable" : ""} ${className}`}
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onMouseDown={(e) => e.stopPropagation()}
+        style={size ? {
+          width: size.width,
+          height: size.height,
+          maxWidth: "calc(100vw - 24px)",
+          maxHeight: "calc(100vh - 24px)",
+        } : undefined}
+      >
         <div className="modal-header">
           <h3 id={titleId}>{title}</h3>
           <button className="icon-button" aria-label="关闭" title="关闭 (Esc)" disabled={busy} onClick={() => void requestCloseRef.current()}><Icon name="close" /></button>
         </div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-footer">{footer}</div>}
+        {resizable && RESIZE_DIRECTIONS.map((direction) => <div
+          key={direction}
+          aria-hidden="true"
+          className={`modal-resize modal-resize-${direction}`}
+          onPointerDown={(event) => startResize(event, direction)}
+        />)}
       </div>
     </div>
   );

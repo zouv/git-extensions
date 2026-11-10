@@ -19,6 +19,9 @@ pub enum WindowRole {
 #[derive(Debug)]
 struct WindowSession {
     role: WindowRole,
+    /// 窗口创建时的首个请求。重复读取（例如 WebView 刷新后重新 bootstrap）
+    /// 必须拿到同一份启动参数，不能因为 `mem::take` 变成空列表。
+    initial: Vec<LaunchRequest>,
     pending: Vec<LaunchRequest>,
 }
 
@@ -120,7 +123,8 @@ fn create_main_window(app: &AppHandle, request: Option<LaunchRequest>) -> Result
             MAIN_LABEL.into(),
             WindowSession {
                 role: WindowRole::Main,
-                pending: request.into_iter().collect(),
+                initial: request.into_iter().collect(),
+                pending: Vec::new(),
             },
         );
     }
@@ -139,7 +143,23 @@ fn create_main_window(app: &AppHandle, request: Option<LaunchRequest>) -> Result
         windows.main_label = None;
         return Err(error.to_string());
     }
+    if let Some(window) = app.get_webview_window(MAIN_LABEL) {
+        show_after_timeout(&window);
+    }
     Ok(())
+}
+
+/// 窗口默认隐藏，等前端渲染完成后调用 `show_current_window`。如果页面加载
+/// 失败（例如 dev 前端服务未启动），窗口会永远隐藏、看起来像“没反应”。
+/// 超时后强制显示，至少让用户看到错误页并可以关闭窗口。
+fn show_after_timeout(window: &WebviewWindow) {
+    let window = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        if matches!(window.is_visible(), Ok(false)) {
+            let _ = window.show();
+        }
+    });
 }
 
 fn explorer_window_size(action: ExplorerAction) -> (f64, f64) {
@@ -183,7 +203,8 @@ fn create_explorer_window(app: &AppHandle, request: LaunchRequest) -> Result<(),
             label.clone(),
             WindowSession {
                 role: WindowRole::Explorer,
-                pending: vec![request.clone()],
+                initial: vec![request.clone()],
+                pending: Vec::new(),
             },
         );
     }
@@ -195,6 +216,7 @@ fn create_explorer_window(app: &AppHandle, request: LaunchRequest) -> Result<(),
         ))
         .inner_size(width, height)
         .min_inner_size(min_width, min_height)
+        .resizable(true)
         .decorations(true)
         .visible(false)
         .build();
@@ -202,6 +224,7 @@ fn create_explorer_window(app: &AppHandle, request: LaunchRequest) -> Result<(),
     match built {
         Ok(window) => {
             let _ = window.center();
+            show_after_timeout(&window);
             Ok(())
         }
         Err(error) => {
@@ -223,7 +246,8 @@ pub fn get_window_bootstrap(
         .ok_or_else(|| format!("window {} has no launch session", window.label()))?;
     Ok(WindowBootstrap {
         kind: session.role,
-        requests: std::mem::take(&mut session.pending),
+        // 不 take：刷新或前端重载后再次 bootstrap 仍应拿到同样的初始动作。
+        requests: session.initial.clone(),
     })
 }
 

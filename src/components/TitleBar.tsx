@@ -53,6 +53,7 @@ export default function TitleBar(props: Props) {
   const [dragPin, setDragPin] = useState<string | null>(null);
   const appBtn = useRef<HTMLButtonElement>(null);
   const groupBtn = useRef<HTMLButtonElement>(null);
+  const recentPaths = props.recentRepos.filter((path) => path.trim()).slice(0, 5);
 
   useEffect(() => {
     let disposed = false;
@@ -211,11 +212,11 @@ export default function TitleBar(props: Props) {
           { id: "settings", label: "设置…", icon: "settings", shortcut: "Ctrl+,", onSelect: props.onSettings },
           { id: "sep-app", separator: true },
           { id: "about", label: "关于 Git Extensions…", onSelect: () => setAboutOpen(true) },
-          ...(props.recentRepos.length > 0 ? [
+          ...(recentPaths.length > 0 ? [
             { id: "sep-recent", separator: true },
-            ...props.recentRepos.slice(0, 5).map((path) => ({
+            ...recentPaths.map((path) => ({
               id: `recent-${path}`,
-              label: `最近打开：${path.split(/[\\/]/).pop() ?? path}`,
+              label: `最近打开：${path.split(/[\\/]/).filter(Boolean).pop() ?? path}`,
               title: path,
               icon: "history" as const,
               onSelect: () => props.onOpenRecent(path),

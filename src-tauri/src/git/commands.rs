@@ -1,6 +1,16 @@
 // 异步 IPC 适配层；同步实现仍供集成测试调用，互斥由实现层保证。
 use super::{cli, operations::run_blocking, rebase};
 use crate::error::GitResult;
+use tauri::Emitter;
+
+pub const CLONE_PROGRESS_EVENT: &str = "clone-progress";
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloneProgress {
+    pub operation_id: String,
+    pub line: String,
+}
 
 #[tauri::command]
 pub async fn clone_repository(path: String, url: String) -> GitResult<String> {
@@ -8,18 +18,75 @@ pub async fn clone_repository(path: String, url: String) -> GitResult<String> {
 }
 
 #[tauri::command]
-pub async fn create_repository(path: String) -> GitResult<String> {
-    run_blocking(move || cli::create_repository(path)).await
+pub async fn clone_repository_with_progress(
+    app: tauri::AppHandle,
+    path: String,
+    url: String,
+    operation_id: String,
+) -> GitResult<String> {
+    run_blocking(move || {
+        cli::clone_repository_with_progress(path, url, |line| {
+            if let Err(error) = app.emit(
+                CLONE_PROGRESS_EVENT,
+                CloneProgress {
+                    operation_id: operation_id.clone(),
+                    line: line.to_owned(),
+                },
+            ) {
+                eprintln!("emit clone-progress failed: {error}");
+            }
+        })
+    })
+    .await
 }
 
 #[tauri::command]
-pub async fn checkout_revision(path: String, oid: String) -> GitResult<String> {
-    run_blocking(move || cli::checkout_revision(path, oid)).await
+pub async fn create_repository(path: String, bare: Option<bool>) -> GitResult<String> {
+    run_blocking(move || cli::create_repository_ex(path, bare.unwrap_or(false))).await
+}
+
+#[tauri::command]
+pub async fn preview_add_files(
+    path: String,
+    filter: String,
+    force: Option<bool>,
+) -> GitResult<cli::CommandOutput> {
+    super::operations::run_read(move || {
+        cli::preview_add_files(path, filter, force.unwrap_or(false))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn add_files(
+    path: String,
+    filter: String,
+    force: Option<bool>,
+) -> GitResult<cli::CommandOutput> {
+    run_blocking(move || cli::add_files(path, filter, force.unwrap_or(false))).await
+}
+
+#[tauri::command]
+pub async fn checkout_revision(
+    path: String,
+    oid: String,
+    force: Option<bool>,
+) -> GitResult<String> {
+    run_blocking(move || cli::checkout_revision_ex(path, oid, force.unwrap_or(false))).await
 }
 
 #[tauri::command]
 pub async fn open_difftool(path: String, file: String, staged: bool) -> GitResult<String> {
     run_blocking(move || cli::open_difftool(path, file, staged)).await
+}
+
+#[tauri::command]
+pub async fn get_file_content(
+    path: String,
+    file: String,
+    oid: Option<String>,
+) -> GitResult<cli::FileContent> {
+    super::operations::run_read(move || cli::get_file_content(path, file, oid)).await
 }
 
 #[tauri::command]
@@ -32,6 +99,70 @@ pub async fn apply_patch(
 }
 
 #[tauri::command]
+pub async fn list_patch_directory(
+    path: String,
+    directory: String,
+) -> GitResult<Vec<cli::PatchFileInfo>> {
+    super::operations::run_read(move || cli::list_patch_directory(path, directory)).await
+}
+
+#[tauri::command]
+pub async fn apply_patch_file(
+    path: String,
+    patch_path: String,
+    ignore_whitespace: Option<bool>,
+    sign_off: Option<bool>,
+) -> GitResult<cli::CommandOutput> {
+    run_blocking(move || {
+        cli::apply_patch_file_ex(
+            path,
+            patch_path,
+            ignore_whitespace.unwrap_or(false),
+            sign_off.unwrap_or(false),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn apply_patch_directory(
+    path: String,
+    directory: String,
+    ignore_whitespace: Option<bool>,
+    sign_off: Option<bool>,
+) -> GitResult<cli::CommandOutput> {
+    run_blocking(move || {
+        cli::apply_patch_directory_ex(
+            path,
+            directory,
+            ignore_whitespace.unwrap_or(false),
+            sign_off.unwrap_or(false),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn get_patch_apply_state(path: String) -> GitResult<cli::PatchApplyState> {
+    super::operations::run_read(move || cli::get_patch_apply_state(path)).await
+}
+
+#[tauri::command]
+pub async fn continue_patch(path: String) -> GitResult<cli::CommandOutput> {
+    run_blocking(move || cli::continue_patch(path)).await
+}
+
+#[tauri::command]
+pub async fn skip_patch(path: String) -> GitResult<cli::CommandOutput> {
+    run_blocking(move || cli::skip_patch(path)).await
+}
+
+#[tauri::command]
+pub async fn abort_patch(path: String) -> GitResult<cli::CommandOutput> {
+    run_blocking(move || cli::abort_patch(path)).await
+}
+
+#[tauri::command]
 pub async fn resolve_revision(path: String, revision: String) -> GitResult<String> {
     super::operations::run_read(move || cli::resolve_revision(path, revision)).await
 }
@@ -39,6 +170,11 @@ pub async fn resolve_revision(path: String, revision: String) -> GitResult<Strin
 #[tauri::command]
 pub async fn list_tracked_files(path: String) -> GitResult<Vec<String>> {
     super::operations::run_read(move || super::repo::list_tracked_files(path)).await
+}
+
+#[tauri::command]
+pub async fn list_head_files(path: String) -> GitResult<Vec<String>> {
+    super::operations::run_read(move || super::repo::list_head_files(path)).await
 }
 
 #[tauri::command]
@@ -57,11 +193,7 @@ pub async fn unstage_files(path: String, paths: Vec<String>) -> GitResult<String
 }
 
 #[tauri::command]
-pub async fn commit(
-    path: String,
-    message: String,
-    amend: Option<bool>,
-) -> GitResult<String> {
+pub async fn commit(path: String, message: String, amend: Option<bool>) -> GitResult<String> {
     run_blocking(move || cli::commit_ex(path, message, amend.unwrap_or(false))).await
 }
 
@@ -89,13 +221,28 @@ pub async fn create_branch(
     path: String,
     name: String,
     start_point: Option<String>,
+    checkout: Option<bool>,
+    orphan: Option<bool>,
 ) -> GitResult<String> {
-    run_blocking(move || cli::create_branch(path, name, start_point)).await
+    run_blocking(move || {
+        cli::create_branch_ex(
+            path,
+            name,
+            start_point,
+            checkout.unwrap_or(false),
+            orphan.unwrap_or(false),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub async fn checkout_branch(path: String, name: String) -> GitResult<String> {
-    run_blocking(move || cli::checkout_branch(path, name)).await
+pub async fn checkout_branch(
+    path: String,
+    name: String,
+    strategy: Option<String>,
+) -> GitResult<String> {
+    run_blocking(move || cli::checkout_branch_ex(path, name, strategy)).await
 }
 
 #[tauri::command]
@@ -103,16 +250,14 @@ pub async fn checkout_remote_branch(
     path: String,
     remote_branch: String,
     local_name: Option<String>,
+    strategy: Option<String>,
 ) -> GitResult<String> {
-    run_blocking(move || cli::checkout_remote_branch(path, remote_branch, local_name)).await
+    run_blocking(move || cli::checkout_remote_branch_ex(path, remote_branch, local_name, strategy))
+        .await
 }
 
 #[tauri::command]
-pub async fn rename_branch(
-    path: String,
-    old_name: String,
-    new_name: String,
-) -> GitResult<String> {
+pub async fn rename_branch(path: String, old_name: String, new_name: String) -> GitResult<String> {
     run_blocking(move || cli::rename_branch(path, old_name, new_name)).await
 }
 
@@ -166,11 +311,7 @@ pub async fn remote_set_url(
 }
 
 #[tauri::command]
-pub async fn remote_rename(
-    path: String,
-    old_name: String,
-    new_name: String,
-) -> GitResult<String> {
+pub async fn remote_rename(path: String, old_name: String, new_name: String) -> GitResult<String> {
     run_blocking(move || cli::remote_rename(path, old_name, new_name)).await
 }
 
@@ -185,11 +326,7 @@ pub async fn get_merged_branches(path: String) -> GitResult<Vec<String>> {
 }
 
 #[tauri::command]
-pub async fn fetch(
-    path: String,
-    remote: Option<String>,
-    prune: Option<bool>,
-) -> GitResult<String> {
+pub async fn fetch(path: String, remote: Option<String>, prune: Option<bool>) -> GitResult<String> {
     run_blocking(move || cli::fetch_ex(path, remote, prune.unwrap_or(false))).await
 }
 
@@ -198,8 +335,25 @@ pub async fn pull(
     path: String,
     mode: Option<String>,
     autostash: Option<bool>,
+    remote: Option<String>,
+    branch: Option<String>,
+    fetch_only: Option<bool>,
+    prune: Option<bool>,
+    tags_mode: Option<String>,
 ) -> GitResult<String> {
-    run_blocking(move || cli::pull_ex(path, mode, autostash.unwrap_or(false))).await
+    run_blocking(move || {
+        cli::pull_ex_advanced(
+            path,
+            mode,
+            autostash.unwrap_or(false),
+            remote,
+            branch,
+            fetch_only.unwrap_or(false),
+            prune.unwrap_or(false),
+            tags_mode,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -234,9 +388,11 @@ pub async fn push(
     expected_branch: Option<String>,
     force_with_lease: Option<bool>,
     push_tags: Option<bool>,
+    force: Option<bool>,
+    recurse_submodules: Option<bool>,
 ) -> GitResult<String> {
     run_blocking(move || {
-        cli::push_ex(
+        cli::push_ex_advanced(
             path,
             remote,
             branch,
@@ -244,6 +400,8 @@ pub async fn push(
             expected_branch,
             force_with_lease.unwrap_or(false),
             push_tags.unwrap_or(false),
+            force.unwrap_or(false),
+            recurse_submodules.unwrap_or(false),
         )
     })
     .await
@@ -254,8 +412,19 @@ pub async fn stash_push(
     path: String,
     message: String,
     include_untracked: bool,
+    keep_index: Option<bool>,
+    paths: Option<Vec<String>>,
 ) -> GitResult<String> {
-    run_blocking(move || cli::stash_push(path, message, include_untracked)).await
+    run_blocking(move || {
+        cli::stash_push_ex(
+            path,
+            message,
+            include_untracked,
+            keep_index.unwrap_or(false),
+            paths.unwrap_or_default(),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -295,6 +464,15 @@ pub async fn rebase(path: String, onto: String) -> GitResult<String> {
 #[tauri::command]
 pub async fn discard_files(path: String, paths: Vec<String>) -> GitResult<String> {
     run_blocking(move || cli::discard_files(path, paths)).await
+}
+
+#[tauri::command]
+pub async fn reset_changes(
+    path: String,
+    paths: Vec<String>,
+    delete_new: Option<bool>,
+) -> GitResult<String> {
+    run_blocking(move || cli::reset_changes(path, paths, delete_new.unwrap_or(false))).await
 }
 
 #[tauri::command]
@@ -570,11 +748,7 @@ pub async fn worktree_add(
 }
 
 #[tauri::command]
-pub async fn worktree_remove(
-    path: String,
-    name: String,
-    force: Option<bool>,
-) -> GitResult<String> {
+pub async fn worktree_remove(path: String, name: String, force: Option<bool>) -> GitResult<String> {
     run_blocking(move || cli::worktree_remove(path, name, force.unwrap_or(false))).await
 }
 
@@ -669,11 +843,7 @@ pub async fn bisect_reset(path: String) -> GitResult<String> {
 }
 
 #[tauri::command]
-pub async fn format_patch(
-    path: String,
-    oid: String,
-    output_path: String,
-) -> GitResult<String> {
+pub async fn format_patch(path: String, oid: String, output_path: String) -> GitResult<String> {
     super::operations::run_read(move || cli::format_patch(path, oid, output_path)).await
 }
 
@@ -687,3 +857,7 @@ pub async fn archive_commit(
     super::operations::run_read(move || cli::archive_commit(path, oid, output_path, format)).await
 }
 
+#[tauri::command]
+pub async fn rename_path(path: String, relative: String, new_name: String) -> GitResult<String> {
+    run_blocking(move || cli::rename_path(path, relative, new_name)).await
+}

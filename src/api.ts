@@ -24,7 +24,8 @@ import type {
   ResetMode, ResetPreview, ResetResult, RecoveryEntry,
   ExplorerIntegrationInfo, LaunchRequest, PatchPreview, ExplorerMenuItem,
   WindowBootstrap, ExplorerTarget, ScopedHistoryEntry, CommandOutput,
-  RemoteInfo, CommandLogEntry, GrepMatch, MergeMode, PullMode,
+  RemoteInfo, CommandLogEntry, GrepMatch, MergeMode, PullMode, CloneProgress,
+  PatchFileInfo, PatchApplyState, FileContent,
 } from "./types";
 
 // 只合并仍在途的同参数读取，不缓存工作区结果。
@@ -71,12 +72,12 @@ export const api = {
     writeInvoke<string>("commit_fixup", { path, targetOid, squash }),
   applyDiffPatch: (path: string, patch: string, cached: boolean, reverse: boolean) =>
     writeInvoke<string>("apply_diff_patch", { path, patch, cached, reverse }),
-  createBranch: (path: string, name: string, startPoint?: string) =>
-    writeInvoke<string>("create_branch", { path, name, startPoint }),
-  checkoutBranch: (path: string, name: string) =>
-    writeInvoke<string>("checkout_branch", { path, name }),
-  checkoutRemoteBranch: (path: string, remoteBranch: string, localName?: string) =>
-    writeInvoke<string>("checkout_remote_branch", { path, remoteBranch, localName }),
+  createBranch: (path: string, name: string, startPoint?: string, checkout = false, orphan = false) =>
+    writeInvoke<string>("create_branch", { path, name, startPoint, checkout, orphan }),
+  checkoutBranch: (path: string, name: string, strategy = "default") =>
+    writeInvoke<string>("checkout_branch", { path, name, strategy }),
+  checkoutRemoteBranch: (path: string, remoteBranch: string, localName?: string, strategy = "default") =>
+    writeInvoke<string>("checkout_remote_branch", { path, remoteBranch, localName, strategy }),
   renameBranch: (path: string, oldName: string, newName: string) =>
     writeInvoke<string>("rename_branch", { path, oldName, newName }),
   deleteBranch: (path: string, name: string, force: boolean) =>
@@ -100,8 +101,8 @@ export const api = {
   getAheadBehind: (path: string) => invoke<AheadBehind | null>("get_ahead_behind", { path }),
   fetch: (path: string, remote?: string, prune = false) =>
     writeInvoke<string>("fetch", { path, remote, prune }),
-  pull: (path: string, mode: PullMode = "default", autostash = false) =>
-    writeInvoke<string>("pull", { path, mode, autostash }),
+  pull: (path: string, mode: PullMode = "default", autostash = false, remote?: string, branch?: string, fetchOnly = false, prune = false, tagsMode: "auto" | "all" | "none" = "auto") =>
+    writeInvoke<string>("pull", { path, mode, autostash, remote, branch, fetchOnly, prune, tagsMode }),
   pullWithOutput: (path: string) => writeInvoke<CommandOutput>("pull_with_output", { path }),
   getPushInfo: (path: string) => invoke<PushInfo>("get_push_info", { path }),
   push: (
@@ -111,6 +112,8 @@ export const api = {
     preview?: PushInfo,
     forceWithLease = false,
     pushTags = false,
+    force = false,
+    recurseSubmodules = false,
   ) =>
     writeInvoke<string>("push", {
       path,
@@ -120,10 +123,12 @@ export const api = {
       expectedBranch: preview?.branchRef,
       forceWithLease,
       pushTags,
+      force,
+      recurseSubmodules,
     }),
   stashList: (path: string) => invoke<StashInfo[]>("stash_list", { path }),
-  stashPush: (path: string, message: string, includeUntracked: boolean) =>
-    writeInvoke<string>("stash_push", { path, message, includeUntracked }),
+  stashPush: (path: string, message: string, includeUntracked: boolean, keepIndex = false, paths: string[] = []) =>
+    writeInvoke<string>("stash_push", { path, message, includeUntracked, keepIndex, paths }),
   stashApply: (path: string, name: string, pop: boolean, expectedOid?: string) =>
     writeInvoke<string>("stash_apply", { path, name, pop, expectedOid }),
   stashDrop: (path: string, name: string, expectedOid?: string) => writeInvoke<string>("stash_drop", { path, name, expectedOid }),
@@ -195,7 +200,11 @@ export const api = {
   skipOperation: (path: string, expected: OperationState) => writeInvoke<string>("skip_operation", { path, expected }),
   abortOperation: (path: string) => writeInvoke<string>("abort_operation", { path }),
   discardFiles: (path: string, paths: string[]) => writeInvoke<string>("discard_files", { path, paths }),
+  resetChanges: (path: string, paths: string[], deleteNew = false) =>
+    writeInvoke<string>("reset_changes", { path, paths, deleteNew }),
   deleteUntrackedFiles: (path: string, paths: string[]) => writeInvoke<string>("delete_untracked_files", { path, paths }),
+  renamePath: (path: string, relative: string, newName: string) =>
+    writeInvoke<string>("rename_path", { path, relative, newName }),
   openPath: (path: string, file: string) => invoke<void>("open_path", { path, file }),
   revealPath: (path: string, file?: string) => invoke<void>("reveal_path", { path, file }),
   getResetPreview: (path: string, target: string, mode: ResetMode) => invoke<ResetPreview>("get_reset_preview", { path, target, mode }),
@@ -217,14 +226,32 @@ export const api = {
   setExplorerContextMenuEnabled: (enabled: boolean, items: ExplorerMenuItem[], alwaysShowAllCommands: boolean) =>
     invoke<void>("set_explorer_context_menu_enabled", { enabled, items, alwaysShowAllCommands }),
   cloneRepository: (path: string, url: string) => writeInvoke<string>("clone_repository", { path, url }),
-  createRepository: (path: string) => writeInvoke<string>("create_repository", { path }),
+  cloneRepositoryWithProgress: (path: string, url: string, operationId: string) =>
+    writeInvoke<string>("clone_repository_with_progress", { path, url, operationId }),
+  createRepository: (path: string, bare = false) => writeInvoke<string>("create_repository", { path, bare }),
+  previewAddFiles: (path: string, filter: string, force = false) =>
+    invoke<CommandOutput>("preview_add_files", { path, filter, force }),
+  addFiles: (path: string, filter: string, force = false) =>
+    writeInvoke<CommandOutput>("add_files", { path, filter, force }),
   resolveRevision: (path: string, revision: string) => invoke<string>("resolve_revision", { path, revision }),
-  checkoutRevision: (path: string, oid: string) => writeInvoke<string>("checkout_revision", { path, oid }),
+  checkoutRevision: (path: string, oid: string, force = false) => writeInvoke<string>("checkout_revision", { path, oid, force }),
   openDifftool: (path: string, file: string, staged: boolean) => invoke<string>("open_difftool", { path, file, staged }),
+  getFileContent: (path: string, file: string, oid?: string) => invoke<FileContent>("get_file_content", { path, file, oid }),
   listTrackedFiles: (path: string) => invoke<string[]>("list_tracked_files", { path }),
+  listHeadFiles: (path: string) => invoke<string[]>("list_head_files", { path }),
   previewPatch: (path: string, patchPath: string) => invoke<PatchPreview>("preview_patch", { path, patchPath }),
   applyPatch: (path: string, patchPath: string, expectedPatchOid: string) =>
     writeInvoke<string>("apply_patch", { path, patchPath, expectedPatchOid }),
+  listPatchDirectory: (path: string, directory: string) =>
+    invoke<PatchFileInfo[]>("list_patch_directory", { path, directory }),
+  applyPatchFile: (path: string, patchPath: string, ignoreWhitespace = false, signOff = false) =>
+    writeInvoke<CommandOutput>("apply_patch_file", { path, patchPath, ignoreWhitespace, signOff }),
+  applyPatchDirectory: (path: string, directory: string, ignoreWhitespace = false, signOff = false) =>
+    writeInvoke<CommandOutput>("apply_patch_directory", { path, directory, ignoreWhitespace, signOff }),
+  getPatchApplyState: (path: string) => invoke<PatchApplyState>("get_patch_apply_state", { path }),
+  continuePatch: (path: string) => writeInvoke<CommandOutput>("continue_patch", { path }),
+  skipPatch: (path: string) => writeInvoke<CommandOutput>("skip_patch", { path }),
+  abortPatch: (path: string) => writeInvoke<CommandOutput>("abort_patch", { path }),
 };
 
 let logRequestId = 0;
@@ -236,6 +263,11 @@ export function nextLogRequestId(): number {
 /** 订阅日志流；回调内按 requestId 过滤过期批次。 */
 export function onLogBatch(handler: (batch: LogBatch) => void) {
   return listen<LogBatch>("log-batch", (event) => handler(event.payload));
+}
+
+/** 订阅克隆进度；回调内按 operationId 过滤其它窗口的克隆。 */
+export function onCloneProgress(handler: (progress: CloneProgress) => void) {
+  return listen<CloneProgress>("clone-progress", (event) => handler(event.payload));
 }
 
 export function formatDate(seconds: number): string {

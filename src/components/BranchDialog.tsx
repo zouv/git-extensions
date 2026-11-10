@@ -25,6 +25,10 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, in
   const [newName, setNewName] = useState("");
   const [renameTo, setRenameTo] = useState("");
   const [force, setForce] = useState(false);
+  const [strategy, setStrategy] = useState<"default" | "stash" | "reset">("default");
+  const [localName, setLocalName] = useState("");
+  const [checkoutAfterCreate, setCheckoutAfterCreate] = useState(true);
+  const [orphan, setOrphan] = useState(false);
   const [mergedNames, setMergedNames] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [localBusy, setBusy] = useState(false);
@@ -34,7 +38,7 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, in
   const selectedEntry = branches.find((b) => b.name === selected) ?? null;
   const selectedBranch = selectedEntry && !selectedEntry.isRemote ? selectedEntry : null;
   const selectedRemote = selectedEntry && selectedEntry.isRemote ? selectedEntry : null;
-  const close = useDirtyClose(newName.trim().length > 0 || renameTo.trim().length > 0, busy, onClose);
+  const close = useDirtyClose(newName.trim().length > 0 || renameTo.trim().length > 0 || localName.trim().length > 0, busy, onClose);
 
   useEffect(() => {
     let alive = true;
@@ -74,14 +78,29 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, in
     if (ok) void run(() => api.deleteBranch(repoPath, selectedBranch.name, force), `已删除 ${selectedBranch.name}`);
   };
 
+  const confirmReset = async () => {
+    if (strategy !== "reset") return true;
+    return confirm({
+      title: "丢弃本地修改并切换？",
+      body: "当前工作区与暂存区的未提交修改会被丢弃，且无法通过 Git 恢复。",
+      confirmLabel: "丢弃并切换",
+      danger: true,
+      requireAck: true,
+      ackLabel: "我确认丢弃当前未提交修改",
+    });
+  };
+
   const checkoutSelected = () => {
-    if (selectedRemote) {
-      void run(() => api.checkoutRemoteBranch(repoPath, selectedRemote.name), `已检出并跟踪 ${selectedRemote.name}`);
-      return;
-    }
-    if (selectedBranch && !selectedBranch.isHead) {
-      void run(() => api.checkoutBranch(repoPath, selectedBranch.name), `已切换到 ${selectedBranch.name}`);
-    }
+    void (async () => {
+      if (!await confirmReset()) return;
+      if (selectedRemote) {
+        void run(() => api.checkoutRemoteBranch(repoPath, selectedRemote.name, localName.trim() || undefined, strategy), `已检出并跟踪 ${selectedRemote.name}`);
+        return;
+      }
+      if (selectedBranch && !selectedBranch.isHead) {
+        void run(() => api.checkoutBranch(repoPath, selectedBranch.name, strategy), `已切换到 ${selectedBranch.name}`);
+      }
+    })();
   };
 
   const renameSelected = () => {
@@ -119,12 +138,20 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, in
     </>}>
       {error && <InlineError message={error} />}
       <div className="branch-list" tabIndex={-1} role="listbox" aria-label="分支">
-        {branches.map((branch) => <div key={`${branch.isRemote ? "r" : "l"}:${branch.name}`} className={`branch-item${selected === branch.name ? " selected" : ""}${branch.isRemote ? " remote" : ""}`} role="option" aria-selected={selected === branch.name} tabIndex={0} onFocus={() => { setSelected(branch.name); if (!branch.isRemote) setRenameTo(branch.name); }} onClick={() => { setSelected(branch.name); if (!branch.isRemote) setRenameTo(branch.name); }} onKeyDown={(e) => { if (moveListFocus(e, ".branch-item")) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(branch.name); } }} onDoubleClick={() => { if (!branch.isRemote && !branch.isHead) void run(() => api.checkoutBranch(repoPath, branch.name), `已切换到 ${branch.name}`); else if (branch.isRemote) void run(() => api.checkoutRemoteBranch(repoPath, branch.name), `已检出并跟踪 ${branch.name}`); }}>
+        {branches.map((branch) => <div key={`${branch.isRemote ? "r" : "l"}:${branch.name}`} className={`branch-item${selected === branch.name ? " selected" : ""}${branch.isRemote ? " remote" : ""}`} role="option" aria-selected={selected === branch.name} tabIndex={0} onFocus={() => { setSelected(branch.name); if (!branch.isRemote) setRenameTo(branch.name); }} onClick={() => { setSelected(branch.name); if (!branch.isRemote) setRenameTo(branch.name); }} onKeyDown={(e) => { if (moveListFocus(e, ".branch-item")) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(branch.name); } }} onDoubleClick={() => { if ((!branch.isRemote && !branch.isHead) || branch.isRemote) checkoutSelected(); }}>
           <span className={branch.isHead ? "branch-head" : ""}>{branch.isHead ? "● " : ""}{branch.name}</span>
           <span>{mergedNames.includes(branch.name) && <span className="badge-merged" title="已合并到 HEAD">已合并</span>} <span className="branch-oid">{branch.oid.slice(0, 7)}</span></span>
         </div>)}
       </div>
       <div className="branch-actions">
+        {selectedRemote && <input aria-label="本地分支名" placeholder="本地分支名（默认同名）" value={localName} onChange={(e) => setLocalName(e.target.value)} />}
+        <label className="branch-strategy">本地修改
+          <select aria-label="本地修改处理" disabled={busy} value={strategy} onChange={(e) => setStrategy(e.target.value as "default" | "stash" | "reset")}>
+            <option value="default">保持（Git 默认）</option>
+            <option value="stash">暂存后切换</option>
+            <option value="reset">丢弃后切换</option>
+          </select>
+        </label>
         <button disabled={busy || (!selectedBranch && !selectedRemote) || !!selectedBranch?.isHead} onClick={checkoutSelected}>
           {selectedRemote ? "检出跟踪分支" : "切换"}
         </button>
@@ -147,8 +174,10 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, in
       )}
       <div className="branch-create">
         <input data-autofocus={initialMode === "create" ? "" : undefined} placeholder="新分支名" value={newName} onChange={(e) => setNewName(e.target.value)} />
-        <span className="muted">基于 {initialStartPoint ?? selectedEntry?.name ?? "HEAD"}</span>
-        <button className="primary" disabled={busy || !newName.trim()} onClick={() => void run(() => api.createBranch(repoPath, newName.trim(), initialStartPoint ?? selectedEntry?.name), `已创建 ${newName.trim()}`)}>新建分支</button>
+        <span className="muted">{orphan ? "孤儿分支（无父提交）" : `基于 ${initialStartPoint ?? selectedEntry?.name ?? "HEAD"}`}</span>
+        <label className="force-label"><input type="checkbox" checked={orphan || checkoutAfterCreate} disabled={busy || orphan} onChange={(e) => setCheckoutAfterCreate(e.target.checked)} />创建后切换</label>
+        <label className="force-label"><input type="checkbox" checked={orphan} disabled={busy} onChange={(e) => setOrphan(e.target.checked)} />孤儿分支</label>
+        <button className="primary" disabled={busy || !newName.trim()} onClick={() => void run(() => api.createBranch(repoPath, newName.trim(), orphan ? undefined : (initialStartPoint ?? selectedEntry?.name), checkoutAfterCreate, orphan), `已创建 ${newName.trim()}`)}>新建分支</button>
       </div>
     </Dialog>
   );

@@ -6,8 +6,8 @@ import ts from "typescript";
 const source = await readFile(new URL("../src/openRepos.ts", import.meta.url), "utf8");
 const url = "data:text/javascript;base64," + Buffer.from(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText).toString("base64");
 const {
-  OPEN_REPOS_KEY, MAX_OPEN_REPOS, sanitizeOpenRepos, parseOpenRepos, loadOpenRepos, saveOpenRepos,
-  restoreCandidates, pickActivePath,
+  OPEN_REPOS_KEY, MAX_OPEN_REPOS, MAX_RECENT_REPOS, sanitizeRecentRepos, sanitizeOpenRepos, parseOpenRepos,
+  loadOpenRepos, saveOpenRepos, restoreCandidates, pickActivePath,
 } = await import(url);
 
 const memoryStorage = () => {
@@ -30,6 +30,13 @@ test("打开列表超过上限时截断", () => {
   const result = sanitizeOpenRepos(paths);
   assert.equal(result.length, MAX_OPEN_REPOS);
   assert.deepEqual(result, paths.slice(0, MAX_OPEN_REPOS));
+});
+
+test("最近打开列表过滤空路径 / 重复项并截断", () => {
+  assert.deepEqual(sanitizeRecentRepos([" /a ", "", "   ", "/a", 1, null, "/b"]), ["/a", "/b"]);
+  const paths = Array.from({ length: 20 }, (_, index) => `/repos/${index}`);
+  assert.equal(sanitizeRecentRepos(paths).length, MAX_RECENT_REPOS);
+  assert.deepEqual(sanitizeRecentRepos("not array"), []);
 });
 
 test("键缺失与显式空列表语义不同", () => {
