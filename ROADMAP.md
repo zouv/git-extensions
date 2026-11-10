@@ -21,6 +21,7 @@
 - 0.7.0 已交付界面交互优化：弹窗焦点 / 错误反馈 / 草稿保护、命令面板与原生目录选择、键盘可达性、Diff 工具增强与大列表性能；剩余原生对话框 / 拖放 / 高 DPI / 安装版验收。
 - 0.8.0 已交付核心 Git 能力补齐（P0–P2 共 13 项，对齐上游 Git Extensions）：合并分支、Amend、Hunk 级暂存、Remotes / Worktree 管理、分支文件夹树、命令日志、全库搜索、Fixup / Autosquash、导出补丁 / 归档、Git Bisect 与已合并分支清理；详见 CHANGELOG [0.8.0]，待实机 GUI 验收。
 - 0.9.0 已发布（2026-11-10）：资源管理器 Rename、整棵级联菜单 16 项上限校验与遗留键清理、Branches & Repos 分组、轻量窗口尺寸记忆 / F5 修复 / difftool 保持打开、设置缩放与「应用」按钮；详见 CHANGELOG [0.9.0]。
+- 0.9.1 已发布（2026-11-10）：Commit / View changes 按资源管理器目录限定范围、View history 三目标、右键动作不再闪控制台、Rename 占用错误提示；详见 CHANGELOG [0.9.1]。
 
 ---
 
@@ -37,6 +38,7 @@
 - ✅ 0.7.0 界面交互全面优化（2026-11-07）：弹窗焦点 / 错误可见性 / 草稿保护、命令面板与原生目录选择、键盘与 Diff 工具增强、大列表性能；详见 CHANGELOG [0.7.0]。
 - ✅ 0.8.0 核心 Git 能力补齐（2026-11-08）：合并分支、Amend、Hunk 级暂存、Remotes / Worktree 管理、分支文件夹树、命令日志、提交与代码搜索、Fixup / Autosquash、导出补丁 / 归档、Git Bisect 与批量清理已合并分支；详见 CHANGELOG [0.8.0]。
 - ✅ 0.9.0 资源管理器菜单与窗口体验（2026-11-10）：Rename、16 项整树上限校验、遗留键清理、Branches & Repos 分组、轻量窗口尺寸记忆 / F5 修复 / difftool 保持打开、设置缩放与「应用」；详见 CHANGELOG [0.9.0]。
+- ✅ 0.9.1 资源管理器范围与启动体验（2026-11-10）：Commit / View changes 目录作用域、View history 三目标、菜单启动无控制台闪烁、Rename 占用提示；详见 CHANGELOG [0.9.1]。
 
 ---
 
@@ -62,6 +64,7 @@
 - [x] ~~资源管理器菜单与参考项目对齐：View changes 只读 diff、View stash 工作区窗口、Add files、Reset、Apply patch 冲突流程、Create repository 类型、文件历史 Blame、Pull/Push/分支选项、菜单文案与上下文规则、Repository settings 面板、View files 文件树、一级/二级/三级菜单配置与超限提示、Esc 关闭；含克隆进度页与「最近打开」修复。~~（2026-11-09）
 - [x] ~~修复 Others 被 Windows 整棵级联树 16 项上限截断的问题并清理旧键；轻量动作窗口拖拽缩放并记住尺寸；设置弹窗四边缩放并记住尺寸；新增 Rename（`git mv`）菜单项。~~（2026-11-10）
 - [x] ~~修复动作窗口 F5 刷新后无法启动 / 无法关闭、Open with difftool 闪退；Create/Open repository 归入 Branches & Repos；设置新增「应用」按钮并禁止遮罩关闭。~~（2026-11-10）
+- [x] ~~资源管理器 Commit / View changes 以当前文件夹或选中目录为范围；File history 更名 View history 并支持文件、目录与目录背景查询；右键动作启动不再闪命令行窗口。~~（2026-11-10）
 - [ ] 完成 Windows 真实菜单、窗口状态、轻量窗口、单实例及安装版/便携版 GUI 验收。
 
 ### M5 专业 UI 与新工作流（平台验收中）

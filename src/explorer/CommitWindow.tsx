@@ -118,7 +118,8 @@ export default function CommitWindow({ action, target, onDirtyChange, onBusyChan
       onOpenConflict={() => { void openInMain("已转到主窗口；请在冲突中心解决冲突"); }}
       onDirtyChange={onDirtyChange}
       focusCommitSignal={action === "commit" ? 1 : 0}
-      initialPath={target.relativePath}
+      initialPath={target.scope === "file" ? target.relativePath : null}
+      scopePath={target.scope === "repository" ? null : target.relativePath}
     />
   </div>;
 }

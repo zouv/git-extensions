@@ -44,12 +44,11 @@ struct Context {
 impl Context {
     /// 与参考项目的 Shell Extension 对齐：仓库级动作只在目录上下文出现，
     /// 单文件动作只在文件上下文出现；Open/Add/Reset/Settings 两者都可用。
+    /// View history 接受文件、选中目录与当前文件夹（目录背景）三种目标。
     fn supports(self, action: ExplorerAction) -> bool {
         match action {
             ExplorerAction::Clone | ExplorerAction::CreateRepository => !self.file_context,
-            ExplorerAction::OpenWithDifftool
-            | ExplorerAction::FileHistory
-            | ExplorerAction::ApplyPatch => self.file_context,
+            ExplorerAction::OpenWithDifftool | ExplorerAction::ApplyPatch => self.file_context,
             ExplorerAction::Commit
             | ExplorerAction::Pull
             | ExplorerAction::Push
@@ -58,7 +57,8 @@ impl Context {
             | ExplorerAction::CheckoutBranch
             | ExplorerAction::CheckoutRevision
             | ExplorerAction::CreateBranch => !self.file_context,
-            ExplorerAction::OpenRepository
+            ExplorerAction::FileHistory
+            | ExplorerAction::OpenRepository
             | ExplorerAction::ResetFileChanges
             | ExplorerAction::AddFiles
             | ExplorerAction::Settings
@@ -405,7 +405,7 @@ const ACTIONS: [ActionSpec; 20] = [
     },
     ActionSpec {
         action: ExplorerAction::FileHistory,
-        label: "File history",
+        label: "View history",
         key: "GitExt.FileHistory",
         icon: "file-history.ico",
     },
@@ -2030,7 +2030,7 @@ mod tests {
             .flat_map(|group| group.actions.iter().copied())
             .filter(|action| CONTEXTS[2].supports(*action))
             .collect();
-        assert_eq!(directory_actions.len(), 17);
+        assert_eq!(directory_actions.len(), 18);
         assert_eq!(file_actions.len(), 10);
 
         // 目录上下文的直排项 + Others + Others 子项合计不能超过 16。
@@ -2190,11 +2190,7 @@ mod tests {
     fn directory_context_omits_file_only_actions() {
         let plan = plan();
         let directory_root = CONTEXTS[0].root;
-        for action in [
-            ExplorerAction::OpenWithDifftool,
-            ExplorerAction::FileHistory,
-            ExplorerAction::ApplyPatch,
-        ] {
+        for action in [ExplorerAction::OpenWithDifftool, ExplorerAction::ApplyPatch] {
             assert!(
                 !plan.iter().any(|key| {
                     key.path.starts_with(directory_root)
@@ -2203,6 +2199,39 @@ mod tests {
                 "directory context should omit {}",
                 action
             );
+        }
+    }
+
+    #[test]
+    fn view_history_is_available_for_file_directory_and_background_targets() {
+        let mut placements = [MenuPlacement::Hidden; ExplorerAction::ALL.len()];
+        placements[ExplorerAction::FileHistory as usize] = MenuPlacement::Cascade;
+        let plan = build_configured_plan(
+            Some(Path::new(r"C:\GitExt\GitExt.exe")),
+            None,
+            &placements,
+            false,
+        )
+        .unwrap();
+        let item_key = cascade_key(&GROUPS[2], ExplorerAction::FileHistory);
+        for context in CONTEXTS {
+            let item = format!(r"{}\{CASCADE_KEY}\shell\{item_key}", context.root);
+            let planned = plan
+                .iter()
+                .find(|key| key.path == item)
+                .unwrap_or_else(|| panic!("missing View history for {}", context.root));
+            assert!(planned
+                .values
+                .iter()
+                .any(|entry| entry.name == "MUIVerb" && entry.value == "View history"));
+            let command = plan
+                .iter()
+                .find(|key| key.path == format!(r"{item}\command"))
+                .unwrap();
+            assert!(command.values.iter().any(|entry| {
+                entry.value
+                    == command_line(r"C:\GitExt\GitExt.exe", "file-history", context.placeholder)
+            }));
         }
     }
 

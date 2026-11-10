@@ -107,7 +107,7 @@ impl ExplorerAction {
             Self::CheckoutRevision => "Checkout revision",
             Self::CreateBranch => "Create branch",
             Self::OpenWithDifftool => "Open with difftool",
-            Self::FileHistory => "View changelog",
+            Self::FileHistory => "View history",
             Self::ResetFileChanges => "Reset file changes",
             Self::AddFiles => "Add files",
             Self::ApplyPatch => "Apply patch",

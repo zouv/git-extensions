@@ -1200,17 +1200,138 @@ pub fn commit(path: String, message: String) -> GitResult<String> {
 }
 
 pub fn commit_ex(path: String, message: String, amend: bool) -> GitResult<String> {
+    commit_ex_scoped(path, message, amend, None)
+}
+
+/// 目录 / 文件作用域的提交：只提交 `scope` 下已暂存的内容，仓库其它目录的
+/// 已暂存改动保持原样。实现上用临时 index：从 HEAD 建树，把 `scope` 的
+/// `--cached` 补丁应用到临时 index 后再提交；真实 index 不被改写。
+/// amend 也因此保留 scope 外的文件内容，只替换 scope 内的暂存部分。
+pub fn commit_ex_scoped(
+    path: String,
+    message: String,
+    amend: bool,
+    scope: Option<String>,
+) -> GitResult<String> {
     let _write = acquire_write(&path)?;
     if message.trim().is_empty() {
         return Err(GitError::InvalidInput("commit message is empty".into()));
     }
+    let scope = scope
+        .filter(|scope| !scope.trim().is_empty() && scope.trim() != ".")
+        .map(|scope| validate_relative_path(&scope))
+        .transpose()?
+        .map(|scope| scope.to_string_lossy().replace('\\', "/"));
+    let Some(scope) = scope else {
+        return run_commit_command(&path, &message, amend, &[]);
+    };
+
+    let repo = open(&path)?;
+    // 作用域提交使用独立临时 index，会绕过 Git 自己对 merge / rebase /
+    // 未解决冲突的拒绝，因此在这里显式阻止。
+    if repo.state() != RepositoryState::Clean || repo.index()?.has_conflicts() {
+        return Err(GitError::InvalidInput(
+            "cannot commit a directory scope while a Git operation or conflict is in progress"
+                .into(),
+        ));
+    }
+    let files = ScopedCommitFiles::new(repo.path());
+    let envs: [(&str, &OsStr); 1] = [("GIT_INDEX_FILE", files.index.as_os_str())];
+    let empty = repo.is_empty()?;
+    let mut read_tree = vec!["read-tree".to_string()];
+    read_tree.push(if empty {
+        "--empty".to_string()
+    } else {
+        "HEAD".to_string()
+    });
+    run_git_with_env(&path, &read_tree, &envs)?;
+
+    // 真实 index 中 scope 相对 HEAD 的暂存差异；临时 index 的基线也是 HEAD，
+    // 因此补丁可以原样应用，且不会把 scope 外的暂存内容带进提交。
+    let mut diff = vec![
+        "diff".to_string(),
+        "--cached".to_string(),
+        "--binary".to_string(),
+        "--no-ext-diff".to_string(),
+        "--no-textconv".to_string(),
+    ];
+    if !empty {
+        diff.push("HEAD".to_string());
+    }
+    diff.push("--".to_string());
+    diff.push(scope.clone());
+    let patch = run_git(&path, &diff)?;
+    if patch.trim().is_empty() {
+        // Amend 可以只改提交信息：临时 index 已是 HEAD 树，不需要应用补丁。
+        if !amend {
+            return Err(GitError::InvalidInput(format!(
+                "no staged changes under {scope}"
+            )));
+        }
+    } else {
+        std::fs::write(&files.patch, patch)?;
+        run_git_with_env(
+            &path,
+            &[
+                "apply".to_string(),
+                "--cached".to_string(),
+                "--binary".to_string(),
+                files.patch.to_string_lossy().into_owned(),
+            ],
+            &envs,
+        )?;
+    }
+    run_commit_command(&path, &message, amend, &envs)
+}
+
+fn run_commit_command(
+    path: &str,
+    message: &str,
+    amend: bool,
+    envs: &[(&str, &OsStr)],
+) -> GitResult<String> {
     let mut args = vec!["commit".to_string()];
     if amend {
         args.push("--amend".to_string());
     }
     args.push("-m".to_string());
-    args.push(message);
-    run_git(&path, &args)
+    args.push(message.to_string());
+    run_git_with_env(path, &args, envs)
+}
+
+/// 作用域提交的临时 index / 补丁文件；无论成功失败都在 Drop 时清理。
+struct ScopedCommitFiles {
+    index: PathBuf,
+    patch: PathBuf,
+}
+
+impl ScopedCommitFiles {
+    fn new(git_dir: &Path) -> Self {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        let base = git_dir.join(format!(
+            "git-extensions-scope-commit-{}-{stamp}",
+            std::process::id()
+        ));
+        let files = Self {
+            index: base.with_extension("index"),
+            patch: base.with_extension("patch"),
+        };
+        // 上一次异常退出可能留下同名文件（时间戳相同几乎不可能）；先清掉，
+        // 保证 read-tree 从空 index 开始。
+        let _ = std::fs::remove_file(&files.index);
+        let _ = std::fs::remove_file(&files.patch);
+        files
+    }
+}
+
+impl Drop for ScopedCommitFiles {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.index);
+        let _ = std::fs::remove_file(&self.patch);
+    }
 }
 
 pub fn commit_fixup(path: String, target_oid: String, squash: bool) -> GitResult<String> {
@@ -2084,11 +2205,33 @@ pub fn rename_path(path: String, relative: String, new_name: String) -> GitResul
     }
     let old_arg = old_relative.to_string_lossy().replace('\\', "/");
     let new_arg = new_relative.to_string_lossy().replace('\\', "/");
-    run_git(
-        &path,
-        &["mv".to_string(), "--".to_string(), old_arg, new_arg.clone()],
-    )?;
-    Ok(new_arg)
+    let args = vec!["mv".to_string(), "--".to_string(), old_arg, new_arg.clone()];
+    // Windows 对目录改名会检查共享冲突：杀毒 / 索引的瞬时占用重试即可恢复；
+    // 若目录被其它进程作为当前工作目录，重试无效，保留 Git 原始错误交给
+    // Rename 面板解释。只有工作区完全没动过时才重试，避免部分改名后重复执行。
+    let mut attempt = 0;
+    loop {
+        match run_git(&path, &args) {
+            Ok(_) => return Ok(new_arg),
+            Err(GitError::Cli(message))
+                if attempt < 2
+                    && is_rename_permission_error(&message)
+                    && old_absolute.exists()
+                    && !new_absolute.exists() =>
+            {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(150));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn is_rename_permission_error(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("permission denied")
+        || message.contains("access is denied")
+        || message.contains("being used by another process")
 }
 
 /// 重置工作区/暂存区变更（Reset changes 菜单）。paths 为空表示整个仓库；

@@ -66,8 +66,8 @@ export const api = {
     writeInvoke<string>("stage_files", { path, paths }),
   unstageFiles: (path: string, paths: string[]) =>
     writeInvoke<string>("unstage_files", { path, paths }),
-  commit: (path: string, message: string, amend = false) =>
-    writeInvoke<string>("commit", { path, message, amend }),
+  commit: (path: string, message: string, amend = false, scope: string | null = null) =>
+    writeInvoke<string>("commit", { path, message, amend, scope }),
   commitFixup: (path: string, targetOid: string, squash = false) =>
     writeInvoke<string>("commit_fixup", { path, targetOid, squash }),
   applyDiffPatch: (path: string, patch: string, cached: boolean, reverse: boolean) =>

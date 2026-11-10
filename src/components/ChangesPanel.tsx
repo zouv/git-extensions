@@ -32,6 +32,8 @@ interface Props {
   error?: string;
   /** Explorer 文件入口：只预选并预览该文件，不自动暂存或还原。 */
   initialPath?: string | null;
+  /** Explorer 目录入口：只展示并提交该目录下的变更（仓库根为 null）。 */
+  scopePath?: string | null;
 }
 
 type Side = "staged" | "unstaged";
@@ -60,6 +62,10 @@ export default function ChangesPanel(props: Props) {
   const previewRequest = useRef(0);
   const commitTitleRef = useRef<HTMLInputElement>(null);
   const initialPathApplied = useRef(false);
+  const scopePath = props.scopePath ?? null;
+  const inScope = (path: string) => !scopePath || path === scopePath || path.startsWith(`${scopePath}/`);
+  const scoped = (entries: StatusEntry[]) => entries.filter((entry) => inScope(entry.path));
+  const scopedStaged = scoped(status.staged);
 
   useEffect(() => {
     if (props.focusCommitSignal) commitTitleRef.current?.focus();
@@ -211,11 +217,11 @@ export default function ChangesPanel(props: Props) {
 
   const doCommit = () => {
     if (busy) return;
-    if (!amend && status.staged.length === 0) { const message = "没有已暂存的变更"; setCommitError(message); return props.setMessage(message); }
+    if (!amend && scopedStaged.length === 0) { const message = scopePath ? `目录 ${scopePath} 下没有已暂存的变更` : "没有已暂存的变更"; setCommitError(message); return props.setMessage(message); }
     if (!title.trim()) { const message = "提交标题不能为空"; setCommitError(message); return props.setMessage(message); }
     const message = title.trim() + (body.trim() ? `\n\n${body.trim()}` : "");
     void run(async () => {
-      const result = await api.commit(repoPath, message, amend);
+      const result = await api.commit(repoPath, message, amend, scopePath);
       setTitle(""); setBody(""); setAmend(false);
       return result;
     }, amend ? "修正提交 (Amend) 完成" : "提交完成", true);
@@ -258,13 +264,14 @@ export default function ChangesPanel(props: Props) {
   };
 
   const renderList = (side: Side, entries: StatusEntry[]) => {
-    const visible = entries.filter((entry) => entry.path.toLowerCase().includes(filter.trim().toLowerCase()));
+    const scopedEntries = scoped(entries);
+    const visible = scopedEntries.filter((entry) => entry.path.toLowerCase().includes(filter.trim().toLowerCase()));
     const activeIndex = preview?.side === side ? visible.findIndex((entry) => entry.path === preview.path) : -1;
     return <section className="changes-list">
       <div className="changes-list-header">
-        <strong>{side === "staged" ? "已暂存" : "未暂存"}<span className="count-badge">{entries.length}</span></strong>
+        <strong>{side === "staged" ? "已暂存" : "未暂存"}<span className="count-badge">{scopedEntries.length}</span></strong>
         <div>
-          <button disabled={busy || entries.length === 0} onClick={() => stagePaths(side, entries.map((e) => e.path))}>{side === "staged" ? "全部取消" : "全部暂存"}</button>
+          <button disabled={busy || scopedEntries.length === 0} onClick={() => stagePaths(side, scopedEntries.map((e) => e.path))}>{side === "staged" ? "全部取消" : "全部暂存"}</button>
           <button disabled={busy || checked[side].size === 0} onClick={() => stagePaths(side, [...checked[side]])}>{side === "staged" ? "取消选中" : "暂存选中"}</button>
         </div>
       </div>
@@ -293,7 +300,7 @@ export default function ChangesPanel(props: Props) {
           <span className="file-path">{entry.path}</span>
           {entry.status === "conflicted" && <Icon name="conflict" size={14} />}
         </div>)}
-        {visible.length === 0 && <div className="panel-hint">{entries.length === 0 ? "（空）" : "无匹配文件"}</div>}
+        {visible.length === 0 && <div className="panel-hint">{scopedEntries.length === 0 ? "（空）" : "无匹配文件"}</div>}
       </div>
     </section>;
   };
@@ -319,7 +326,7 @@ export default function ChangesPanel(props: Props) {
           <textarea aria-label="提交正文" placeholder="提交正文（可选）" disabled={busy} value={body} onChange={(e) => { setBody(e.target.value); setCommitError(""); }} rows={3} onKeyDown={(e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doCommit(); }
           }} />
-          <button className="primary commit-button" disabled={busy || (!amend && status.staged.length === 0)} onClick={doCommit}>{busy ? <span className="spinner" /> : <Icon name="check" />}{amend ? `修正提交 (${status.staged.length})` : `提交 (${status.staged.length})`}</button>
+          <button className="primary commit-button" disabled={busy || (!amend && scopedStaged.length === 0)} onClick={doCommit}>{busy ? <span className="spinner" /> : <Icon name="check" />}{amend ? `修正提交 (${scopedStaged.length})` : `提交 (${scopedStaged.length})`}</button>
         </div>
       </div>
       <SplitHandle direction="vertical" label="调整变更文件列表宽度" onResize={(delta) => props.onWidth(Math.min(720, Math.max(300, props.width + delta)))} onReset={() => props.onWidth(420)} />

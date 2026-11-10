@@ -214,7 +214,7 @@ export default function ExplorerWindow({ launch }: { launch: LaunchRequest }) {
       break;
     case "view-changes":
       content = <HistoryWindow
-        target={target.scope === "repository" ? target : { ...target, scope: "repository", relativePath: null }}
+        target={target}
         onBusyChange={setBusy}
         mode="view-changes"
       />;

@@ -52,8 +52,8 @@ test("级联项按使用场景分组且顶级项不重复出现", () => {
 test("级别计数按上下文校验整个级联树的 16 项上限，且不自动移动命令", () => {
   const actions = EXPLORER_MENU_ACTIONS.map((item) => item.action);
   const allCascade = setPlacements(actions, "cascade");
-  // 目录上下文可用 17 项、文件上下文 10 项；全部直排时目录上下文超限。
-  assert.equal(explorerMenuLevelCounts(allCascade, false).directoryTotal, 17);
+  // 目录上下文可用 18 项、文件上下文 10 项；全部直排时目录上下文超限。
+  assert.equal(explorerMenuLevelCounts(allCascade, false).directoryTotal, 18);
   assert.equal(explorerMenuLevelCounts(allCascade, false).fileTotal, 10);
   assert.equal(explorerMenuLevelCounts(allCascade, false).issues.length, 1);
 
@@ -61,7 +61,7 @@ test("级别计数按上下文校验整个级联树的 16 项上限，且不自�
   const directoryActions = [
     "clone", "create-repository", "open-repository", "commit", "pull", "push", "view-stash",
     "view-changes", "checkout-branch", "checkout-revision", "create-branch", "view-files",
-    "reset-file-changes", "add-files", "repository-settings", "settings", "rename",
+    "reset-file-changes", "add-files", "repository-settings", "settings", "rename", "file-history",
   ];
   const user = placementsWith("hidden");
   for (const action of directoryActions.slice(0, 13)) user[action] = "cascade";
@@ -79,7 +79,7 @@ test("级别计数按上下文校验整个级联树的 16 项上限，且不自�
   assert.equal(explorerMenuLevelCounts(user, false).issues.length, 0);
 
   // 文件专用命令只计入文件上下文；全部放 Others 也不会超过 16。
-  const fileOnly = ["open-with-difftool", "file-history", "apply-patch"];
+  const fileOnly = ["open-with-difftool", "apply-patch"];
   const fileOthers = setPlacements([...fileOnly, "add-files", "reset-file-changes", "rename", "settings", "view-files", "open-repository", "repository-settings"], "others");
   assert.equal(explorerMenuLevelCounts(fileOthers, false).issues.length, 0);
 });

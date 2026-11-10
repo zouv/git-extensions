@@ -24,6 +24,18 @@ function selectStem(input: HTMLInputElement) {
   else input.select();
 }
 
+/** Windows 共享冲突：目录可能是某个终端 / 编辑器 / Agent 的当前工作目录。 */
+const RENAME_LOCKED = /permission denied|access is denied|being used by another process|拒绝访问/i;
+
+function renameErrorText(reason: unknown): string {
+  const text = String(reason);
+  if (!RENAME_LOCKED.test(text)) return text;
+  return `无法重命名：Windows 拒绝访问，目标目录 / 文件正被其它程序占用。常见原因：\n`
+    + `· 终端、编辑器或 Agent 把该目录作为当前工作目录（Windows 不允许重命名这种目录）；\n`
+    + `· 目录内有文件正被打开、预览或同步。\n`
+    + `请关闭占用它的程序（或在其中切换到别的目录）后重试。\n\n${text}`;
+}
+
 /** 资源管理器 Rename 动作：对选中的文件 / 目录执行 `git mv`（同目录改名）。 */
 export default function RenamePathDialog({ repoPath, relativePath, onClose, onChanged, onDirtyChange, setMessage }: Props) {
   const original = baseName(relativePath);
@@ -53,7 +65,7 @@ export default function RenamePathDialog({ repoPath, relativePath, onClose, onCh
       onChanged();
       onClose();
     } catch (reason) {
-      setError(String(reason));
+      setError(renameErrorText(reason));
     } finally {
       setBusy(false);
     }

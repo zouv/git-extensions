@@ -598,6 +598,101 @@ diff --git a/file.txt b/file.txt
 }
 
 #[test]
+fn scoped_commit_only_commits_staged_changes_under_the_directory() {
+    let workspace = Workspace::new();
+    let repo = workspace.repo("scoped-commit");
+    repo.commit("dir/in.txt", "one\n");
+    repo.commit("other/out.txt", "one\n");
+
+    repo.write("dir/in.txt", "two\n");
+    repo.write("other/out.txt", "two\n");
+    git::cli::stage_files(repo.path(), vec!["dir/in.txt".into()]).unwrap();
+    git::cli::stage_files(repo.path(), vec!["other/out.txt".into()]).unwrap();
+
+    git::cli::commit_ex_scoped(repo.path(), "only dir".into(), false, Some("dir".into())).unwrap();
+
+    let head = repo.head();
+    assert_eq!(
+        git::cli::get_file_content(repo.path(), "dir/in.txt".into(), Some(head.clone()))
+            .unwrap()
+            .content,
+        "two\n"
+    );
+    assert_eq!(
+        git::cli::get_file_content(repo.path(), "other/out.txt".into(), Some(head.clone()))
+            .unwrap()
+            .content,
+        "one\n"
+    );
+    let status = git::status::get_status(repo.path()).unwrap();
+    assert_eq!(
+        status
+            .staged
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["other/out.txt"]
+    );
+    assert!(status.unstaged.is_empty());
+
+    // Amend 同样只替换作用域内的内容，作用域外的暂存改动继续保留。
+    repo.write("dir/in.txt", "three\n");
+    git::cli::stage_files(repo.path(), vec!["dir/in.txt".into()]).unwrap();
+    git::cli::commit_ex_scoped(repo.path(), "amend dir".into(), true, Some("dir".into())).unwrap();
+    let amended = repo.head();
+    assert_eq!(
+        git::cli::get_file_content(repo.path(), "dir/in.txt".into(), Some(amended.clone()))
+            .unwrap()
+            .content,
+        "three\n"
+    );
+    assert_eq!(
+        git::cli::get_file_content(repo.path(), "other/out.txt".into(), Some(amended))
+            .unwrap()
+            .content,
+        "one\n"
+    );
+    let status = git::status::get_status(repo.path()).unwrap();
+    assert_eq!(
+        status
+            .staged
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["other/out.txt"]
+    );
+
+    // 作用域内没有暂存内容时，Amend 仍可只修改提交信息。
+    git::cli::commit_ex_scoped(
+        repo.path(),
+        "amend message only".into(),
+        true,
+        Some("dir".into()),
+    )
+    .unwrap();
+    let message_only = repo.head();
+    assert_eq!(
+        git::diff::get_commit(repo.path(), message_only.clone())
+            .unwrap()
+            .message
+            .trim(),
+        "amend message only"
+    );
+    assert_eq!(
+        git::cli::get_file_content(repo.path(), "dir/in.txt".into(), Some(message_only.clone()))
+            .unwrap()
+            .content,
+        "three\n"
+    );
+    assert_eq!(
+        git::cli::get_file_content(repo.path(), "other/out.txt".into(), Some(message_only))
+            .unwrap()
+            .content,
+        "one\n"
+    );
+}
+
+#[test]
 fn add_reset_stash_and_bare_repository_extensions() {
     let workspace = Workspace::new();
     let repo = workspace.repo("changes");

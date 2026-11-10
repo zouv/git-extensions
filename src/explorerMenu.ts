@@ -41,7 +41,7 @@ export const EXPLORER_MENU_ACTIONS: readonly ExplorerMenuActionSpec[] = [
   { action: "checkout-revision", label: "Checkout revision...", group: "branches", defaultPlacement: "cascade" },
   { action: "create-branch", label: "Create branch...", group: "branches", defaultPlacement: "cascade" },
   { action: "open-with-difftool", label: "Open with difftool", group: "files", defaultPlacement: "cascade" },
-  { action: "file-history", label: "File history", group: "files", defaultPlacement: "cascade" },
+  { action: "file-history", label: "View history", group: "files", defaultPlacement: "cascade" },
   { action: "view-files", label: "View files", group: "files", defaultPlacement: "cascade" },
   { action: "reset-file-changes", label: "Reset file changes...", group: "files", defaultPlacement: "cascade" },
   { action: "add-files", label: "Add files...", group: "files", defaultPlacement: "cascade" },
@@ -91,7 +91,7 @@ const DIRECTORY_ONLY_ACTIONS = new Set<ExplorerAction>([
   "checkout-branch", "checkout-revision", "create-branch",
 ]);
 const FILE_ONLY_ACTIONS = new Set<ExplorerAction>([
-  "open-with-difftool", "file-history", "apply-patch",
+  "open-with-difftool", "apply-patch",
 ]);
 function contextSupports(action: ExplorerAction, fileContext: boolean): boolean {
   if (FILE_ONLY_ACTIONS.has(action)) return fileContext;

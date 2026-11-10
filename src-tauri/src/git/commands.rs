@@ -193,8 +193,13 @@ pub async fn unstage_files(path: String, paths: Vec<String>) -> GitResult<String
 }
 
 #[tauri::command]
-pub async fn commit(path: String, message: String, amend: Option<bool>) -> GitResult<String> {
-    run_blocking(move || cli::commit_ex(path, message, amend.unwrap_or(false))).await
+pub async fn commit(
+    path: String,
+    message: String,
+    amend: Option<bool>,
+    scope: Option<String>,
+) -> GitResult<String> {
+    run_blocking(move || cli::commit_ex_scoped(path, message, amend.unwrap_or(false), scope)).await
 }
 
 #[tauri::command]
