@@ -173,4 +173,4 @@
 
 > 自检：「新对话只读文档能否接力？」+「文档与代码是否一致？」两条都 yes 才算收工；收工前跑一次 `sh check-docs.sh`。
 
-<!-- vibe-coding-starter 2026-10-31 · 文档体系版本标记：初始化时保留，用来判断本项目的规则是否需要随模板升级（变更记录见模板仓库 vibe-coding-starter/README.md） -->
+<!-- vibe-coding-starter 2026-11-10.1 · 文档体系版本标记：初始化时保留，用来判断本项目的规则是否需要随模板升级（变更记录见模板仓库 vibe-coding-starter/README.md） -->

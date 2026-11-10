@@ -12,6 +12,9 @@
 
 ## [未发布]
 
+### 变更
+- 文档体系：同步 vibe-coding-starter 2026-11-10.1（check-docs / skills / hook / .vibe-template）。
+
 ## [0.9.1] - 2026-11-10
 
 ### 新增
