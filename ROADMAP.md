@@ -20,6 +20,7 @@
 - Windows 资源管理器集成、单实例轻量窗口、文件级 View changelog 与 Shell extension 设置已交付 0.6.0；真实菜单、各轻量窗口 / 冲突反馈及安装版 / 便携版验收待补。
 - 0.7.0 已交付界面交互优化：弹窗焦点 / 错误反馈 / 草稿保护、命令面板与原生目录选择、键盘可达性、Diff 工具增强与大列表性能；剩余原生对话框 / 拖放 / 高 DPI / 安装版验收。
 - 0.8.0 已交付核心 Git 能力补齐（P0–P2 共 13 项，对齐上游 Git Extensions）：合并分支、Amend、Hunk 级暂存、Remotes / Worktree 管理、分支文件夹树、命令日志、全库搜索、Fixup / Autosquash、导出补丁 / 归档、Git Bisect 与已合并分支清理；详见 CHANGELOG [0.8.0]，待实机 GUI 验收。
+- 0.9.0 已发布（2026-11-10）：资源管理器 Rename、整棵级联菜单 16 项上限校验与遗留键清理、Branches & Repos 分组、轻量窗口尺寸记忆 / F5 修复 / difftool 保持打开、设置缩放与「应用」按钮；详见 CHANGELOG [0.9.0]。
 
 ---
 
@@ -35,6 +36,7 @@
 - ✅ 0.6.0 资源管理器集成与轻量工作流（2026-11-04）：文件 / 目录菜单、单实例多窗口、Clone / Commit / Pull / changelog 等单任务窗口、统一 View changelog；详见 CHANGELOG [0.6.0]。
 - ✅ 0.7.0 界面交互全面优化（2026-11-07）：弹窗焦点 / 错误可见性 / 草稿保护、命令面板与原生目录选择、键盘与 Diff 工具增强、大列表性能；详见 CHANGELOG [0.7.0]。
 - ✅ 0.8.0 核心 Git 能力补齐（2026-11-08）：合并分支、Amend、Hunk 级暂存、Remotes / Worktree 管理、分支文件夹树、命令日志、提交与代码搜索、Fixup / Autosquash、导出补丁 / 归档、Git Bisect 与批量清理已合并分支；详见 CHANGELOG [0.8.0]。
+- ✅ 0.9.0 资源管理器菜单与窗口体验（2026-11-10）：Rename、16 项整树上限校验、遗留键清理、Branches & Repos 分组、轻量窗口尺寸记忆 / F5 修复 / difftool 保持打开、设置缩放与「应用」；详见 CHANGELOG [0.9.0]。
 
 ---
 

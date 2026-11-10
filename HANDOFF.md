@@ -2,7 +2,7 @@
 
 ## 状态快照
 
-- 最近更新：2026-11-10。完成资源管理器菜单 Others 截断修复（Windows 整棵级联树 16 项上限 + 遗留键清理）、轻量动作窗口尺寸持久化、设置弹窗缩放、「应用」按钮与遮罩关闭策略、Rename（`git mv`）、动作窗口 F5 刷新修复、difftool 窗口保持打开、菜单分组调整；自动测试与构建通过，等待人工 GUI 验收。
+- 最近更新：2026-11-10。0.9.0 已发布并上传 GitHub Release：资源管理器 Rename、菜单 16 项上限与遗留键清理、Branches & Repos 分组、轻量窗口尺寸记忆 / F5 修复 / difftool 保持打开、设置缩放与「应用」按钮。NSIS 3.50 MiB、MSI 5.86 MiB、便携 zip 4.81 MiB，SHA256SUMS 校验通过；当前无进行中任务（待人工 GUI 验收）。
 - 远程已关联并推送：origin = https://github.com/zouv/git-extensions，main 与历史标签已推送。
 
 ## 当前任务
@@ -15,10 +15,11 @@
 
 ## 下一步
 
-- 按「待验收」清单完成 GUI 验收；若 Others 仍不足，按设置页提示把超限的目录直排命令改为一级或隐藏后重新保存。验收前请先运行要使用的构建（release unpack 或 dev）并点一次「保存 / 应用」，让菜单命令指向该可执行文件。
+- 按「待验收」清单完成 0.9.0 GUI 验收；若 Others 仍不足，按设置页提示把超限的目录直排命令改为一级或隐藏后重新保存。验收前请先运行要使用的构建（release unpack 或 dev）并点一次「保存 / 应用」，让菜单命令指向该可执行文件。
 
 ## 验证状态
 
+- 2026-11-10 0.9.0 发布验证：`pnpm test` 71/71、`pnpm build`、`cargo test` 106/106、`cargo fmt --check`、`sh check-docs.sh` 通过；`package` 生成 NSIS 0.9.0（3.50 MiB）、MSI 0.9.0（5.86 MiB）、`unpack/` 便携目录、便携 zip（4.81 MiB）与 `SHA256SUMS.txt`，本地 `sha256sum -c` 三个产物全部 OK；GitHub Release `v0.9.0` 已创建并上传全部 4 个资产。
 - 2026-11-10 本轮：`pnpm test` Node 71/71、`pnpm build`（tsc + Vite）通过、`cargo test` Rust 106/106（46 lib + 10 repository_capabilities + 21 safety + 14 smoke + 15 workflows）、`cargo fmt --check` 通过。新增 Rename 集成测试、菜单 16 项上限 / 遗留键清理 / 分组单测；在 dev 实例中实测 Rename 面板打开、F5 后仍可恢复、Open with difftool 窗口保持打开、设置「应用」后保持面板并置灰、点遮罩不关闭；用真实 Shell 菜单枚举确认 Branches & Repos 分组、Rename 项、重复 Reset 键已清理。另发现菜单指向 dev 构建时若无 Vite 服务会表现为“点菜单没反应”，已加 3 秒兜底显示。
 
 ## 待验收
