@@ -160,8 +160,8 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 
 | 调用方 | 路由 / 入口 | 关键字段 / 约定 |
 |---|---|---|
-| 前端 → 后端 | `open_repo` / `get_branches` / `get_status` | `path` 为仓库内任意路径，后端 discover；RepoInfo 的 headOid / headBranch 在空仓库可为 null；detached 返回 HEAD 名称与实际 OID；状态项 `path` / `oldPath` 为重命名新 / 旧路径 |
-| 前端 → 后端 | `start_log` / `cancel_log` | `requestId` 代际号；cancel 只取消匹配代际；`maxCount` 默认 100000，revspec 非空只从指定 ref 出发 |
+| 前端 → 后端 | `open_repo` / `get_branches` / `get_status` | `path` 为仓库内任意路径，后端 discover；RepoInfo 的 headOid / headBranch 在空仓库可为 null；detached 返回 HEAD 名称与实际 OID；`get_branches` 不返回符号引用（如 `origin/HEAD`）；状态项 `path` / `oldPath` 为重命名新 / 旧路径 |
+| 前端 → 后端 | `start_log` / `cancel_log` | `requestId` 代际号；cancel 只取消匹配代际；`maxCount` 默认 100000；revspec 非空只从指定 ref 出发，为空时从 HEAD + refs 出发并排除 `refs/git-extensions/backups/`、`refs/original/` 与符号引用 |
 | 后端 → 前端 | `log-batch` 事件 | `requestId`、`revisions[]`、`done`、`error` |
 | 前端 → 后端 | `get_commit` / `get_commit_diff` | `oid` 为完整 40 位 |
 | 前端 → 后端 | `get_commit_files` / `get_compare_files` | 不生成 patch 的 FileDiff 清单；compare 返回解析后的 baseOid / targetOid，后续单文件不再用可移动 ref |
@@ -213,8 +213,8 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 - **GUI 下派生 CLI 必须 `CREATE_NO_WINDOW`**（Windows），否则每次写操作闪控制台窗口。
 - **无 HEAD 的新仓库**：`restore --staged` 会失败，`unstage_files` 自动退回 `reset -q --`。
 - **diff 先限内容再限输出**：单文件 >8 MiB 在 Patch 前检查 delta / ODB header / 工作区元数据并跳过，单 patch 512 KiB、合计 4 MiB；超限是 truncated，不伪装 binary。Patch 生成后才能确定二进制，文件清单不能假定最终 binary 分类。
-- **默认 revwalk 起点是 HEAD + refs（排除内部备份）**：detached 也必须 push HEAD；refs 先 peel_to_commit，annotated tag 不能直接 push。排除 refs/git-extensions/backups/，避免被 reset / drop 的旧提交只因备份而混入日常日志；空仓库发空 done。
-- **分支删除预检按 `git branch -d` 语义**：有可解析 upstream 时只比较 upstream，否则回退 HEAD，不能对两者取 OR；`get_branch_delete_status` 只是确认框的 UI 提示，最终安全边界仍是 `-d/-D` 的复核。目录删除必须基于全量分支列表（不受左侧过滤 / 分页影响）并按 `prefix/` 前缀包含嵌套；本地目录含当前 HEAD 时禁止整目录删除，远程目录逐个 `push --delete`，批量部分失败后必须刷新视图并保留失败明细。
+- **默认 revwalk 起点是 HEAD + refs（排除内部备份与重写备份）**：detached 也必须 push HEAD；refs 先 peel_to_commit，annotated tag 不能直接 push。排除 `refs/git-extensions/backups/` 与 `refs/original/`，并跳过符号引用（如 `origin/HEAD`），避免被 reset / drop / filter-branch 重写掉的旧提交混入日常日志；删除分支只删分支本身，不隐式清理 `refs/original`。空仓库发空 done。
+- **分支删除预检按 `git branch -d` 语义**：有可解析 upstream 时只比较 upstream，否则回退 HEAD，不能对两者取 OR；`get_branch_delete_status` 只是确认框的 UI 提示，最终安全边界仍是 `-d/-D` 的复核。目录删除必须基于全量分支列表（不受左侧过滤 / 分页影响）并按 `prefix/` 前缀包含嵌套；本地目录含当前 HEAD 时禁止整目录删除，远程目录逐个 `push --delete`，批量部分失败后必须刷新视图并保留失败明细。写操作开始时 `writeInvoke` 作废同仓库在途读取，删除后刷新不能复用写前结果；删除当前历史过滤的 ref 时清空 `leftRef`，否则提交图会带着失效 revspec 加载。
 - **Push 失败绝不更换目标**：无 upstream 时显式选择目标并校验 branch / HEAD；已有 upstream 的普通 Push 尊重 Git 配置。认证、网络、非快进等失败必须原样返回，不能当作首次推送 fallback。
 - **写锁不可重入**：一个用户操作的内部步骤共用 RAII lease（例如冲突保存后 stage），不能再调用会申请锁的公共写入口；新增写 IPC 必须接入后端调度与前端 `writeInvoke`。
 - **按 ref 过滤仍走同一条日志流**：`start_log` 的可选 `revspec` 只改变 revwalk 起点，保留同一套分批、图布局与双端取消逻辑。

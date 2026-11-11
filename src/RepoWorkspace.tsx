@@ -57,7 +57,6 @@ interface Props {
   repo: RepoInfo;
   active: boolean;
   settings: AppSettings;
-  onOpen: () => void;
   onSettings: () => void;
   onNotify: (kind: NoticeKind, message: string, details?: string) => void;
   onMeta: (meta: SessionMeta) => void;
@@ -147,6 +146,7 @@ export default function RepoWorkspace(props: Props) {
   const branchDeleteFlow = useRef(false);
   const pollingRef = useRef(false);
   const settingsRef = useRef(settings);
+  const leftRefRef = useRef<string | null>(leftRef);
   const selectedOidsRef = useRef<string[]>([]);
   const logListenReadyRef = useRef<Promise<unknown> | null>(null);
   const confirm = useConfirm();
@@ -158,6 +158,7 @@ export default function RepoWorkspace(props: Props) {
   statusRef.current = status;
   busyRef.current = busy;
   settingsRef.current = settings;
+  leftRefRef.current = leftRef;
   selectedOidsRef.current = selectedOids;
 
   useEffect(() => { if (!(import.meta.env.DEV && import.meta.env.VITE_TEST_REPO)) saveLayout(repo.path, layout); }, [layout, repo.path]);
@@ -258,11 +259,11 @@ export default function RepoWorkspace(props: Props) {
     const id = nextLogRequestId();
     requestIdRef.current = id;
     setRevisions([]); setLogLoading(true); setLogError("");
-    startLogWhenReady(id, leftRef);
+    startLogWhenReady(id, leftRefRef.current);
     refreshAux();
     const selected = selectedOidsRef.current[selectedOidsRef.current.length - 1];
     if (selected) loadCommit(selected);
-  }, [leftRef, loadCommit, refreshAux, startLogWhenReady]);
+  }, [loadCommit, refreshAux, startLogWhenReady]);
 
   useEffect(() => { refreshAll(); }, []); // 每个挂载的仓库会话独立加载
   const previousMax = useRef(settings.maxLogCount);
@@ -275,6 +276,15 @@ export default function RepoWorkspace(props: Props) {
     if (previousRef.current === leftRef) return;
     previousRef.current = leftRef; refreshAll();
   }, [leftRef, refreshAll]);
+  /** 删除分支后清掉指向已删分支的历史过滤，避免下一次提交图加载使用失效 revspec。 */
+  const clearDeletedRef = useCallback((names: readonly string[], prefix?: string) => {
+    const current = leftRefRef.current;
+    if (!current) return;
+    if (!names.includes(current) && !(prefix && current.startsWith(`${prefix}/`))) return;
+    leftRefRef.current = null;
+    previousRef.current = null;
+    setLeftRef(null);
+  }, []);
 
   const pollOnce = useCallback(async () => {
     if (pollingRef.current || auxPending.current.running || busyRef.current || getRepoOperation(repo.path) || document.visibilityState !== "visible") return;
@@ -468,6 +478,7 @@ export default function RepoWorkspace(props: Props) {
       if (decision.names.length === 0) {
         setMessage(`分支 ${branch.name} 已不存在`);
         notifyRef.current("info", "分支已不存在", `${branch.name} 可能已被外部删除或重命名`);
+        clearDeletedRef([branch.name]);
         refreshAll();
         return;
       }
@@ -475,7 +486,10 @@ export default function RepoWorkspace(props: Props) {
       if (!await confirm(singleBranchDeleteConfirm(branch.name, branch.oid, force))) return;
       if (busyRef.current || getRepoOperation(repo.path)) return;
       await runAction(
-        () => api.deleteBranch(repo.path, branch.name, force),
+        async () => {
+          await api.deleteBranch(repo.path, branch.name, force);
+          clearDeletedRef([branch.name]);
+        },
         force ? `已强制删除 ${branch.name}` : `已删除 ${branch.name}`,
       );
     } catch (e) {
@@ -484,7 +498,7 @@ export default function RepoWorkspace(props: Props) {
     } finally {
       branchDeleteFlow.current = false;
     }
-  }, [confirm, refreshAll, repo.path, runAction]);
+  }, [clearDeletedRef, confirm, refreshAll, repo.path, runAction]);
 
   const deleteBranchFolder = useCallback(async (prefix: string, kind: "local" | "remote") => {
     if (branchDeleteFlow.current || busyRef.current || getRepoOperation(repo.path)) return;
@@ -505,6 +519,7 @@ export default function RepoWorkspace(props: Props) {
         const decision = decideBranchDeletion(statuses, plan.names);
         if (decision.names.length === 0) {
           notifyRef.current("info", "没有可删除的分支", "目录下的分支已不存在");
+          clearDeletedRef(plan.names, prefix);
           refreshAll();
           return;
         }
@@ -513,6 +528,7 @@ export default function RepoWorkspace(props: Props) {
         await runAction(async () => {
           try {
             await api.deleteBranches(repo.path, decision.names, decision.force);
+            clearDeletedRef(decision.names, prefix);
           } catch (e) {
             refreshAll();
             throw e;
@@ -523,6 +539,7 @@ export default function RepoWorkspace(props: Props) {
 
       if (plan.names.length === 0) {
         notifyRef.current("info", "没有可删除的分支", `目录 ${prefix}/ 下没有远程分支`);
+        clearDeletedRef([], prefix);
         refreshAll();
         return;
       }
@@ -530,18 +547,19 @@ export default function RepoWorkspace(props: Props) {
       if (busyRef.current || getRepoOperation(repo.path)) return;
       await runAction(async () => {
         const failures: string[] = [];
-        let deleted = 0;
+        const deletedNames: string[] = [];
         for (const name of plan.names) {
           try {
             await api.deleteRemoteBranch(repo.path, name);
-            deleted += 1;
+            deletedNames.push(name);
           } catch (e) {
             failures.push(`${name}：${String(e)}`);
           }
         }
+        clearDeletedRef(deletedNames);
         refreshAll();
         if (failures.length > 0) {
-          throw new Error(`已删除 ${deleted}/${plan.names.length} 个远程分支\n${failures.join("\n")}`);
+          throw new Error(`已删除 ${deletedNames.length}/${plan.names.length} 个远程分支\n${failures.join("\n")}`);
         }
       }, `已删除 ${plan.names.length} 个远程分支`);
     } catch (e) {
@@ -550,7 +568,7 @@ export default function RepoWorkspace(props: Props) {
     } finally {
       branchDeleteFlow.current = false;
     }
-  }, [branches, confirm, refreshAll, repo.path, runAction]);
+  }, [branches, clearDeletedRef, confirm, refreshAll, repo.path, runAction]);
 
   const deleteRemoteBranch = useCallback(async (remoteBranch: string) => {
     const ok = await confirm({
@@ -729,8 +747,8 @@ export default function RepoWorkspace(props: Props) {
 
   return (
     <div className="repo-workspace">
-      <Toolbar repo={repoInfo} loading={logLoading} busy={busy} revisionCount={filteredRevisions.length} aheadBehind={aheadBehind} filter={filter} workspace={workspace} inspectorVisible={layout.showInspector} leftVisible={layout.showLeft} inspectorPosition={layout.inspectorPosition} compareBase={compareBase}
-        onFilter={setFilter} onOpen={props.onOpen} onRefresh={refreshAll} onToggleLeft={() => setLayout((prev) => ({ ...prev, showLeft: !prev.showLeft }))} onToggleInspector={() => setLayout((prev) => ({ ...prev, showInspector: !prev.showInspector }))}
+      <Toolbar repo={repoInfo} branches={branches} loading={logLoading} busy={busy} revisionCount={filteredRevisions.length} aheadBehind={aheadBehind} filter={filter} workspace={workspace} inspectorVisible={layout.showInspector} leftVisible={layout.showLeft} inspectorPosition={layout.inspectorPosition} compareBase={compareBase}
+        onFilter={setFilter} onCheckoutBranch={(name) => { if (name !== repoInfo.headBranch) void runAction(() => api.checkoutBranch(repo.path, name), `已切换到 ${name}`); }} onRefresh={refreshAll} onToggleLeft={() => setLayout((prev) => ({ ...prev, showLeft: !prev.showLeft }))} onToggleInspector={() => setLayout((prev) => ({ ...prev, showInspector: !prev.showInspector }))}
         onInspectorPosition={(position) => setLayout((prev) => ({ ...prev, inspectorPosition: position, showInspector: true }))}
         onResetLayout={() => setLayout(resetLayout(repo.path, settings))}
         onWideDiff={() => setLayout((prev) => ({ ...prev, showLeft: false, showInspector: true, inspectorPosition: "right", inspectorSize: 640 }))}
@@ -802,7 +820,7 @@ export default function RepoWorkspace(props: Props) {
       {resetTarget && <ResetDialog repoPath={repo.path} target={resetTarget} onClose={() => setResetTarget(null)} onChanged={refreshAll} onNotify={props.onNotify} />}
       {showRecovery && <RecoveryDialog repoPath={repo.path} onClose={() => setShowRecovery(false)} onRestore={(oid) => { setShowRecovery(false); setResetTarget(oid); }} />}
       {showPush && <PushDialog repoPath={repo.path} onClose={() => setShowPush(false)} onChanged={refreshAll} onNotify={props.onNotify} />}
-      {showBranches && <BranchDialog repoPath={repo.path} branches={branches} initialStartPoint={branchStart} initialMode={branchMode} initialSelected={branchSelected} onClose={() => setShowBranches(false)} onChanged={refreshAll} setMessage={setMessage} onMergeRef={(ref) => setMergeTarget(ref)} />}
+      {showBranches && <BranchDialog repoPath={repo.path} branches={branches} initialStartPoint={branchStart} initialMode={branchMode} initialSelected={branchSelected} onClose={() => setShowBranches(false)} onChanged={(deletedRefs) => { if (deletedRefs) clearDeletedRef(deletedRefs); refreshAll(); }} setMessage={setMessage} onMergeRef={(ref) => setMergeTarget(ref)} />}
       {mergeTarget !== null && <MergeDialog repoPath={repo.path} headBranch={repoInfo.headBranch} branches={branches} initialTarget={mergeTarget || undefined} onClose={() => setMergeTarget(null)} onChanged={refreshAll} onConflict={showConflict} onNotify={props.onNotify} />}
       {showPullOptions && <PullDialog repoPath={repo.path} headBranch={repoInfo.headBranch} onClose={() => setShowPullOptions(false)} onChanged={refreshAll} onConflict={showConflict} onNotify={props.onNotify} />}
       {showRemotes && <RemotesDialog repoPath={repo.path} onClose={() => setShowRemotes(false)} onChanged={refreshAll} setMessage={setMessage} />}

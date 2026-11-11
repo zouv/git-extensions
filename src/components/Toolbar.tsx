@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import type { AheadBehind, RepoInfo } from "../types";
+import type { AheadBehind, BranchInfo, RepoInfo } from "../types";
 import Icon from "../ui/Icon";
 import type { IconName } from "../ui/Icon";
 import ContextMenu from "../ui/ContextMenu";
@@ -7,6 +7,7 @@ import type { MenuItem } from "../ui/ContextMenu";
 
 interface Props {
   repo: RepoInfo;
+  branches: BranchInfo[];
   loading: boolean;
   busy: boolean;
   revisionCount: number;
@@ -18,7 +19,7 @@ interface Props {
   inspectorPosition: "right" | "bottom";
   compareBase: string | null;
   onFilter: (value: string) => void;
-  onOpen: () => void;
+  onCheckoutBranch: (name: string) => void;
   onRefresh: () => void;
   onToggleLeft: () => void;
   onToggleInspector: () => void;
@@ -52,8 +53,10 @@ export default function Toolbar(props: Props) {
   const { repo, loading, busy, revisionCount, aheadBehind, filter } = props;
   const [viewMenu, setViewMenu] = useState<{ x: number; y: number } | null>(null);
   const [moreMenu, setMoreMenu] = useState<{ x: number; y: number } | null>(null);
+  const [branchMenu, setBranchMenu] = useState<{ x: number; y: number } | null>(null);
   const viewButton = useRef<HTMLButtonElement>(null);
   const moreButton = useRef<HTMLButtonElement>(null);
+  const branchButton = useRef<HTMLButtonElement>(null);
   const openMenu = (element: HTMLElement | null, setter: (value: { x: number; y: number } | null) => void) => {
     if (!element) return;
     const rect = element.getBoundingClientRect();
@@ -88,16 +91,40 @@ export default function Toolbar(props: Props) {
     ...(props.onCommandLog ? [{ id: "command-log", label: "Git 命令执行日志…", shortcut: "Ctrl+Shift+G", onSelect: props.onCommandLog }] : []),
   ];
 
+  const branchItems: MenuItem[] = [
+    ...props.branches.filter((branch) => !branch.isRemote).map((branch) => ({
+      id: `branch-${branch.name}`,
+      label: branch.name,
+      icon: "branch" as const,
+      checked: branch.isHead,
+      disabled: branch.isHead,
+      title: branch.isHead ? "当前分支" : `切换到 ${branch.name}`,
+      onSelect: () => props.onCheckoutBranch(branch.name),
+    })),
+    ...(props.branches.some((branch) => !branch.isRemote) ? [{ id: "sep-branch", separator: true }] : []),
+    { id: "manage-branches", label: "分支管理…", icon: "branch" as const, shortcut: "Ctrl+Shift+B", onSelect: props.onBranches },
+  ];
+
   return (
     <div className="toolbar">
       <div className="toolbar-group">
         <ToolButton icon="menu" title="显示 / 隐藏导航 (Ctrl+B)" onClick={props.onToggleLeft} />
-        <ToolButton icon="plus" title="打开仓库 (Ctrl+O)" onClick={props.onOpen} />
         <ToolButton icon="refresh" title="刷新当前仓库 (F5)" disabled={loading || busy} onClick={props.onRefresh} />
       </div>
       <div className="toolbar-separator" />
       <div className="toolbar-group branch-toolbar-group">
-        <button className="branch-switch" disabled={busy} onClick={props.onBranches} title="分支管理 (Ctrl+Shift+B)"><Icon name="branch" /><strong>{repo.headBranch ?? " detached HEAD"}</strong>{aheadBehind && (aheadBehind.ahead > 0 || aheadBehind.behind > 0) && <span>↑{aheadBehind.ahead} ↓{aheadBehind.behind}</span>}<Icon name="chevron-down" size={13} /></button>
+        <button
+          ref={branchButton}
+          className="branch-switch"
+          disabled={busy}
+          onClick={() => { if (branchMenu) setBranchMenu(null); else openMenu(branchButton.current, setBranchMenu); }}
+          onPointerDown={(event) => { if (branchMenu) event.stopPropagation(); }}
+          title="切换分支 / 分支管理"
+          aria-haspopup="menu"
+          aria-expanded={!!branchMenu}
+        >
+          <Icon name="branch" /><strong>{repo.headBranch ?? " detached HEAD"}</strong>{aheadBehind && (aheadBehind.ahead > 0 || aheadBehind.behind > 0) && <span>↑{aheadBehind.ahead} ↓{aheadBehind.behind}</span>}<Icon name="chevron-down" size={13} />
+        </button>
       </div>
       <div className="toolbar-group remote-actions">
         <ToolButton icon="fetch" label="Fetch" title="Fetch (Ctrl+Shift+F)" disabled={busy} onClick={() => props.onRemote("fetch")} />
@@ -118,9 +145,10 @@ export default function Toolbar(props: Props) {
         <ToolButton icon="history" title="恢复历史：HEAD 备份与 reflog" disabled={busy} onClick={props.onRecovery} />
         <ToolButton icon="stash" title="Stash (Ctrl+Shift+S)" disabled={busy} onClick={props.onStash} />
         <ToolButton icon="tag" title="标签 (Ctrl+Shift+T)" disabled={busy} onClick={props.onTags} />
-        <ToolButton icon="more" title="子模块 (Ctrl+Shift+M)" disabled={busy} onClick={props.onSubmodules} />
+        <ToolButton icon="folder" title="子模块 (Ctrl+Shift+M)" disabled={busy} onClick={props.onSubmodules} />
       </div>
       <button ref={moreButton} type="button" className="tool-button toolbar-more" title="更多操作" aria-label="更多操作" aria-haspopup="menu" aria-expanded={!!moreMenu} onPointerDown={(event) => { if (moreMenu) event.stopPropagation(); }} onClick={() => { if (moreMenu) setMoreMenu(null); else openMenu(moreButton.current, setMoreMenu); }}><Icon name="more" /><span>更多</span></button>
+      {branchMenu && <ContextMenu x={branchMenu.x} y={branchMenu.y} onClose={() => setBranchMenu(null)} ariaLabel="切换分支" items={branchItems} />}
       {viewMenu && <ContextMenu x={viewMenu.x} y={viewMenu.y} onClose={() => setViewMenu(null)} ariaLabel="视图" items={viewItems} />}
       {moreMenu && <ContextMenu x={moreMenu.x} y={moreMenu.y} onClose={() => setMoreMenu(null)} ariaLabel="更多操作" items={moreItems} />}
     </div>

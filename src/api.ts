@@ -43,6 +43,15 @@ function invoke<T>(command: string, args: Record<string, unknown>): Promise<T> {
 }
 
 function writeInvoke<T>(command: string, args: { path: string; [key: string]: unknown }): Promise<T> {
+  // 写操作开始后，之前发起的读取可能读到旧状态；不要让写后的刷新复用在途旧结果。
+  for (const key of [...pendingReads.keys()]) {
+    try {
+      const [, requestArgs] = JSON.parse(key) as [string, { path?: string }];
+      if (requestArgs?.path === args.path) pendingReads.delete(key);
+    } catch {
+      pendingReads.delete(key);
+    }
+  }
   return runRepoWrite(args.path, command, () => tauriInvoke<T>(command, args));
 }
 

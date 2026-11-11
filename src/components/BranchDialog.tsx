@@ -17,7 +17,7 @@ interface Props {
   initialMode?: "checkout" | "create";
   initialSelected?: string;
   onClose: () => void;
-  onChanged: () => void;
+  onChanged: (deletedRefs?: readonly string[]) => void;
   setMessage: (msg: string) => void;
   onMergeRef?: (ref: string) => void;
 }
@@ -25,7 +25,7 @@ interface Props {
 export default function BranchDialog({ repoPath, branches, initialStartPoint, initialMode = "checkout", initialSelected, onClose, onChanged, setMessage, onMergeRef }: Props) {
   const [selected, setSelected] = useState<string | null>(initialSelected ?? null);
   const [newName, setNewName] = useState("");
-  const [renameTo, setRenameTo] = useState("");
+  const [renameTo, setRenameTo] = useState(initialSelected ?? "");
   const [strategy, setStrategy] = useState<"default" | "stash" | "reset">("default");
   const [localName, setLocalName] = useState("");
   const [checkoutAfterCreate, setCheckoutAfterCreate] = useState(true);
@@ -40,7 +40,9 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, in
   const selectedEntry = branches.find((b) => b.name === selected) ?? null;
   const selectedBranch = selectedEntry && !selectedEntry.isRemote ? selectedEntry : null;
   const selectedRemote = selectedEntry && selectedEntry.isRemote ? selectedEntry : null;
-  const close = useDirtyClose(newName.trim().length > 0 || renameTo.trim().length > 0 || localName.trim().length > 0, busy, onClose);
+  // 选中分支会自动把原名填进重命名框；只有内容真的变化才算未保存修改。
+  const renameDirty = !!selectedBranch && renameTo.trim() !== selectedBranch.name;
+  const close = useDirtyClose(newName.trim().length > 0 || renameDirty || localName.trim().length > 0, busy, onClose);
 
   useEffect(() => {
     let alive = true;
@@ -50,13 +52,13 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, in
     return () => { alive = false; };
   }, [repoPath, branches]);
 
-  const run = async (action: () => Promise<unknown>, success: string, closeOnDone = true) => {
+  const run = async (action: () => Promise<unknown>, success: string, closeOnDone = true, deletedRefs?: readonly string[]) => {
     if (busy) return;
     setBusy(true); setError("");
     try {
       await action();
       setMessage(success);
-      onChanged();
+      onChanged(deletedRefs);
       if (closeOnDone) onClose();
       else setBusy(false);
     } catch (e) { setError(String(e)); setMessage(String(e)); setBusy(false); }
@@ -94,6 +96,8 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, in
         await run(
           () => api.deleteBranch(repoPath, target.name, force),
           force ? `已强制删除 ${target.name}` : `已删除 ${target.name}`,
+          true,
+          [target.name],
         );
       }
     } catch (e) {
@@ -150,7 +154,7 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, in
     void run(async () => {
       await api.deleteBranches(repoPath, mergedNames, false);
       setMergedNames([]);
-    }, `已清理 ${mergedNames.length} 个已合并分支`, false);
+    }, `已清理 ${mergedNames.length} 个已合并分支`, false, mergedNames);
   };
 
   return (

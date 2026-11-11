@@ -82,6 +82,10 @@ fn collect_refs(repo: &Repository) -> HashMap<Oid, Vec<RefLabel>> {
         let Some(name) = reference.name() else {
             continue;
         };
+        // 符号引用（如 refs/remotes/origin/HEAD）只是别名，不作为独立 ref 标签。
+        if reference.symbolic_target().is_some() {
+            continue;
+        }
         let (short, kind) = if name == "refs/stash" {
             ("stash".to_string(), "stash")
         } else if let Some(s) = name.strip_prefix("refs/heads/") {
@@ -298,10 +302,14 @@ pub fn run_log(
                 pushed += 1;
             }
             for reference in repo.references()?.flatten() {
-                // 内部恢复引用不属于日常历史，避免 Reset/drop 后旧提交幽灵重现。
-                if reference
-                    .name()
-                    .is_some_and(|name| name.starts_with("refs/git-extensions/backups/"))
+                let Some(name) = reference.name() else {
+                    continue;
+                };
+                // 内部恢复引用与 filter-branch 备份不属于日常历史，避免 Reset / 分支删除 / 历史重写后
+                // 旧提交幽灵重现；符号引用（origin/HEAD）也不作为独立起点。
+                if name.starts_with("refs/git-extensions/backups/")
+                    || name.starts_with("refs/original/")
+                    || reference.symbolic_target().is_some()
                 {
                     continue;
                 }

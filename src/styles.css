@@ -402,9 +402,13 @@ kbd { font: 11px Consolas, monospace; }
 
 /* 弹窗与确认 */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .58); display: flex; align-items: center; justify-content: center; z-index: 400; }
-.about-app { display: flex; align-items: center; gap: 14px; }
-.about-app h4 { margin: 0 0 2px; font-size: 16px; font-weight: 600; }
-.about-app img { border-radius: 8px; }
+.modal.about-dialog { width: min(480px, calc(100vw - 40px)); }
+.about-app { display: flex; align-items: flex-start; gap: 16px; padding: 4px 2px; }
+.about-app-icon { flex: 0 0 auto; border-radius: 10px; }
+.about-app-info { display: flex; flex-direction: column; min-width: 0; }
+.about-app h4 { margin: 0; font-size: 18px; font-weight: 600; }
+.about-app-meta { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.about-app-desc { margin: 14px 0 0; font-size: 13px; line-height: 1.6; }
 .modal { position: relative; width: min(520px, calc(100vw - 40px)); max-width: calc(100vw - 40px); max-height: 85vh; display: flex; flex-direction: column; gap: 0; background: var(--elevated); border: 1px solid #3a4350; border-radius: 7px; box-shadow: 0 16px 50px rgba(0, 0, 0, .5); overflow: hidden; }
 .modal-wide { width: min(1040px, calc(100vw - 40px)); }
 .modal-resizable { min-width: 320px; min-height: 260px; }

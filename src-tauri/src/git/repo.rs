@@ -205,6 +205,10 @@ pub fn get_branches(path: String) -> GitResult<Vec<BranchInfo>> {
     for item in repo.branches(None)? {
         let (branch, kind) = item?;
         let reference = branch.get();
+        // refs/remotes/origin/HEAD 是符号引用，不是可操作的远程分支。
+        if reference.symbolic_target().is_some() {
+            continue;
+        }
         let oid = reference
             .target()
             .map(|o| o.to_string())

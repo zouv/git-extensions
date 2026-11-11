@@ -29,7 +29,7 @@
 | `src/ui/ContextMenu.tsx` | 统一右键菜单：视口定位、焦点循环、`keepOpen` 多选菜单、浮层栈 | 改菜单行为 |
 | `src/ui/Confirm.tsx` | 应用内危险确认；危险操作默认聚焦“取消”，requireAck 聚焦勾选框 | 改危险确认策略 |
 | `src/ui/SplitHandle.tsx` / `Icon.tsx` | 可拖拽分栏与本地 SVG 图标 | 改共享交互原语 |
-| `src/components/Toolbar.tsx` | 命令栏：分支 / 远程 / 过滤 / 视图菜单 / 窄窗口“更多”菜单 | 改工具栏组织 |
+| `src/components/Toolbar.tsx` | 命令栏：分支下拉（切换 + 分支管理入口）/ 远程 / 过滤 / 视图菜单 / 窄窗口“更多”菜单 | 改工具栏组织 |
 | `src/components/LeftPanel.tsx` | 本地变更 / 全部提交 / 分支 / 标签 / Submodules / Worktrees；分支标签过滤、200 条分页、树键盘移动、worktree 打开、分支目录右键批量删除 | 改引用导航 |
 | `src/branchDelete.ts` | 分支目录收集与删除计划纯函数：`prefix/` 匹配、嵌套、远程 HEAD 排除、合并状态 → 是否强制 | 改目录删除规则 |
 | `src/branchDeleteDialog.tsx` | 单分支 / 本地目录 / 远程目录删除确认框：动态确认按钮与警告文案 | 改删除确认文案或样式 |
@@ -71,6 +71,7 @@
 | 提交图选择 / 图宽 / 右键扩展动作 | `RevisionGrid.tsx` 的容器 keydown、`aria-activedescendant`、`graphScan`、`RevisionAction` | 支持合并到当前分支、Fixup/Squash、导出补丁/归档、Bisect Good/Bad |
 | Diff 模式 / 文件过滤 / Hunk 按钮 | `DiffView.tsx` 的 `loadDiffMode` / `loadDiffWrap`、`filteredEntries`、`renderHunkBar`、`openLineMenu`、`goDiff` | 偏好键含 `prefKey`（仓库路径）；文件列表 500 条封顶 |
 | 左侧导航 / 分支文件夹树 | `LeftPanel.tsx` 的 `refFilter`、`refLimit`、`collapsedFolders`、`focusProps`、`treeKeyDown`、`onOpenWorktree`、`onDeleteBranchFolder`；`viewState.ts::buildBranchTree`；`branchDelete.ts::planBranchFolderDelete`、`decideBranchDeletion` | 分支按 `/` 分层可折叠；右键支持远程检出、重命名、远程删除与合并；目录右键可批量删除整棵子树，含当前 HEAD 的本地目录禁用 |
+| 工具栏分支切换 / 分支管理入口 | `Toolbar.tsx` 的 `branchMenu`、`branchItems`、`onCheckoutBranch`；`BranchDialog.tsx` | 下拉列出全部本地分支，当前分支勾选并禁用；底部「分支管理…」才打开管理弹窗；弹窗只在输入真正变化时算 dirty |
 | Merge / Pull / Remotes / Worktree / 搜索 / 命令日志 / Bisect | `MergeDialog.tsx`、`PullDialog.tsx`、`RemotesDialog.tsx`、`WorktreeDialog.tsx`、`SearchDialog.tsx`、`CommandLogDialog.tsx`；`RepoWorkspace.tsx` 的 Bisect 横幅 | `Ctrl+Shift+H` 打开搜索、`Ctrl+Shift+G` 打开命令日志 |
 | 对比基准 | `RepoWorkspace.tsx` 的 `compareBase`、`onRevisionAction("compare-base")`；`Toolbar.tsx` 的 `compare-base-chip`；`RevisionGrid.tsx` 菜单标签 | 基准 chip 可清除；Esc 先清基准 |
 | 任务视图 / 草稿 | `RepoWorkspace.tsx` 的 `conflictDrafts`、`rebaseDrafts`、`saveConflictDraft`、`saveRebaseDraft`、`switchWorkspace` | 草稿存在会话 maps；关闭页签确认 |
@@ -150,6 +151,8 @@
 - **通知不能被 slice 静默丢弃**：错误是用户唯一的 Git stderr 查看入口；只显示最近几条并让“清理”清空全部会让错误永久丢失。抽屉保留全部，清理需确认。
 - **轮询不能重置 DiffView**：预览刷新时保留旧 patch；`setPreview({file:null})` 会让面板闪 spinner 并丢失滚动 / 模式 / 折叠。
 - **命令注册按 active 仓库**：非活动 RepoWorkspace 不能注册命令，否则在 A 仓库会执行 B 的刷新 / 提交 / 分支操作。
+- **分支管理 dirty 不能把自动回填当修改**：选中分支会把原名填进重命名框，dirty 必须是 `renameTo !== selectedBranch.name`；否则打开分支管理后直接关闭也会提示「放弃未保存的修改」。
+- **工具栏分支按钮是下拉而不是管理入口**：点击展开本地分支菜单，当前分支勾选并禁用，底部「分支管理…」才打开 `BranchDialog`；不要把两个动作合并回一个按钮。
 - **键盘列表需要单一 Tab 停靠点**：表格化 rows 全部 `tabIndex=0` 会产生几十上百个 Tab 停靠点；用容器 / roving + `aria-activedescendant`。
 - **原生 dialog 插件需要权限**：`@tauri-apps/plugin-dialog` 在 `lib.rs` 注册，capabilities 加 `dialog:allow-open`；便携版同样要在主进程初始化。
 - **Diff 偏好按仓库键存储**：`prefKey` 为仓库路径；不要回退成全局键，否则不同仓库互相覆盖 Inline / Split 设置。
@@ -161,6 +164,6 @@
 - **布局与草稿按仓库隔离**：已访问的 RepoWorkspace 与提交面板持久挂载；冲突 / Rebase 草稿保留在会话 maps（含空内容、删除意图、原来源），关闭页签才丢失；不持久化仓库内容草稿。
 - **读取去重不是长期缓存**：`api.pendingReads` 只合并同参数在途 Promise，完成 / 失败立即释放；动态 ref 固定到 OID 后才给单文件 loader。
 - **自绘顶部栏与窗口生命周期**：`decorations: false`；`data-tauri-drag-region` 只作用于直接元素；窗口控制权限在 capabilities；系统关闭统一走 `closeWindow`，`allowCloseRef` 防循环，关闭失败恢复标记并显示错误；主窗口 `Destroyed` 后显式 `exit(0)`。
-- **分支目录删除必须基于全量列表**：不能用 `localTree` / `remoteTree` 或 `local.slice(0, refLimit)` 收集，否则过滤词与 200 条分页会漏删 / 误删；按 `prefix + "/"` 匹配（不包含同名叶子分支），本地 / 远程分开，远程排除 `origin/HEAD`。含当前 HEAD 的本地目录禁用整目录删除；确认框列出实际将删除的完整名单。预检结果只用于确认框，最终仍由 `git branch -d/-D` 复核。
+- **分支目录删除必须基于全量列表**：不能用 `localTree` / `remoteTree` 或 `local.slice(0, refLimit)` 收集，否则过滤词与 200 条分页会漏删 / 误删；按 `prefix + "/"` 匹配（不包含同名叶子分支），本地 / 远程分开，远程排除 `origin/HEAD`。含当前 HEAD 的本地目录禁用整目录删除；确认框列出实际将删除的完整名单。预检结果只用于确认框，最终仍由 `git branch -d/-D` 复核。写操作开始时 `writeInvoke` 会作废同仓库在途读取，删除后刷新不会复用旧结果；删除当前历史过滤的 ref 时必须清空 `leftRef`，否则提交图会用失效 revspec 加载。`origin/HEAD` 是符号引用，`get_branches` 与 ref 标签都应跳过，避免它作为远程分支或额外提交图标签出现。
 - **页签分组 / 拖拽 / 启动恢复**：分组是纯 UI 配置，Default 不可改名 / 删除 / Pin；页签拖拽 6px 阈值、条外 / Esc / 失捕取消；`openRepos.v1` 缺失回退 `lastRepo`、显式 `[]` 不回退；恢复只懒挂载活动页签，`sessionRestored` 前禁止持久化，StrictMode 用 ref 防双跑。
 

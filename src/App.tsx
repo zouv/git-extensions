@@ -651,7 +651,6 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
             repo={repo}
             active={repo.path === activePath}
             settings={settings}
-            onOpen={() => beginOpen(repo.path)}
             onSettings={() => setShowSettings(true)}
             onNotify={(kind, message, details) => notify(repo.path, kind, message, details, repo.name)}
             onMeta={(value) => updateMeta(repo.path, value)}

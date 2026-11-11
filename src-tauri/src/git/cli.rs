@@ -1534,6 +1534,7 @@ pub fn rename_branch(path: String, old_name: String, new_name: String) -> GitRes
     )
 }
 
+/// 只删除本地分支；`refs/original/*` 等 filter-branch 备份不是分支，不在这里隐式清理。
 pub fn delete_branch(path: String, name: String, force: bool) -> GitResult<String> {
     let _write = acquire_write(&path)?;
     validate_ref_name(&name, "heads")?;

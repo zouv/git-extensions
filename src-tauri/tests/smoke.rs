@@ -411,6 +411,104 @@ fn run_log_collects_all_commits() {
 }
 
 #[test]
+fn run_log_ignores_filter_branch_backup_refs() {
+    let t = TempRepo::new("run-log-original-refs");
+    let path = t.path();
+    t.write("a.txt", "one\n");
+    git::cli::stage_files(path.clone(), vec!["a.txt".into()]).unwrap();
+    git::cli::commit(path.clone(), "c1".into()).unwrap();
+    let main = git::repo::open_repo(path.clone())
+        .unwrap()
+        .head_branch
+        .unwrap();
+
+    git::cli::create_branch(path.clone(), "old-history".into(), None).unwrap();
+    git::cli::checkout_branch(path.clone(), "old-history".into()).unwrap();
+    t.write("old.txt", "old\n");
+    git::cli::stage_files(path.clone(), vec!["old.txt".into()]).unwrap();
+    git::cli::commit(path.clone(), "rewritten".into()).unwrap();
+    let old_oid = git::repo::open_repo(path.clone())
+        .unwrap()
+        .head_oid
+        .unwrap();
+    git::cli::checkout_branch(path.clone(), main).unwrap();
+    git::cli::delete_branch(path.clone(), "old-history".into(), true).unwrap();
+
+    git2::Repository::open(&t.root)
+        .unwrap()
+        .reference(
+            "refs/original/refs/heads/old-history",
+            old_oid.parse().unwrap(),
+            false,
+            "filter-branch backup",
+        )
+        .unwrap();
+
+    let batches = std::cell::RefCell::new(Vec::new());
+    git::log::run_log(&path, 1, 1000, None, &|| false, &|b| {
+        batches.borrow_mut().push(b)
+    })
+    .unwrap();
+    let subjects: Vec<String> = batches
+        .into_inner()
+        .into_iter()
+        .flat_map(|b| b.revisions)
+        .map(|r| r.subject)
+        .collect();
+    assert_eq!(subjects, vec!["c1"]);
+    assert!(!subjects.iter().any(|subject| subject == "rewritten"));
+}
+
+#[test]
+fn symbolic_remote_head_is_hidden_from_branches_and_ref_labels() {
+    let t = TempRepo::new("remote-head");
+    let path = t.path();
+    t.write("a.txt", "one\n");
+    git::cli::stage_files(path.clone(), vec!["a.txt".into()]).unwrap();
+    git::cli::commit(path.clone(), "c1".into()).unwrap();
+    let head = git::repo::open_repo(path.clone())
+        .unwrap()
+        .head_oid
+        .unwrap();
+
+    let repo = git2::Repository::open(&t.root).unwrap();
+    repo.reference(
+        "refs/remotes/origin/main",
+        head.parse().unwrap(),
+        false,
+        "test remote main",
+    )
+    .unwrap();
+    repo.reference_symbolic(
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+        false,
+        "test remote head",
+    )
+    .unwrap();
+    drop(repo);
+
+    let branches = git::repo::get_branches(path.clone()).unwrap();
+    assert!(branches.iter().any(|branch| branch.name == "origin/main"));
+    assert!(!branches.iter().any(|branch| branch.name == "origin/HEAD"));
+
+    let batches = std::cell::RefCell::new(Vec::new());
+    git::log::run_log(&path, 1, 1000, None, &|| false, &|b| {
+        batches.borrow_mut().push(b)
+    })
+    .unwrap();
+    let labels: Vec<String> = batches
+        .into_inner()
+        .into_iter()
+        .flat_map(|b| b.revisions)
+        .flat_map(|revision| revision.refs)
+        .map(|label| label.name)
+        .collect();
+    assert!(labels.iter().any(|name| name == "origin/main"));
+    assert!(!labels.iter().any(|name| name == "origin/HEAD"));
+}
+
+#[test]
 fn run_log_empty_repo_emits_done() {
     let t = TempRepo::new("run-log-empty");
     let path = t.path();

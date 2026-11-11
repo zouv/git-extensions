@@ -15,6 +15,7 @@ import Dialog from "../ui/Dialog";
 import Icon from "../ui/Icon";
 import GroupAvatar from "./GroupAvatar";
 import appIcon from "../../src-tauri/icons/32x32.png";
+import aboutIcon from "../../src-tauri/icons/128x128.png";
 
 interface Props {
   repos: RepoInfo[];
@@ -230,15 +231,15 @@ export default function TitleBar(props: Props) {
         <ContextMenu x={groupMenu.x} y={groupMenu.y} onClose={() => setGroupMenu(null)} ariaLabel="仓库页签分组" items={groupMenuItems} />
       )}
       {aboutOpen && (
-        <Dialog title="关于 Git Extensions" onClose={() => setAboutOpen(false)} footer={<button className="primary" onClick={() => setAboutOpen(false)}>关闭</button>}>
+        <Dialog title="关于 Git Extensions" className="about-dialog" onClose={() => setAboutOpen(false)} footer={<button className="primary" onClick={() => setAboutOpen(false)}>关闭</button>}>
           <div className="about-app">
-            <img src={appIcon} width={48} height={48} alt="" />
-            <div>
+            <img className="about-app-icon" src={aboutIcon} width={64} height={64} alt="" />
+            <div className="about-app-info">
               <h4>Git Extensions</h4>
-              <p className="panel-hint">版本 {version || "—"}</p>
+              <p className="about-app-meta">版本 {version || "—"} · 作者 @zouv</p>
+              <p className="about-app-desc">本地 Git 仓库浏览与操作工具。<br />基于 Tauri 2、Rust 与 React 构建。</p>
             </div>
           </div>
-          <p className="panel-hint">本地 Git 仓库浏览与操作工具，基于 Tauri 2、Rust 与 React 构建。</p>
         </Dialog>
       )}
     </div>
