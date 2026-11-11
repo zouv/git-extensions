@@ -655,6 +655,7 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
             onNotify={(kind, message, details) => notify(repo.path, kind, message, details, repo.name)}
             onMeta={(value) => updateMeta(repo.path, value)}
             onOpenRepo={(path) => { void openRepo(path); }}
+            onCloseRepo={() => { void closeRepo(repo.path); }}
             launchAction={workspaceLaunch?.path === repo.path ? workspaceLaunch : null}
             onLaunchActionConsumed={() => setWorkspaceLaunch((current) => current?.path === repo.path ? null : current)}
           />

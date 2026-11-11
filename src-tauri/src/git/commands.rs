@@ -538,6 +538,16 @@ pub async fn submodule_update(path: String) -> GitResult<String> {
 }
 
 #[tauri::command]
+pub async fn submodule_sync(path: String) -> GitResult<String> {
+    run_blocking(move || cli::submodule_sync(path)).await
+}
+
+#[tauri::command]
+pub async fn git_maintenance(path: String, action: String) -> GitResult<String> {
+    run_blocking(move || cli::git_maintenance(path, action)).await
+}
+
+#[tauri::command]
 pub async fn get_push_info(path: String) -> GitResult<cli::PushInfo> {
     super::operations::run_read(move || cli::get_push_info(path)).await
 }

@@ -6,6 +6,10 @@ export interface RepoInfo {
   isEmpty: boolean;
 }
 
+/** Repository 菜单允许编辑的固定配置文件。 */
+export type RepoFileTarget = "gitignore" | "exclude" | "gitattributes" | "mailmap" | "config";
+export type GitMaintenanceAction = "gc" | "delete-index-lock";
+
 export interface BranchInfo {
   name: string;
   isHead: boolean;

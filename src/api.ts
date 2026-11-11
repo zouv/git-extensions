@@ -27,6 +27,7 @@ import type {
   RemoteInfo, CommandLogEntry, GrepMatch, MergeMode, PullMode, CloneProgress,
   PatchFileInfo, PatchApplyState, FileContent,
   BranchDeleteStatus,
+  RepoFileTarget, GitMaintenanceAction,
 } from "./types";
 
 // 只合并仍在途的同参数读取，不缓存工作区结果。
@@ -155,6 +156,9 @@ export const api = {
   deleteTag: (path: string, name: string) => writeInvoke<string>("delete_tag", { path, name }),
   submoduleList: (path: string) => invoke<SubmoduleInfo[]>("submodule_list", { path }),
   submoduleUpdate: (path: string) => writeInvoke<string>("submodule_update", { path }),
+  submoduleSync: (path: string) => writeInvoke<string>("submodule_sync", { path }),
+  gitMaintenance: (path: string, action: GitMaintenanceAction) =>
+    writeInvoke<string>("git_maintenance", { path, action }),
   worktreeList: (path: string) => invoke<WorktreeInfo[]>("worktree_list", { path }),
   worktreeAdd: (
     path: string,
@@ -219,6 +223,8 @@ export const api = {
     writeInvoke<string>("rename_path", { path, relative, newName }),
   openPath: (path: string, file: string) => invoke<void>("open_path", { path, file }),
   revealPath: (path: string, file?: string) => invoke<void>("reveal_path", { path, file }),
+  editRepoFile: (path: string, target: RepoFileTarget) =>
+    writeInvoke<void>("edit_repo_file", { path, target }),
   getResetPreview: (path: string, target: string, mode: ResetMode) => invoke<ResetPreview>("get_reset_preview", { path, target, mode }),
   reset: (path: string, preview: ResetPreview) => writeInvoke<ResetResult>("reset", { path, preview }),
   getRecoveryEntries: (path: string) => invoke<RecoveryEntry[]>("get_recovery_entries", { path }),
@@ -286,4 +292,19 @@ export function formatDate(seconds: number): string {
   const d = new Date(seconds * 1000);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** View 菜单「显示相对时间」：以本地当前时间为基准，粗略到分钟 / 小时 / 天。 */
+export function formatRelativeDate(seconds: number, now = Date.now()): string {
+  const delta = Math.max(0, Math.floor(now / 1000) - seconds);
+  if (delta < 60) return "刚刚";
+  const minutes = Math.floor(delta / 60);
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} 天前`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} 个月前`;
+  return `${Math.floor(months / 12)} 年前`;
 }

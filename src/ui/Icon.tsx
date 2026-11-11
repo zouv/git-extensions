@@ -1,18 +1,20 @@
 import type { ReactNode } from "react";
 
 export type IconName =
-  | "branch" | "changes" | "check" | "chevron-down" | "close" | "compare"
+  | "branch" | "changes" | "check" | "chevron-down" | "chevron-right" | "close" | "commands" | "compare"
   | "conflict" | "copy" | "edit" | "external" | "fetch" | "file" | "folder"
-  | "group" | "history" | "maximize" | "menu" | "minimize" | "more"
-  | "panel" | "pin" | "plus" | "pull" | "push" | "refresh" | "restore"
-  | "search" | "settings" | "stash" | "tag" | "trash" | "warning";
+  | "group" | "history" | "maximize" | "menu" | "minimize" | "more" | "navigate"
+  | "panel" | "pin" | "plus" | "pull" | "push" | "refresh" | "repository" | "restore"
+  | "search" | "settings" | "stash" | "tag" | "trash" | "view" | "warning";
 
 const paths: Record<IconName, ReactNode> = {
   branch: <><circle cx="6" cy="4" r="2"/><circle cx="6" cy="20" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 6v12M8 16c6 0 2-7 8-7h0M18 9v2"/></>,
   changes: <><path d="M4 5h16M4 12h16M4 19h16"/><path d="m8 3-2 2 2 2m8 3-2 2 2 2m-8 3-2 2 2 2"/></>,
   check: <path d="m5 12 4 4L19 6"/>,
   "chevron-down": <path d="m7 9 5 5 5-5"/>,
+  "chevron-right": <path d="m9 7 5 5-5 5"/>,
   close: <path d="m6 6 12 12M18 6 6 18"/>,
+  commands: <><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></>,
   compare: <><path d="M7 4v16M17 4v16M3 8l4-4 4 4m2 8 4 4 4-4"/></>,
   conflict: <><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5m0 3v.01"/></>,
   copy: <><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></>,
@@ -27,18 +29,21 @@ const paths: Record<IconName, ReactNode> = {
   maximize: <rect x="5" y="5" width="14" height="14" rx="1"/>,
   minimize: <path d="M5 12h14"/>,
   more: <><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></>,
+  navigate: <><circle cx="12" cy="12" r="9"/><path d="m16 8-2.5 5.5L8 16l2.5-5.5z"/></>,
   panel: <><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></>,
   pin: <><path d="M12 17v5"/><path d="M9 3h6l1 7 3 3v1H5v-1l3-3z"/></>,
   plus: <path d="M12 5v14M5 12h14"/>,
   pull: <><path d="M12 3v12m-4-4 4 4 4-4"/><path d="M5 20h14M7 3H5a2 2 0 0 0-2 2v3m14-5h2a2 2 0 0 1 2 2v3"/></>,
   push: <><path d="M12 15V3m-4 4 4-4 4 4"/><path d="M5 20h14M7 15H5a2 2 0 0 1-2-2v-3m14 5h2a2 2 0 0 0 2-2v-3"/></>,
   refresh: <><path d="M20 7v5h-5"/><path d="M18.5 16a8 8 0 1 1 .8-7L20 12"/></>,
+  repository: <><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></>,
   restore: <><rect x="7" y="7" width="12" height="12" rx="1"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></>,
   search: <><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></>,
   settings: <><circle cx="12" cy="12" r="3"/><path d="M19 13.5v-3l-2-.7-.6-1.4.9-1.9-2.1-2.1-1.9.9-1.4-.6-.7-2h-3l-.7 2-1.4.6-1.9-.9-2.1 2.1.9 1.9-.6 1.4-2 .7v3l2 .7.6 1.4-.9 1.9 2.1 2.1 1.9-.9 1.4.6.7 2h3l.7-2 1.4-.6 1.9.9 2.1-2.1-.9-1.9.6-1.4z"/></>,
   stash: <><path d="m4 7 8-4 8 4-8 4z"/><path d="m4 12 8 4 8-4M4 17l8 4 8-4"/></>,
   tag: <><path d="M20 13 13 20 3 10V3h7z"/><circle cx="7.5" cy="7.5" r="1"/></>,
   trash: <><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></>,
+  view: <><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/></>,
   warning: <><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5m0 3v.01"/></>,
 };
 

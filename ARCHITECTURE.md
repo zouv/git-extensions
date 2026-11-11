@@ -63,11 +63,11 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | `src-tauri/src/git/log.rs` | revwalk 流式日志、refs 收集、分支图 lane 布局、代际取消 | 改日志加载 / 图数据 |
 | `src-tauri/src/git/diff.rs` | 提交 / 工作区 / 双端文件清单与单文件 patch、大小保护 | 改 diff 数据 |
 | `src-tauri/src/git/status.rs` | 状态快照、真实 operation state（含 Bisect）、冲突四方内容 | 改状态分类 / 冲突读取 |
-| `src-tauri/src/git/cli.rs` | 同步 Git 写实现与参数校验（含 Hunk 暂存、Amend/Fixup、Merge、Remote、Worktree、Bisect、导出、命令日志、Clone 进度流、Add/Reset/Patch/Stash 扩展、Rename 与 Pull/Push 选项） | 改任何 Git 写操作或 CLI 命令记录 |
+| `src-tauri/src/git/cli.rs` | 同步 Git 写实现与参数校验（含 Hunk 暂存、Amend/Fixup、Merge、Remote、Worktree、Bisect、导出、命令日志、Clone 进度流、Add/Reset/Patch/Stash 扩展、Rename 与 Pull/Push 选项、子模块同步与 Git 维护） | 改任何 Git 写操作或 CLI 命令记录 |
 | `src-tauri/src/git/commands.rs` / `operations.rs` | 全部 Git 读写 IPC 适配；有界后台读取与 common Git dir 写互斥 | 改写操作执行调度 |
 | `src-tauri/src/git/reset.rs` | Reset 预览、状态指纹、CLI HEAD 备份、执行与 reflog / 备份恢复列表 | 改 Reset / 恢复保护 |
 | `src-tauri/src/git/rebase.rs` | 线性计划校验、真实 `rebase -i`、内部 sequence/message editor | 改交互式 Rebase |
-| `src-tauri/src/system.rs` / `system/explorer.rs` | 安全解析仓库内路径并调用 OS 打开 / 显示；可选 HKCU 平铺分组资源管理器菜单与内嵌图标；同步后清理旧布局遗留键 | 改系统集成；菜单详见 `arch/explorer.md` |
+| `src-tauri/src/system.rs` / `system/explorer.rs` | 安全解析仓库内路径并调用 OS 打开 / 显示；按固定白名单编辑仓库配置文件；可选 HKCU 平铺分组资源管理器菜单与内嵌图标；同步后清理旧布局遗留键 | 改系统集成；菜单详见 `arch/explorer.md` |
 | `src-tauri/src/launch.rs` | 固定 Explorer 动作与受控启动参数解析 | 改外部启动协议 |
 | `src-tauri/src/window_host.rs` | 单实例请求队列、主窗口聚焦、轻量动作窗口创建与最后窗口退出 | 改外部启动 / 多窗口路由 |
 | `src-tauri/src/git/history.rs` | git2 逐行 blame、CLI `--follow` 单文件历史、目录 / 文件范围 changelog、提交搜索与 `git grep` | 改文件历史 / 搜索 / 行数上限 |
@@ -111,6 +111,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | Hunk 暂存 / Fixup / 忽略 / 导出 / 命令日志 | `cli.rs` 的 `apply_diff_patch`、`commit_ex`、`commit_fixup`、`ignore_file`、`format_patch`、`archive_commit`、`get_command_log` | `apply_diff_patch` 通过 stdin 传给 `git apply`；命令日志保留最近 200 条 CLI 记录 |
 | 重命名工作区文件 / 目录 | `cli.rs` 的 `rename_path`、`validate_rename_name` | 只允许同目录改名；`git mv` 仅处理已跟踪内容；拒绝路径分隔符、`.git`、Windows 保留名与已存在目标 |
 | blame / 文件历史 / 提交与代码搜索 | `history.rs` 的 `blame_file`、`file_log`、`search_commits`、`git_grep` | blame 上限 2 MiB / 20000 行；搜索经受控 CLI NUL 协议解析 |
+| 仓库配置文件 / 子模块同步 / Git 维护 | `cli.rs` 的 `submodule_sync`、`git_maintenance`；`system.rs` 的 `edit_repo_file` | 配置文件与维护动作均固定白名单；gc / 删除 index.lock 走写互斥，删除锁仍不排除外部 Git 进程竞态 |
 
 ### 2.2 前端（`src/`）
 
@@ -178,6 +179,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | 前端 → 后端 | `list_patch_directory` / `apply_patch_file` / `apply_patch_directory` / `get_patch_apply_state` / `continue_patch` / `skip_patch` / `abort_patch` | 文件按内容自动选 `git apply` / `git am`；目录按文件名顺序；返回输出与退出码；am 冲突映射为 `applyPatch` 操作状态 |
 | 前端 → 后端 | `worktree_list` / `worktree_add` / `worktree_remove` / `worktree_lock` / `worktree_prune` | 管理 linked worktree，写操作均走 CLI 并受仓库写互斥保护 |
 | 前端 → 后端 | `search_commits` / `git_grep` / `format_patch` / `archive_commit` / `bisect_start` / `bisect_mark` / `bisect_reset` / `get_command_log` / `clear_command_log` | 提交搜索支持 message/author/path/allRefs；`git_grep` 支持 revision 与大小写；导出补丁/归档经 `dialog:allow-save` 选择目标路径；命令日志返回耗时、退出码与输出摘要 |
+| 前端 → 后端 | `submodule_sync` / `git_maintenance` / `edit_repo_file` | `git_maintenance` 仅接受 `gc` / `delete-index-lock`；`edit_repo_file` 仅接受 `.gitignore` / `.git/info/exclude` / `.gitattributes` / `.mailmap` / `.git/config`，文件不存在时先创建再交给系统默认编辑器 |
 | 前端 → 后端 | `stash_*` / `cherry_pick` / `revert` / `rebase` / `create_tag` / `delete_tag` / `submodule_update` | 写操作经后台 IPC 与仓库写互斥，仍走 CLI；Push 契约见下一行 |
 | 前端 → 后端 | `get_push_info` / `push` | 信息含 branch、branchRef、headOid、hasUpstream、upstream、remotes；push 可传 remote / branch 和 expectedHead / expectedBranch。明确目标必须携带预览，未指定则须有 upstream 并保留 Git 配置 |
 | 前端 → 后端 | `get_reset_preview` / `reset` / `get_recovery_entries` | target + mode 返回 ResetPreview（branch / headOid / targetOid / fingerprint / 影响）；reset 必须传完整预览，返回 backupRef / previousHead / newHead / output；RecoveryEntry 含 oid / label / time / backupRef |
@@ -232,6 +234,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 - **前端交互取舍见分册**：顶部栏 / 页签拖拽 / 分组 / 启动恢复 / 草稿隔离 / 设置白名单 / 高亮限量 / 读取去重等 UI 规则见 [`arch/ui.md §5`](./arch/ui.md)；窗口生命周期与 capabilities 仍以本节和后端代码为准。
 - **Explorer 文件/目录动作不同**：Commit/Pull/Push/Stash/View changes/Checkout 只在目录上下文，Difftool/Apply patch 只在文件上下文，View history 在文件、目录与目录背景中都显示（文件 `--follow`、目录按 pathspec），Rename 只在具体文件 / 目录（不进目录背景）；注册表菜单无法判断目录是否为有效 Git 仓库。**Windows 的 16 项上限作用于整棵级联菜单（Git Extensions 子菜单 + Others 及其子项合计），不是每层 16 项**；超出部分被系统静默丢弃。`validate_levels` 按目录 / 文件上下文分别统计并阻止保存，不自动迁移命令；一级项用 `GitExt.Top.*` 键紧跟 Git Extensions；二级分组为 Repository & sync / Branches & Repos / Files & history / Settings，Create new repository 与 Open repository 归在 Branches & Repos。成功同步后会清理 `GitExt.*` 命名空间里带所有权标记但不在 known 计划中的遗留键（旧开发版分组顺序会留下 `30.03.reset-file-changes` 之类重复项，既重复显示又占用 16 项容量）。Add files 的 Filter 是唯一按 Git pathspec 展开的写入口；`git stash push -u` 不能带 `--literal-pathspecs`，否则未跟踪文件不会被 stash。
 - **Explorer 目录作用域提交**：Commit 从资源管理器目录打开时只展示并提交该目录已暂存内容；`cli.rs::commit_ex_scoped` 用临时 index（HEAD + 目录 `--cached` 补丁）提交，真实 index 中其它目录的暂存改动不受影响，amend 也只替换目录内部分。临时 index 绕过 Git 对 merge / 冲突的拒绝，所以后端在非 Clean 状态显式报错。View changes / View history 把目录作为 pathspec。
+- **Repository 菜单的配置文件 / 维护动作只接受白名单**：`edit_repo_file` 只能打开 `.gitignore`、`.git/info/exclude`、`.gitattributes`、`.mailmap`、`.git/config`，不接受前端任意路径；`git_maintenance` 只接受 `gc` 与 `delete-index-lock`。删除 `index.lock` 前必须由 UI 二次确认，但仍无法排除外部 Git 进程竞态；不要把这里扩成通用命令执行入口。
 - **exe 始终是 GUI 子系统**：右键菜单每次点击都会新起进程，控制台子系统会先闪一个命令行窗口；调试构建在标准句柄缺失时用 `AttachConsole(ATTACH_PARENT_PROCESS)` 恢复 stdout / stderr。派生 `git` / `explorer.exe` 仍需 `CREATE_NO_WINDOW`。
 - **打包产物只导本次构建**：NSIS / MSI 每次构建都会内嵌时间戳，大小与 SHA256 都会变，不能靠「文件已存在 + 版本号」判断新包。`package.bat` 先 `snapshot` 记录 bundle 内安装包的 size / mtime / birthtime，构建后 `collect` 只导出指纹变化且版本匹配的产物，否则报错而不是发布旧包。`dist/release/` 整目录重建（旧产物清理），unpack 直接取 `target/release` 的 exe（写入 bundle 信息后仍可独立运行），zip 用 `Compress-Archive` 以应用根为根目录并回读校验。
 - **前端产物与发布产物目录分离**：vite `build.outDir` 设为 `.runtime/dist`，`tauri.conf.json` 的 `frontendDist` 指向 `../.runtime/dist`；项目根 `dist/release/` 只放打包成品。若前端仍输出到 `dist/`，`vite build` 会清空整个目录，把安装包、便携 zip 和 unpack 一起删掉。`clean.bat` 因此保留 `dist/release/`，只清 `.runtime/dist`、打包临时状态与 `src-tauri/target`。

@@ -26,14 +26,14 @@
 | `src/components/RepoGroupsDialog.tsx` / `GroupAvatar.tsx` | 分组管理器（CRUD、Pin、色板、逐页签分组 / 别名）与组头像 | 改分组管理交互 |
 | `src/ui/Dialog.tsx` / `dialogSize.ts` | 统一弹窗：初始焦点、焦点陷阱、浮层栈、busy / dirty 关闭保护、焦点恢复；可选四边 / 四角拖拽调整尺寸并按 `sizeKey` 持久化；`closeOnBackdrop=false` 可禁止遮罩关闭 | 改所有弹窗的共同行为 |
 | `src/explorerWindowState.ts` | 资源管理器轻量动作窗口按 action 保存 / 恢复原生窗口尺寸 | 改轻量窗口尺寸规则 |
-| `src/ui/ContextMenu.tsx` | 统一右键菜单：视口定位、焦点循环、`keepOpen` 多选菜单、浮层栈 | 改菜单行为 |
+| `src/ui/ContextMenu.tsx` | 统一右键菜单：视口定位、焦点循环、`keepOpen` 多选菜单、`children` 一级子菜单、浮层栈 | 改菜单行为 |
 | `src/ui/Confirm.tsx` | 应用内危险确认；危险操作默认聚焦“取消”，requireAck 聚焦勾选框 | 改危险确认策略 |
 | `src/ui/SplitHandle.tsx` / `Icon.tsx` | 可拖拽分栏与本地 SVG 图标 | 改共享交互原语 |
-| `src/components/Toolbar.tsx` | 命令栏：分支下拉（切换 + 分支管理入口）/ 远程 / 过滤 / 视图菜单 / 窄窗口“更多”菜单 | 改工具栏组织 |
+| `src/components/Toolbar.tsx` | 命令栏：左侧 Repository / Navigate / View / Commands 四个下拉菜单；分支下拉（切换 + 分支管理入口）/ 远程 / 过滤 / 恢复与 Stash 快捷图标 | 改工具栏组织 |
 | `src/components/LeftPanel.tsx` | 本地变更 / 全部提交 / 分支 / 标签 / Submodules / Worktrees；分支标签过滤、200 条分页、树键盘移动、worktree 打开、分支目录右键批量删除 | 改引用导航 |
 | `src/branchDelete.ts` | 分支目录收集与删除计划纯函数：`prefix/` 匹配、嵌套、远程 HEAD 排除、合并状态 → 是否强制 | 改目录删除规则 |
 | `src/branchDeleteDialog.tsx` | 单分支 / 本地目录 / 远程目录删除确认框：动态确认按钮与警告文案 | 改删除确认文案或样式 |
-| `src/components/RevisionGrid.tsx` | 虚拟化提交列表 + Canvas 分支图；`aria-activedescendant`、容器级方向键、增量图宽 | 改列表 / 图渲染 |
+| `src/components/RevisionGrid.tsx` | 虚拟化提交列表 + Canvas 分支图；`aria-activedescendant`、容器级方向键、增量图宽；View 菜单控制图列 / 作者 / 日期 / SHA / 远程标签 / 标签 / 相对时间 | 改列表 / 图渲染 |
 | `src/components/DiffView.tsx` | 文件列表 / 目录树、过滤与 500 条封顶、按需 patch、Inline / Split、hunk 导航与内联 Hunk 暂存 / 取消暂存 / 丢弃、行右键、增删统计、按仓库记住模式 | 改 diff 展示 |
 | `src/viewState.ts` | Diff 解析 / 分类 / 分栏 / 折叠 / 虚拟窗口、`extractHunkPatch`、`buildBranchTree`、`applyAutosquashOrder`、草稿恢复、dirty 规则 | 改可测试的视图状态规则 |
 | `src/highlight.worker.ts` / `src/languages.ts` | highlight.js 后台高亮、扩展名到语言映射 | 改高亮语言 / 请求协议 |
@@ -43,12 +43,13 @@
 | `src/components/ConflictCenter.tsx` | 冲突草稿、来源快照校验、冲突标记提示、合并两侧、继续 / 跳过 / 中止 | 改冲突工作流 |
 | `src/components/RebasePlanner.tsx` | 会话内线性 Rebase 计划、批量动作 / 重排 / Autosquash 自动重排 / 拖放指示、执行 | 改 Rebase 交互 |
 | `src/components/{Branch,Merge,Pull,Remotes,Worktree,CommandLog,Search,Stash,Tag,Submodule,CheckoutRevision,DiffTool,ApplyPatch,AddFiles,Clone,CreateRepository,Push,Reset,Recovery,Blame,BlameView,FileHistory,TrackedFile}Dialog.tsx` | 各类任务弹窗 / 共用视图；表单弹窗使用 dirty 关闭守卫，错误内联并保留 Git 原始输出 | 改对应工作流 |
+| `src/components/RepositorySettingsDialog.tsx` | Repository 菜单的仓库设置弹窗；内容与 `explorer/RepositorySettingsWindow.tsx` 共用 | 改仓库设置展示 |
 | `src/components/SettingsDialog.tsx` | 行为设置、分类键盘导航、未保存修改保护、快捷键帮助；可拖拽边框调整并记住尺寸；「应用」生效但不关闭面板、点击遮罩不关闭 | 改设置交互 |
 | `src/explorer/` | 单任务窗口 Host、Commit / Pull / History 轻量界面与原生关闭保护 | 改 Explorer 轻量工作流 |
 | `src/repoGroups.ts` | 页签分组纯数据层：组 CRUD、Pin、颜色、分配、多选并集、别名 | 改分组规则 |
 | `src/openRepos.ts` | 打开页签持久化：路径白名单、缺失 / 空列表语义、恢复候选 | 改启动恢复规则 |
 | `src/tabOrder.ts` | 页签拖拽插入位置与重排纯函数 | 改拖拽排序规则 |
-| `src/settings.ts` / `windowState.ts` / `explorerWindowState.ts` / `explorerMenu.ts` | 行为设置、按仓库布局、主窗口 bounds、轻量动作窗口尺寸、资源管理器菜单配置；localStorage 白名单与离屏修正 | 改持久化规则 |
+| `src/settings.ts` / `windowState.ts` / `explorerWindowState.ts` / `explorerMenu.ts` | 行为设置、按仓库布局与 View 显示选项（`GridDisplayOptions`）、主窗口 bounds、轻量动作窗口尺寸、资源管理器菜单配置；localStorage 白名单与离屏修正 | 改持久化规则 |
 | `src/repoOperations.ts` / `useRepoBusy.ts` | 仓库级写状态同步与共享 busy | 改写状态与关闭保护 |
 | `src/api.ts` | 在途读取去重、`writeInvoke`、log-batch 订阅、日期格式化 | 改 IPC 调用方式 |
 | `src/types.ts` | 前后端共享 TS 类型 | 改 IPC 字段 |
@@ -72,6 +73,7 @@
 | Diff 模式 / 文件过滤 / Hunk 按钮 | `DiffView.tsx` 的 `loadDiffMode` / `loadDiffWrap`、`filteredEntries`、`renderHunkBar`、`openLineMenu`、`goDiff` | 偏好键含 `prefKey`（仓库路径）；文件列表 500 条封顶 |
 | 左侧导航 / 分支文件夹树 | `LeftPanel.tsx` 的 `refFilter`、`refLimit`、`collapsedFolders`、`focusProps`、`treeKeyDown`、`onOpenWorktree`、`onDeleteBranchFolder`；`viewState.ts::buildBranchTree`；`branchDelete.ts::planBranchFolderDelete`、`decideBranchDeletion` | 分支按 `/` 分层可折叠；右键支持远程检出、重命名、远程删除与合并；目录右键可批量删除整棵子树，含当前 HEAD 的本地目录禁用 |
 | 工具栏分支切换 / 分支管理入口 | `Toolbar.tsx` 的 `branchMenu`、`branchItems`、`onCheckoutBranch`；`BranchDialog.tsx` | 下拉列出全部本地分支，当前分支勾选并禁用；底部「分支管理…」才打开管理弹窗；弹窗只在输入真正变化时算 dirty |
+| 工具栏四菜单 / 提交导航 / 视图显示 | `Toolbar.tsx` 的 `repositoryItems` / `navigateItems` / `viewItems` / `commandItems`；`RepoWorkspace.tsx` 的 `goToRevision` / `goParent` / `goChild` / `goMergeBase` / `navigateBackward` / `stepQuickSearch`；`RevisionGrid.tsx` 的 `display`；`settings.ts` 的 `GridDisplayOptions` | 导航只使用已加载的 `revisions` / `parents`；View 显示选项按仓库保存在 `UILayout`，隐藏列不改变后端顺序与 lane |
 | Merge / Pull / Remotes / Worktree / 搜索 / 命令日志 / Bisect | `MergeDialog.tsx`、`PullDialog.tsx`、`RemotesDialog.tsx`、`WorktreeDialog.tsx`、`SearchDialog.tsx`、`CommandLogDialog.tsx`；`RepoWorkspace.tsx` 的 Bisect 横幅 | `Ctrl+Shift+H` 打开搜索、`Ctrl+Shift+G` 打开命令日志 |
 | 对比基准 | `RepoWorkspace.tsx` 的 `compareBase`、`onRevisionAction("compare-base")`；`Toolbar.tsx` 的 `compare-base-chip`；`RevisionGrid.tsx` 菜单标签 | 基准 chip 可清除；Esc 先清基准 |
 | 任务视图 / 草稿 | `RepoWorkspace.tsx` 的 `conflictDrafts`、`rebaseDrafts`、`saveConflictDraft`、`saveRebaseDraft`、`switchWorkspace` | 草稿存在会话 maps；关闭页签确认 |
@@ -102,6 +104,14 @@
 - `commands.ts` 维护 `Map<owner, Command[]>` 和版本缓存；`useCommands` 用 `useSyncExternalStore` 订阅。
 - App 注册应用命令（打开 / 克隆 / 新建 / 设置 / 分组 / 关闭页签 / 切换仓库）；`RepoWorkspace` 在 `active` 时注册当前仓库命令（刷新、工作区、视图预设、分支 / Stash / 标签 / 子模块 / Fetch / Pull / Push 等），切走时注销，避免跨仓库执行。
 - `CommandPalette` 搜索 title / group / keywords / shortcut，↑/↓/Home/End/Enter 操作；执行后先关闭面板再运行命令。
+
+### 工具栏四菜单与提交导航
+
+- Repository / Navigate / View / Commands 四个菜单共用 `ContextMenu`；`MenuItem.children` 支持一级子菜单（Repository > Git 维护），Esc / 点击外部会关闭整条菜单链。菜单按钮打开时在 `pointerdown` 阻止冒泡，避免同一按钮的第二次点击被菜单外部关闭逻辑抢先处理。
+- Navigate 的父 / 子 / 首个父 / 末个父 / 共同祖先都只基于当前已加载的 `revisions` 与 `parents` 计算，不额外发 IPC。目标被过滤、尚未加载或被 `maxLogCount` 截断时提示「不在当前列表中」，不静默失败。
+- `navHistory` 只记录正常选中；向后 / 向前导航直接恢复选中且不回写历史，避免来回移动时污染栈。
+- View 的分支范围复用 `leftRef`：全部 = `null`，当前分支 = `headBranch`（detached 为 `HEAD`）。显示选项（远程标签 / 标签 / 图列 / 作者 / 日期 / SHA / 相对时间）存入按仓库的 `UILayout`；RevisionGrid 只改变呈现，不重排提交或重算 lane。
+- Repository 的配置文件编辑与维护动作走固定白名单 IPC（`edit_repo_file` / `git_maintenance`）；`git gc`、删除 `index.lock` 仍申请仓库写互斥，但无法排除外部 Git 进程。
 
 ### 通知中心
 

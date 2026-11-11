@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { Revision } from "../types";
-import { formatDate } from "../api";
+import type { RefLabel, Revision } from "../types";
+import { formatDate, formatRelativeDate } from "../api";
+import { DEFAULT_LAYOUT } from "../settings";
+import type { GridDisplayOptions } from "../settings";
 import ContextMenu from "../ui/ContextMenu";
 
 const ROW_H = 28;
@@ -9,6 +11,11 @@ const NODE_R = 4;
 const PALETTE = ["#e06c75", "#65a9f5", "#57bd8a", "#d19a66", "#c678dd", "#56b6c2", "#d5a84e", "#be5046", "#7ec8e3", "#b5cea8"];
 const MAX_GRAPH_W = 320;
 const optionId = (oid: string) => `revision-option-${oid}`;
+
+/** 只过滤标签显示；提交图 lane 数据仍由后端完整生成。 */
+function refsForDisplay(refs: RefLabel[], display: GridDisplayOptions): RefLabel[] {
+  return refs.filter((ref) => (ref.kind !== "remote" || display.showRemoteBranches) && (ref.kind !== "tag" || display.showTags));
+}
 
 export type RevisionAction =
   | "reset"
@@ -43,9 +50,11 @@ interface Props {
   layoutKey?: string;
   /** 轻量窗口只暴露已具备完整处理链路的动作。 */
   allowedActions?: RevisionAction[];
+  /** View 菜单控制的列 / 标签 / 日期显示。 */
+  display?: GridDisplayOptions;
 }
 
-export default function RevisionGrid({ revisions, selectedOids, onSelect, onContextAction, loading, compareBase, layoutKey, allowedActions }: Props) {
+export default function RevisionGrid({ revisions, selectedOids, onSelect, onContextAction, loading, compareBase, layoutKey, allowedActions, display = DEFAULT_LAYOUT }: Props) {
   const can = (action: RevisionAction) => !allowedActions || allowedActions.includes(action);
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -54,6 +63,7 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
   const [menu, setMenu] = useState<{ x: number; y: number; rev: Revision } | null>(null);
   const selectedOid = selectedOids[selectedOids.length - 1] ?? null;
   const [graphWidth, setGraphWidth] = useState(8 + LANE_W);
+  const graphW = display.showGraphColumn ? graphWidth : 0;
   const graphScan = useRef({ key: "", length: 0, lanes: 1, firstOid: "" });
 
   // 日志按 300 条分批到达；只扫描新增尾部，避免每批重扫全部记录。
@@ -96,6 +106,7 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
   }, [revisions, selectedOid]);
 
   useEffect(() => {
+    if (!display.showGraphColumn) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
@@ -128,10 +139,11 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
         ctx.strokeStyle = color(ml);
         ctx.beginPath(); ctx.moveTo(x(ml), y); ctx.bezierCurveTo(x(ml), y, x(rev.lane), y, x(rev.lane), y); ctx.stroke();
       }
-      ctx.fillStyle = rev.refs.length > 0 ? "#d5a84e" : color(rev.lane);
-      ctx.beginPath(); ctx.arc(x(rev.lane), y, rev.refs.length > 0 ? NODE_R + 1 : NODE_R, 0, Math.PI * 2); ctx.fill();
+      const hasVisibleRefs = refsForDisplay(rev.refs, display).length > 0;
+      ctx.fillStyle = hasVisibleRefs ? "#d5a84e" : color(rev.lane);
+      ctx.beginPath(); ctx.arc(x(rev.lane), y, hasVisibleRefs ? NODE_R + 1 : NODE_R, 0, Math.PI * 2); ctx.fill();
     }
-  }, [revisions, startRow, endRow, graphWidth]);
+  }, [revisions, startRow, endRow, graphWidth, display.showGraphColumn, display.showRemoteBranches, display.showTags]);
 
   return (
     <div
@@ -177,7 +189,7 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
       }}
     >
       <div className="revision-content" style={{ height: revisions.length * ROW_H }}>
-        <canvas ref={canvasRef} className="graph-canvas" style={{ top: startRow * ROW_H, width: graphWidth }} />
+        <canvas ref={canvasRef} className="graph-canvas" style={{ top: startRow * ROW_H, width: graphWidth, display: display.showGraphColumn ? undefined : "none" }} />
         {revisions.slice(startRow, endRow).map((rev, i) => {
           const row = startRow + i;
           const selected = selectedOids.includes(rev.oid);
@@ -186,7 +198,7 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
               key={rev.oid}
               id={optionId(rev.oid)}
               className={`revision-row${selected ? " selected" : ""}`}
-              style={{ top: row * ROW_H, left: graphWidth, height: ROW_H }}
+              style={{ top: row * ROW_H, left: graphW, height: ROW_H }}
               role="option"
               aria-selected={selected}
               aria-posinset={row + 1}
@@ -206,11 +218,11 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
                 setMenu({ x: rect.left + 24, y: rect.bottom, rev });
               }}
             >
-              <span className="rev-refs">{rev.refs.map((ref, j) => <span key={j} className={`ref-badge ref-${ref.kind}`}>{ref.name}</span>)}</span>
+              <span className="rev-refs">{refsForDisplay(rev.refs, display).map((ref, j) => <span key={j} className={`ref-badge ref-${ref.kind}`}>{ref.name}</span>)}</span>
               <span className="rev-subject" title={rev.subject}>{rev.subject}</span>
-              <span className="rev-author" title={rev.authorName}>{rev.authorName}</span>
-              <span className="rev-date">{formatDate(rev.authorTime)}</span>
-              <span className="rev-sha">{rev.shortId}</span>
+              {display.showAuthorColumn && <span className="rev-author" title={rev.authorName}>{rev.authorName}</span>}
+              {display.showDateColumn && <span className="rev-date">{display.relativeDate ? formatRelativeDate(rev.authorTime) : formatDate(rev.authorTime)}</span>}
+              {display.showShaColumn && <span className="rev-sha">{rev.shortId}</span>}
             </div>
           );
         })}

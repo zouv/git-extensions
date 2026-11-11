@@ -9,7 +9,7 @@ const source = await readFile(new URL("../src/settings.ts", import.meta.url), "u
 const output = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
   .replace('from "./explorerMenu"', `from "${menuUrl}"`);
 const url = "data:text/javascript;base64," + Buffer.from(output).toString("base64");
-const { DEFAULT_SETTINGS, loadSettings, saveSettings } = await import(url);
+const { DEFAULT_SETTINGS, loadSettings, saveSettings, DEFAULT_LAYOUT, loadLayout, saveLayout } = await import(url);
 const SETTINGS_KEY = "git-extensions.settings";
 
 const memoryStorage = () => {
@@ -139,5 +139,45 @@ test("设置保存往返一致，未知字段不会通过读取白名单", () =>
     saveSettings({ ...expected, unknownSetting: "discard" });
     assert.deepEqual(loadSettings(), expected);
     assert.equal(JSON.parse(storage.getItem(SETTINGS_KEY)).explorerContextMenuEnabled, true);
+  });
+});
+
+test("View 显示选项按仓库布局持久化，旧布局缺少字段时补齐默认值", () => {
+  withStorage((storage) => {
+    storage.setItem("git-extensions.layout.v2:/repo", JSON.stringify({ leftWidth: 300, showInspector: false }));
+    const loaded = loadLayout("/repo", DEFAULT_SETTINGS);
+    assert.equal(loaded.leftWidth, 300);
+    assert.equal(loaded.showInspector, false);
+    assert.equal(loaded.showRemoteBranches, true);
+    assert.equal(loaded.showTags, true);
+    assert.equal(loaded.showGraphColumn, true);
+    assert.equal(loaded.showAuthorColumn, true);
+    assert.equal(loaded.showDateColumn, true);
+    assert.equal(loaded.showShaColumn, true);
+    assert.equal(loaded.relativeDate, false);
+
+    saveLayout("/repo", { ...loaded, showRemoteBranches: false, showTags: false, relativeDate: true, showShaColumn: false });
+    const saved = loadLayout("/repo", DEFAULT_SETTINGS);
+    assert.equal(saved.showRemoteBranches, false);
+    assert.equal(saved.showTags, false);
+    assert.equal(saved.relativeDate, true);
+    assert.equal(saved.showShaColumn, false);
+    assert.equal(saved.showGraphColumn, true);
+  });
+});
+
+test("View 显示选项只接受布尔值，非法类型回退默认值", () => {
+  withStorage((storage) => {
+    storage.setItem("git-extensions.layout.v2:/bad", JSON.stringify({
+      showRemoteBranches: "false",
+      showTags: 0,
+      relativeDate: "yes",
+      showGraphColumn: null,
+    }));
+    const loaded = loadLayout("/bad", DEFAULT_SETTINGS);
+    assert.equal(loaded.showRemoteBranches, DEFAULT_LAYOUT.showRemoteBranches);
+    assert.equal(loaded.showTags, DEFAULT_LAYOUT.showTags);
+    assert.equal(loaded.relativeDate, DEFAULT_LAYOUT.relativeDate);
+    assert.equal(loaded.showGraphColumn, DEFAULT_LAYOUT.showGraphColumn);
   });
 });

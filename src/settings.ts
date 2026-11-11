@@ -14,7 +14,18 @@ export interface AppSettings {
 
 export type InspectorPosition = "right" | "bottom";
 
-export interface UILayout {
+/** View 菜单里可持久化的提交图显示选项；按仓库保存。 */
+export interface GridDisplayOptions {
+  showRemoteBranches: boolean;
+  showTags: boolean;
+  showGraphColumn: boolean;
+  showAuthorColumn: boolean;
+  showDateColumn: boolean;
+  showShaColumn: boolean;
+  relativeDate: boolean;
+}
+
+export interface UILayout extends GridDisplayOptions {
   leftWidth: number;
   inspectorSize: number;
   inspectorPosition: InspectorPosition;
@@ -41,6 +52,13 @@ export const DEFAULT_LAYOUT: UILayout = {
   showLeft: true,
   showInspector: true,
   changesWidth: 420,
+  showRemoteBranches: true,
+  showTags: true,
+  showGraphColumn: true,
+  showAuthorColumn: true,
+  showDateColumn: true,
+  showShaColumn: true,
+  relativeDate: false,
 };
 
 const SETTINGS_KEY = "git-extensions.settings";
@@ -54,6 +72,10 @@ function numberOption(value: unknown, allowed: number[], fallback: number): numb
 
 function bounded(value: unknown, min: number, max: number, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+}
+
+function booleanOption(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
 }
 
 /** localStorage 可能被手工修改，只接受白名单中的设置值。 */
@@ -89,6 +111,13 @@ export function loadLayout(repoPath: string, settings: AppSettings): UILayout {
       showLeft: typeof raw.showLeft === "boolean" ? raw.showLeft : settings.showLeftPanel,
       showInspector: typeof raw.showInspector === "boolean" ? raw.showInspector : true,
       changesWidth: bounded(raw.changesWidth, 300, 720, DEFAULT_LAYOUT.changesWidth),
+      showRemoteBranches: booleanOption(raw.showRemoteBranches, true),
+      showTags: booleanOption(raw.showTags, true),
+      showGraphColumn: booleanOption(raw.showGraphColumn, true),
+      showAuthorColumn: booleanOption(raw.showAuthorColumn, true),
+      showDateColumn: booleanOption(raw.showDateColumn, true),
+      showShaColumn: booleanOption(raw.showShaColumn, true),
+      relativeDate: booleanOption(raw.relativeDate, false),
     };
   } catch {
     return { ...DEFAULT_LAYOUT, showLeft: settings.showLeftPanel };

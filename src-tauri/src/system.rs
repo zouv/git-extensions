@@ -156,3 +156,34 @@ pub fn reveal_path(path: String, file: Option<String>) -> GitResult<String> {
     let (root, target) = repository_target(&path, &file)?;
     run_os_command(reveal_command(&root, &target))
 }
+
+/// Repository 菜单的配置文件编辑入口。目标来自固定白名单，不接受前端任意路径。
+#[tauri::command]
+pub fn edit_repo_file(path: String, target: String) -> GitResult<String> {
+    let repo = open(&path)?;
+    let common = repo.commondir().canonicalize()?;
+    let file = match target.as_str() {
+        "gitignore" | "gitattributes" | "mailmap" => {
+            let workdir = repo
+                .workdir()
+                .ok_or_else(|| GitError::InvalidInput("bare repository has no worktree".into()))?
+                .canonicalize()?;
+            workdir.join(format!(".{target}"))
+        }
+        "exclude" => common.join("info").join("exclude"),
+        "config" => common.join("config"),
+        _ => {
+            return Err(GitError::InvalidInput(format!(
+                "unsupported repository file: {target}"
+            )))
+        }
+    };
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file)?;
+    run_os_command(open_command(&file))
+}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { AheadBehind, ExplorerTarget, PushInfo, RemoteInfo } from "../types";
+import type { AheadBehind, ExplorerTarget, PushInfo, RemoteInfo, RepoInfo } from "../types";
 import InlineError from "../ui/InlineError";
 
 interface Props {
@@ -8,9 +8,9 @@ interface Props {
   setMessage?: (message: string) => void;
 }
 
-/** 当前仓库只读设置面板：远程地址、当前分支 / HEAD、upstream、ahead/behind。 */
-export default function RepositorySettingsWindow({ target, setMessage }: Props) {
-  const repoPath = target.repo.path;
+/** 仓库配置内容：主窗口弹窗与资源管理器轻量窗口共用。 */
+export function RepositorySettingsContent({ repo, setMessage }: { repo: RepoInfo; setMessage?: (message: string) => void }) {
+  const repoPath = repo.path;
   const [remotes, setRemotes] = useState<RemoteInfo[] | null>(null);
   const [pushInfo, setPushInfo] = useState<PushInfo | null>(null);
   const [aheadBehind, setAheadBehind] = useState<AheadBehind | null>(null);
@@ -38,9 +38,8 @@ export default function RepositorySettingsWindow({ target, setMessage }: Props) 
 
   useEffect(() => { void reload(); }, [repoPath]);
 
-  return <div className="repository-settings-window">
-    <div className="repository-settings-toolbar">
-      <strong>Repository settings</strong>
+  return <>
+    <div className="repository-settings-actions">
       <button disabled={loading} onClick={() => void reload()}>刷新</button>
     </div>
     {error && <InlineError message={error} />}
@@ -49,11 +48,11 @@ export default function RepositorySettingsWindow({ target, setMessage }: Props) 
       <section>
         <h4>仓库</h4>
         <dl className="repository-settings-grid">
-          <dt>名称</dt><dd>{target.repo.name}</dd>
+          <dt>名称</dt><dd>{repo.name}</dd>
           <dt>路径</dt><dd className="mono">{repoPath}</dd>
-          <dt>当前分支</dt><dd>{target.repo.headBranch ?? "detached HEAD"}</dd>
-          <dt>HEAD</dt><dd className="mono">{target.repo.headOid ?? "—"}</dd>
-          <dt>状态</dt><dd>{target.repo.isEmpty ? "空仓库" : "正常仓库"}</dd>
+          <dt>当前分支</dt><dd>{repo.headBranch ?? "detached HEAD"}</dd>
+          <dt>HEAD</dt><dd className="mono">{repo.headOid ?? "—"}</dd>
+          <dt>状态</dt><dd>{repo.isEmpty ? "空仓库" : "正常仓库"}</dd>
         </dl>
       </section>
       <section>
@@ -80,5 +79,14 @@ export default function RepositorySettingsWindow({ target, setMessage }: Props) 
       </section>
       <div className="settings-note">此面板只读展示当前仓库配置。远程地址修改请使用工具栏的「远程管理」；分支、上游和推送目标由 Git 配置决定。</div>
     </div>
+  </>;
+}
+
+export default function RepositorySettingsWindow({ target, setMessage }: Props) {
+  return <div className="repository-settings-window">
+    <div className="repository-settings-toolbar">
+      <strong>Repository settings</strong>
+    </div>
+    <RepositorySettingsContent repo={target.repo} setMessage={setMessage} />
   </div>;
 }

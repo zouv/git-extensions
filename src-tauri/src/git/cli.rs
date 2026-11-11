@@ -2640,6 +2640,42 @@ pub fn submodule_update(path: String) -> GitResult<String> {
     )
 }
 
+pub fn submodule_sync(path: String) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    run_git(
+        &path,
+        &[
+            "submodule".to_string(),
+            "sync".to_string(),
+            "--recursive".to_string(),
+        ],
+    )
+}
+
+/// Repository 菜单的 Git 维护动作；只接受固定白名单，避免把任意命令暴露给前端。
+pub fn git_maintenance(path: String, action: String) -> GitResult<String> {
+    match action.as_str() {
+        "gc" => {
+            let _write = acquire_write(&path)?;
+            run_git(&path, &["gc".to_string()])
+        }
+        "delete-index-lock" => {
+            let _write = acquire_write(&path)?;
+            let repo = open(&path)?;
+            let lock = repo.path().join("index.lock");
+            if lock.exists() {
+                std::fs::remove_file(&lock)?;
+                Ok(format!("已删除 {}", lock.display()))
+            } else {
+                Ok("index.lock 不存在，无需删除".into())
+            }
+        }
+        _ => Err(GitError::InvalidInput(format!(
+            "unsupported maintenance action: {action}"
+        ))),
+    }
+}
+
 /// 跳过当前序列步骤，确认期间 Git 状态变化时拒绝旧意图。
 pub fn skip_operation(path: String, expected: super::status::OperationState) -> GitResult<String> {
     let _write = acquire_write(&path)?;

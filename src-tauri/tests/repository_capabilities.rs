@@ -956,3 +956,25 @@ fn branch_delete_status_rejects_invalid_names_and_handles_empty() {
         );
     }
 }
+
+#[test]
+fn submodule_sync_and_git_maintenance_accept_only_whitelisted_actions() {
+    let workspace = Workspace::new();
+    let repo = workspace.repo("submodule-sync-maintenance");
+    repo.commit("tracked.txt", "base\n");
+
+    assert!(git::cli::submodule_sync(repo.path()).is_ok());
+
+    let lock = repo.repo().path().join("index.lock");
+    fs::write(&lock, "").unwrap();
+    let output = git::cli::git_maintenance(repo.path(), "delete-index-lock".into()).unwrap();
+    assert!(!lock.exists());
+    assert!(output.contains("index.lock"));
+
+    let error = git::cli::git_maintenance(repo.path(), "rm -rf".into()).unwrap_err();
+    assert!(error.to_string().contains("unsupported maintenance action"));
+
+    let error =
+        git_extensions_lib::system::edit_repo_file(repo.path(), "random".into()).unwrap_err();
+    assert!(error.to_string().contains("unsupported repository file"));
+}

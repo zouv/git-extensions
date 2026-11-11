@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { IconName } from "./Icon";
 import Icon from "./Icon";
 import { isTopLayer, popLayer, pushLayer } from "./layerStack";
@@ -25,6 +25,8 @@ export interface MenuItem {
   separator?: boolean;
   /** 多选类菜单保持打开，便于连续切换多个项目。 */
   keepOpen?: boolean;
+  /** 子菜单；仅 Repository > Git maintenance 使用。 */
+  children?: MenuItem[];
   trailingAction?: MenuTrailingAction;
   onSelect?: () => void;
 }
@@ -42,6 +44,7 @@ export default function ContextMenu({ x, y, items, onClose, ariaLabel = "上下�
   const ref = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const [submenu, setSubmenu] = useState<{ item: MenuItem; x: number; y: number } | null>(null);
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -107,13 +110,23 @@ export default function ContextMenu({ x, y, items, onClose, ariaLabel = "上下�
             key={item.id}
             disabled={item.disabled}
             title={item.title}
-            onClick={() => { if (!item.keepOpen) onClose(); item.onSelect?.(); }}
+            aria-haspopup={item.children ? "menu" : undefined}
+            onClick={(event) => {
+              if (item.children) {
+                const rect = event.currentTarget.getBoundingClientRect();
+                setSubmenu({ item, x: rect.right + 2, y: rect.top });
+                return;
+              }
+              if (!item.keepOpen) onClose();
+              item.onSelect?.();
+            }}
           >
             {item.checked !== undefined && <span className="menu-check">{item.checked ? <Icon name="check" size={14} /> : null}</span>}
             {item.color && <span className="menu-color" style={{ background: item.color }} aria-hidden="true" />}
             {item.icon && <Icon name={item.icon} />}
             <span>{item.label}</span>
             {item.shortcut && <kbd>{item.shortcut}</kbd>}
+            {item.children && <Icon name="chevron-right" size={13} />}
           </button>
         );
         if (!item.trailingAction) return main;
@@ -136,6 +149,13 @@ export default function ContextMenu({ x, y, items, onClose, ariaLabel = "上下�
           </div>
         );
       })}
+      {submenu && <ContextMenu
+        x={submenu.x}
+        y={submenu.y}
+        items={submenu.item.children ?? []}
+        ariaLabel={submenu.item.label ?? "子菜单"}
+        onClose={() => { setSubmenu(null); onCloseRef.current(); }}
+      />}
     </div>
   );
 }
