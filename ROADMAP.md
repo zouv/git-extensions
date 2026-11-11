@@ -22,6 +22,7 @@
 - 0.8.0 已交付核心 Git 能力补齐（P0–P2 共 13 项，对齐上游 Git Extensions）：合并分支、Amend、Hunk 级暂存、Remotes / Worktree 管理、分支文件夹树、命令日志、全库搜索、Fixup / Autosquash、导出补丁 / 归档、Git Bisect 与已合并分支清理；详见 CHANGELOG [0.8.0]，待实机 GUI 验收。
 - 0.9.0 已发布（2026-11-10）：资源管理器 Rename、整棵级联菜单 16 项上限校验与遗留键清理、Branches & Repos 分组、轻量窗口尺寸记忆 / F5 修复 / difftool 保持打开、设置缩放与「应用」按钮；详见 CHANGELOG [0.9.0]。
 - 0.9.1 已发布（2026-11-10）：Commit / View changes 按资源管理器目录限定范围、View history 三目标、右键动作不再闪控制台、Rename 占用错误提示；详见 CHANGELOG [0.9.1]。
+- 0.10.0 已发布（2026-11-12）：工具栏 Repository / Navigate / View / Commands 四菜单、分支删除预检与目录批量删除、写后刷新与 refs/original 过滤；详见 CHANGELOG [0.10.0]。
 
 ---
 
@@ -39,6 +40,7 @@
 - ✅ 0.8.0 核心 Git 能力补齐（2026-11-08）：合并分支、Amend、Hunk 级暂存、Remotes / Worktree 管理、分支文件夹树、命令日志、提交与代码搜索、Fixup / Autosquash、导出补丁 / 归档、Git Bisect 与批量清理已合并分支；详见 CHANGELOG [0.8.0]。
 - ✅ 0.9.0 资源管理器菜单与窗口体验（2026-11-10）：Rename、16 项整树上限校验、遗留键清理、Branches & Repos 分组、轻量窗口尺寸记忆 / F5 修复 / difftool 保持打开、设置缩放与「应用」；详见 CHANGELOG [0.9.0]。
 - ✅ 0.9.1 资源管理器范围与启动体验（2026-11-10）：Commit / View changes 目录作用域、View history 三目标、菜单启动无控制台闪烁、Rename 占用提示；详见 CHANGELOG [0.9.1]。
+- ✅ 0.10.0 工具栏四菜单与分支管理（2026-11-12）：Repository / Navigate / View / Commands 下拉菜单、分支删除预检与目录批量删除、写后刷新与 refs/original 过滤；详见 CHANGELOG [0.10.0]。
 
 ---
 

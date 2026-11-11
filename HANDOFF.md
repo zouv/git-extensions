@@ -2,16 +2,16 @@
 
 ## 状态快照
 
-- 最近更新：2026-11-12。0.10.0 版本号与 CHANGELOG 已更新，准备打包并上传 GitHub Release。本版包含：工具栏左侧 Repository / Navigate / View / Commands 四个下拉菜单（Repository 汇总资源管理器、远程 / 子模块 / Worktree、编辑仓库配置文件、Git 维护、仓库设置与关闭页签；Navigate 支持 HEAD / 父子提交 / 共同祖先 / 前后导航 / 快速搜索；View 增加分支范围与远程标签 / 标签 / 相对时间 / 图与列开关并按仓库持久化；Commands 汇总提交、撤销、Pull/Push、Stash、Reset、分支 / 标签 / 合并 / Rebase / 冲突、Cherry-pick、归档、Bisect、reflog、补丁）；新增 `submodule_sync`、`git_maintenance`、`edit_repo_file` IPC；旧「视图」「更多」菜单移除。前端 78/78、Rust 113/113 测试通过。
+- 最近更新：2026-11-12。0.10.0 已发布并上传 GitHub Release（NSIS / MSI / unpack zip / SHA256SUMS）。本版包含：工具栏左侧 Repository / Navigate / View / Commands 四个下拉菜单（Repository 汇总资源管理器、远程 / 子模块 / Worktree、编辑仓库配置文件、Git 维护、仓库设置与关闭页签；Navigate 支持 HEAD / 父子提交 / 共同祖先 / 前后导航 / 快速搜索；View 增加分支范围与远程标签 / 标签 / 相对时间 / 图与列开关并按仓库持久化；Commands 汇总提交、撤销、Pull/Push、Stash、Reset、分支 / 标签 / 合并 / Rebase / 冲突、Cherry-pick、归档、Bisect、reflog、补丁）；新增 `submodule_sync`、`git_maintenance`、`edit_repo_file` IPC；旧「视图」「更多」菜单移除。前端 78/78、Rust 113/113 测试通过，当前无进行中任务（待 GUI 验收）。
 - 远程已关联并推送：origin = https://github.com/zouv/git-extensions，main 与历史标签已推送。
 
 ## 当前任务
 
-- 0.10.0 发布：版本号三处同步、CHANGELOG 归档已完成；待 `package.bat` 生成 NSIS / MSI / unpack / zip，创建 GitHub Release `v0.10.0` 并上传，最后回填发布验证。
+- 无进行中任务（0.10.0 已发布并上传，工具栏四菜单待 GUI 验收）。
 
 ## 进行中
 
-- 下一步执行：`package.bat` → 校验 `dist/release/` 与 `SHA256SUMS.txt` → `gh release create v0.10.0` 并上传 4 个资产。
+- 无。
 
 ## 下一步
 
@@ -19,6 +19,7 @@
 
 ## 验证状态
 
+- 2026-11-12 0.10.0 发布验证：版本号三处同步为 0.10.0、CHANGELOG 归档；`package` 生成 NSIS 0.10.0（3.52 MiB）、MSI 0.10.0（5.89 MiB）、`unpack/` 便携目录、便携 zip（4.85 MiB）与 `SHA256SUMS.txt`，本地 `sha256sum -c` 三个产物全部 OK；GitHub Release `v0.10.0` 已创建并上传全部 4 个资产；发布前 `pnpm test` 78/78、`pnpm build`、`cargo test` 113/113、`cargo fmt --check`、`sh check-docs.sh` 通过。
 - 2026-11-12 工具栏四菜单：`pnpm test` Node 78/78（新增 2 个 View 显示选项持久化用例）、`pnpm build`（tsc + Vite）通过；`cargo test` Rust 113/113（47 lib + 14 repository_capabilities + 21 safety + 16 smoke + 15 workflows）、`cargo fmt --check` 通过。新增 `submodule_sync` / `git_maintenance` / `edit_repo_file`；`git_maintenance` 集成测试覆盖删除 index.lock 与非法动作拒绝。未做 GUI 实机验收（菜单定位、子菜单、文件编辑器打开、提交导航、列开关视觉）。
 - 2026-11-11 工具栏与分支弹窗：`pnpm test` Node 76/76、`pnpm build`（tsc + Vite）通过；改动为前端交互，Rust 测试沿用同日 112/112。未做 GUI 实机验收。
 - 2026-11-11 分支删除交互：`pnpm test` Node 76/76（新增 5 个 `branchDelete` 纯函数用例）、`pnpm build`（tsc + Vite）通过、`cargo test` Rust 112/112（47 lib + 13 repository_capabilities + 21 safety + 16 smoke + 15 workflows）、`cargo fmt --check` 通过。新增 `get_branch_delete_status` 集成测试覆盖 HEAD 祖先、未合并、upstream 已合并、upstream ref 缺失回退 HEAD、不存在分支与非法名称；新增 `refs/original/*` 排除与 `origin/HEAD` 符号引用过滤测试。刷新修复补跑 `pnpm test` 76/76 与 `pnpm build` 通过；未做真实 GUI / 远程目录实机验收。
