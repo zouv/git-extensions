@@ -49,6 +49,7 @@
 - [x] ~~P0 日常高频闭环：合并分支（`git merge` 普通 / `--no-ff` / `--squash`）、Amend 修正提交、远程分支检出跟踪 / 本地分支重命名 / 删除远程分支、Hunk 级暂存 / 取消暂存 / 丢弃。~~（2026-11-08）
 - [x] ~~P1 协作与多工作区：Remotes 远程管理弹窗与 Fetch Prune / Pull 策略 / Push Force-with-Lease & Tags、Worktree 新建 / 删除 / 锁定 / 清理、左侧分支 `/` 文件夹树折叠与右键加入 `.gitignore`、Git 命令执行日志查看器。~~（2026-11-08）
 - [x] ~~P2 进阶研发效率：后端提交搜索与 `git grep` 代码搜索、快速 Fixup / Squash 提交与 Rebase Autosquash、导出补丁（`format-patch`）与归档（`git archive`）、Git Bisect 可视化二分排错、批量清理已合并分支。~~（2026-11-08）
+- [x] ~~分支删除交互：未合并预检、动态「强制删除」确认、本地 / 远程分支目录批量删除。~~（2026-11-11）
 - [ ] 完成新增 P0–P2 工作流（Merge / Hunk / Remotes / Worktree / 搜索 / 命令日志 / Bisect / 导出）的真实 GUI 验收。
 
 ### Windows 资源管理器集成与设置分类（代码完成，待实机验收）

@@ -361,7 +361,7 @@ where
 }
 
 /// 分支/标签名与 revision 是不同类型的输入，不能直接当 CLI 选项拼接。
-fn validate_ref_name(name: &str, namespace: &str) -> GitResult<()> {
+pub(crate) fn validate_ref_name(name: &str, namespace: &str) -> GitResult<()> {
     if name.trim() != name
         || name.contains('\0')
         || name.starts_with('-')

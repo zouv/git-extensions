@@ -3,6 +3,8 @@ import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent
 import type { BranchInfo, SubmoduleInfo, TagInfo, WorktreeInfo } from "../types";
 import { buildBranchTree } from "../viewState";
 import type { BranchTreeNode } from "../viewState";
+import { planBranchFolderDelete } from "../branchDelete";
+import type { BranchRefKind } from "../branchDelete";
 import Icon from "../ui/Icon";
 import ContextMenu from "../ui/ContextMenu";
 import type { MenuItem } from "../ui/ContextMenu";
@@ -27,6 +29,7 @@ interface Props {
   onCompare: (ref: string) => void;
   onNewBranch: (startPoint: string) => void;
   onDeleteBranch: (branch: BranchInfo) => void;
+  onDeleteBranchFolder?: (prefix: string, kind: BranchRefKind) => void;
   onDeleteTag: (name: string) => void;
   onStash: () => void;
   onSubmodules: () => void;
@@ -39,7 +42,8 @@ interface Props {
 type RefMenuTarget = { x: number; y: number; kind: "branch" | "remote" | "tag"; name: string; branch?: BranchInfo };
 type SubmoduleMenuTarget = { x: number; y: number; kind: "submodule"; name: string; path: string };
 type WorktreeMenuTarget = { x: number; y: number; kind: "worktree"; name: string; path: string };
-type MenuTarget = RefMenuTarget | WorktreeMenuTarget | SubmoduleMenuTarget;
+type FolderMenuTarget = { x: number; y: number; kind: "local-folder" | "remote-folder"; name: string; prefix: string };
+type MenuTarget = RefMenuTarget | WorktreeMenuTarget | SubmoduleMenuTarget | FolderMenuTarget;
 
 export default function LeftPanel(props: Props) {
   const [menu, setMenu] = useState<MenuTarget | null>(null);
@@ -137,6 +141,7 @@ export default function LeftPanel(props: Props) {
       } else {
         const folderKey = `folder-${kind}-${node.prefix}`;
         const isCollapsed = collapsed.has(folderKey) && !query;
+        const folderMenuKind: "local-folder" | "remote-folder" = kind === "branch" ? "local-folder" : "remote-folder";
         out.push(
           <button
             key={folderKey}
@@ -146,6 +151,14 @@ export default function LeftPanel(props: Props) {
             {...focusProps(`group-${folderKey}`)}
             aria-expanded={!isCollapsed}
             onClick={() => toggle(folderKey)}
+            onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: folderMenuKind, name: node.name, prefix: node.prefix, x: e.clientX, y: e.clientY }); }}
+            onKeyDown={(e) => {
+              if (e.key === "F10" && e.shiftKey) {
+                e.preventDefault();
+                const rect = e.currentTarget.getBoundingClientRect();
+                setMenu({ kind: folderMenuKind, name: node.name, prefix: node.prefix, x: rect.left, y: rect.bottom });
+              }
+            }}
           >
             <Icon name={isCollapsed ? "folder" : "chevron-down"} size={12} />
             <span>{node.name}</span>
@@ -173,6 +186,30 @@ export default function LeftPanel(props: Props) {
       { id: "copy", label: "复制路径", icon: "copy", onSelect: () => props.onCopyPath(menu.path) },
       { id: "reveal", label: "在文件管理器中显示", icon: "external", onSelect: () => props.onRevealPath(menu.path) },
     ];
+    if (menu.kind === "local-folder" || menu.kind === "remote-folder") {
+      if (!props.onDeleteBranchFolder) return [];
+      const kind: BranchRefKind = menu.kind === "local-folder" ? "local" : "remote";
+      const plan = planBranchFolderDelete(props.branches, menu.prefix, kind);
+      if (kind === "local" && plan.headBranch) {
+        return [{
+          id: "delete-branch-folder",
+          label: "删除目录下所有分支…（含当前分支，请先切换）",
+          icon: "close" as const,
+          danger: true,
+          disabled: true,
+          title: `目录包含当前检出的分支 ${plan.headBranch}，请先切换到其他分支`,
+        }];
+      }
+      return [{
+        id: kind === "local" ? "delete-branch-folder" : "delete-remote-branch-folder",
+        label: kind === "local" ? "删除目录下所有分支…" : "删除目录下所有远程分支…",
+        icon: "close" as const,
+        danger: true,
+        disabled: plan.names.length === 0,
+        title: `将删除目录 ${menu.prefix}/ 下的 ${plan.names.length} 个分支`,
+        onSelect: () => props.onDeleteBranchFolder?.(menu.prefix, kind),
+      }];
+    }
     return [
       ...(menu.kind === "branch" ? [
         { id: "checkout", label: "切换分支", icon: "branch" as const, disabled: menu.branch?.isHead, onSelect: () => props.onCheckout(menu.name) },

@@ -59,7 +59,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | `src-tauri/src/lib.rs` | Tauri 命令注册、插件与窗口生命周期；最后一个窗口销毁后退出 | 新增 / 删除 IPC 命令、改应用生命周期 |
 | `src-tauri/src/error.rs` | 统一错误类型 `GitError`（可序列化给前端） | 新增错误类别 |
 | `src-tauri/src/git/mod.rs` | `open()`：按路径 discover 打开仓库 | 改仓库打开策略 |
-| `src-tauri/src/git/repo.rs` | 仓库信息、分支列表、远程列表、已合并本地分支、linked worktree 列表 | 改仓库概览 / 分支 / remote / worktree 字段 |
+| `src-tauri/src/git/repo.rs` | 仓库信息、分支列表、远程列表、已合并本地分支、分支删除预检、linked worktree 列表 | 改仓库概览 / 分支 / remote / worktree 字段 |
 | `src-tauri/src/git/log.rs` | revwalk 流式日志、refs 收集、分支图 lane 布局、代际取消 | 改日志加载 / 图数据 |
 | `src-tauri/src/git/diff.rs` | 提交 / 工作区 / 双端文件清单与单文件 patch、大小保护 | 改 diff 数据 |
 | `src-tauri/src/git/status.rs` | 状态快照、真实 operation state（含 Bisect）、冲突四方内容 | 改状态分类 / 冲突读取 |
@@ -107,7 +107,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | 有界后台读取 | `operations.rs` 的 `run_read`、`ReadPermit`；`commands.rs` 读适配、`log.rs::start_log` | 四令牌 FIFO 异步等待；令牌由 blocking 工作持有 |
 | Reset / 恢复备份 | `reset.rs` 的 `get_reset_preview`、`reset`、`get_recovery_entries`、`create_backup` | 原 HEAD 与 branch / index / dirty 内容指纹；Hard clean 保护 |
 | Push 目标与预览 / 远程管理 | `cli.rs` 的 `get_push_info`、`push_ex`、`fetch_ex`、`pull_ex`、`remote_*`；`repo.rs::remote_list` | 不 fallback；支持 `--force-with-lease`、`--tags`、fetch `--prune`、pull 策略与 `--autostash` |
-| 分支扩展 / Merge / Worktree / Bisect | `cli.rs` 的 `checkout_remote_branch`、`rename_branch`、`delete_branches`、`delete_remote_branch`、`merge_branch`、`worktree_*`、`bisect_*`；`repo.rs::get_merged_branches` | 均经 `acquire_write` 与参数验证；`get_merged_branches` 自动排除当前 HEAD 与常见主干分支 |
+| 分支扩展 / Merge / Worktree / Bisect | `cli.rs` 的 `checkout_remote_branch`、`rename_branch`、`delete_branches`、`delete_remote_branch`、`merge_branch`、`worktree_*`、`bisect_*`；`repo.rs::get_merged_branches`、`repo.rs::get_branch_delete_status` | 均经 `acquire_write` 与参数验证；`get_merged_branches` 自动排除当前 HEAD 与常见主干分支；删除预检按 `git branch -d` 的 upstream / HEAD 语义返回 `{name, exists, merged}` |
 | Hunk 暂存 / Fixup / 忽略 / 导出 / 命令日志 | `cli.rs` 的 `apply_diff_patch`、`commit_ex`、`commit_fixup`、`ignore_file`、`format_patch`、`archive_commit`、`get_command_log` | `apply_diff_patch` 通过 stdin 传给 `git apply`；命令日志保留最近 200 条 CLI 记录 |
 | 重命名工作区文件 / 目录 | `cli.rs` 的 `rename_path`、`validate_rename_name` | 只允许同目录改名；`git mv` 仅处理已跟踪内容；拒绝路径分隔符、`.git`、Windows 保留名与已存在目标 |
 | blame / 文件历史 / 提交与代码搜索 | `history.rs` 的 `blame_file`、`file_log`、`search_commits`、`git_grep` | blame 上限 2 MiB / 20000 行；搜索经受控 CLI NUL 协议解析 |
@@ -173,7 +173,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | 前端 → 后端 | `discard_files` / `delete_untracked_files` / `open_path` / `reveal_path` | 仅仓库内相对路径；丢弃保留 staged；删除拒绝 tracked / ignored / 目录 |
 | 前端 → 后端 | `get_worktree_diff` | `staged`：true=HEAD vs index，false=index vs workdir |
 | 前端 → 后端 | `stage_files` / `unstage_files` / `preview_add_files` / `add_files` / `reset_changes` / `commit` / `commit_fixup` / `apply_diff_patch` / `ignore_file` | 走 CLI，stderr 原文返回；`preview_add_files` 执行 `git add --dry-run`；`add_files` 的 Filter 按 Git pathspec 语义；`reset_changes` 支持 deleteNew；`commit` 支持 `amend`；`apply_diff_patch` 支持 `cached` 与 `reverse`（Hunk 暂存/取消暂存/丢弃） |
-| 前端 → 后端 | `create_branch` / `checkout_branch` / `checkout_remote_branch` / `rename_branch` / `delete_branch` / `delete_branches` / `delete_remote_branch` / `get_merged_branches` / `merge_branch` | 远程检出自动创建跟踪分支；批量删除与远程删除需确认；`merge_branch` 支持 `default` / `no-ff` / `ff-only` / `squash` |
+| 前端 → 后端 | `create_branch` / `checkout_branch` / `checkout_remote_branch` / `rename_branch` / `delete_branch` / `delete_branches` / `delete_remote_branch` / `get_merged_branches` / `get_branch_delete_status` / `merge_branch` | 远程检出自动创建跟踪分支；批量删除与远程删除需确认；`get_branch_delete_status` 按 `git branch -d` 语义（有可解析 upstream 时比较 upstream，否则回退 HEAD）返回 `{name, exists, merged}`；`merge_branch` 支持 `default` / `no-ff` / `ff-only` / `squash` |
 | 前端 → 后端 | `fetch` / `pull` / `push` / `remote_list` / `remote_add` / `remote_set_url` / `remote_rename` / `remote_remove` | `fetch` 支持 `remote` / `prune`；`pull` 支持 `mode`、`autostash`、`remote` / `branch`、`fetchOnly`、`prune`、`tagsMode`；`push` 支持 `forceWithLease`、`force`、`pushTags`、`recurseSubmodules` |
 | 前端 → 后端 | `list_patch_directory` / `apply_patch_file` / `apply_patch_directory` / `get_patch_apply_state` / `continue_patch` / `skip_patch` / `abort_patch` | 文件按内容自动选 `git apply` / `git am`；目录按文件名顺序；返回输出与退出码；am 冲突映射为 `applyPatch` 操作状态 |
 | 前端 → 后端 | `worktree_list` / `worktree_add` / `worktree_remove` / `worktree_lock` / `worktree_prune` | 管理 linked worktree，写操作均走 CLI 并受仓库写互斥保护 |
@@ -214,6 +214,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 - **无 HEAD 的新仓库**：`restore --staged` 会失败，`unstage_files` 自动退回 `reset -q --`。
 - **diff 先限内容再限输出**：单文件 >8 MiB 在 Patch 前检查 delta / ODB header / 工作区元数据并跳过，单 patch 512 KiB、合计 4 MiB；超限是 truncated，不伪装 binary。Patch 生成后才能确定二进制，文件清单不能假定最终 binary 分类。
 - **默认 revwalk 起点是 HEAD + refs（排除内部备份）**：detached 也必须 push HEAD；refs 先 peel_to_commit，annotated tag 不能直接 push。排除 refs/git-extensions/backups/，避免被 reset / drop 的旧提交只因备份而混入日常日志；空仓库发空 done。
+- **分支删除预检按 `git branch -d` 语义**：有可解析 upstream 时只比较 upstream，否则回退 HEAD，不能对两者取 OR；`get_branch_delete_status` 只是确认框的 UI 提示，最终安全边界仍是 `-d/-D` 的复核。目录删除必须基于全量分支列表（不受左侧过滤 / 分页影响）并按 `prefix/` 前缀包含嵌套；本地目录含当前 HEAD 时禁止整目录删除，远程目录逐个 `push --delete`，批量部分失败后必须刷新视图并保留失败明细。
 - **Push 失败绝不更换目标**：无 upstream 时显式选择目标并校验 branch / HEAD；已有 upstream 的普通 Push 尊重 Git 配置。认证、网络、非快进等失败必须原样返回，不能当作首次推送 fallback。
 - **写锁不可重入**：一个用户操作的内部步骤共用 RAII lease（例如冲突保存后 stage），不能再调用会申请锁的公共写入口；新增写 IPC 必须接入后端调度与前端 `writeInvoke`。
 - **按 ref 过滤仍走同一条日志流**：`start_log` 的可选 `revspec` 只改变 revwalk 起点，保留同一套分批、图布局与双端取消逻辑。

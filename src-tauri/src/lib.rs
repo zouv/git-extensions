@@ -81,6 +81,7 @@ pub fn run(launch_request: Option<launch::LaunchRequest>) {
             git::commands::delete_branch,
             git::commands::delete_branches,
             git::commands::delete_remote_branch,
+            git::commands::get_branch_delete_status,
             git::commands::merge_branch,
             git::commands::remote_list,
             git::commands::remote_add,

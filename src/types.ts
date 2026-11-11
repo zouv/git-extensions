@@ -13,6 +13,12 @@ export interface BranchInfo {
   oid: string;
 }
 
+export interface BranchDeleteStatus {
+  name: string;
+  exists: boolean;
+  merged: boolean;
+}
+
 export interface RefLabel {
   name: string;
   kind: "head" | "branch" | "remote" | "tag" | "stash" | string;

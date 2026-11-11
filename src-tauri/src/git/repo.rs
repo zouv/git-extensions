@@ -2,6 +2,7 @@ use std::path::Path;
 
 use serde::Serialize;
 
+use super::cli::validate_ref_name;
 use super::open;
 use crate::error::{GitError, GitResult};
 
@@ -316,4 +317,69 @@ pub fn get_merged_branches(path: String) -> GitResult<Vec<String>> {
     }
     merged.sort();
     Ok(merged)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchDeleteStatus {
+    pub name: String,
+    pub exists: bool,
+    pub merged: bool,
+}
+
+/// 复刻 `git branch -d` 的合并判定：有可解析 upstream 时只比较 upstream，
+/// 否则（无 upstream、配置不完整或 upstream ref 缺失）回退到 HEAD。
+fn branch_is_fully_merged(
+    repo: &git2::Repository,
+    branch: &git2::Branch<'_>,
+    head: Option<git2::Oid>,
+) -> bool {
+    let Some(tip) = branch.get().peel_to_commit().ok().map(|commit| commit.id()) else {
+        return false;
+    };
+    let reference = branch
+        .upstream()
+        .ok()
+        .and_then(|upstream| upstream.get().peel_to_commit().ok())
+        .map(|commit| commit.id())
+        .or(head);
+    let Some(reference) = reference else {
+        return false;
+    };
+    tip == reference || repo.graph_descendant_of(reference, tip).unwrap_or(false)
+}
+
+/// 删除前预检：缺失的分支返回 `exists: false`，不让一个失效名字拖垮整批目录预检。
+pub fn get_branch_delete_status(
+    path: String,
+    names: Vec<String>,
+) -> GitResult<Vec<BranchDeleteStatus>> {
+    let repo = open(&path)?;
+    for name in &names {
+        validate_ref_name(name, "heads")?;
+    }
+    let head = repo
+        .head()
+        .and_then(|head| head.peel_to_commit())
+        .ok()
+        .map(|commit| commit.id());
+    let mut statuses = Vec::with_capacity(names.len());
+    for name in names {
+        match repo.find_branch(&name, git2::BranchType::Local) {
+            Ok(branch) => statuses.push(BranchDeleteStatus {
+                merged: branch_is_fully_merged(&repo, &branch, head),
+                exists: true,
+                name,
+            }),
+            Err(error) if error.code() == git2::ErrorCode::NotFound => {
+                statuses.push(BranchDeleteStatus {
+                    name,
+                    exists: false,
+                    merged: false,
+                });
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(statuses)
 }

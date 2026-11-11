@@ -26,6 +26,7 @@ import type {
   WindowBootstrap, ExplorerTarget, ScopedHistoryEntry, CommandOutput,
   RemoteInfo, CommandLogEntry, GrepMatch, MergeMode, PullMode, CloneProgress,
   PatchFileInfo, PatchApplyState, FileContent,
+  BranchDeleteStatus,
 } from "./types";
 
 // 只合并仍在途的同参数读取，不缓存工作区结果。
@@ -84,6 +85,8 @@ export const api = {
     writeInvoke<string>("delete_branch", { path, name, force }),
   deleteBranches: (path: string, names: string[], force = false) =>
     writeInvoke<string>("delete_branches", { path, names, force }),
+  getBranchDeleteStatus: (path: string, names: string[]) =>
+    invoke<BranchDeleteStatus[]>("get_branch_delete_status", { path, names }),
   deleteRemoteBranch: (path: string, remoteBranch: string) =>
     writeInvoke<string>("delete_remote_branch", { path, remoteBranch }),
   mergeBranch: (path: string, target: string, mode: MergeMode = "default", message?: string) =>

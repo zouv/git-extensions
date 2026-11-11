@@ -286,6 +286,14 @@ pub async fn delete_remote_branch(path: String, remote_branch: String) -> GitRes
 }
 
 #[tauri::command]
+pub async fn get_branch_delete_status(
+    path: String,
+    names: Vec<String>,
+) -> GitResult<Vec<super::repo::BranchDeleteStatus>> {
+    super::operations::run_read(move || super::repo::get_branch_delete_status(path, names)).await
+}
+
+#[tauri::command]
 pub async fn merge_branch(
     path: String,
     target: String,

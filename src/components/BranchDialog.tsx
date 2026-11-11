@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { decideBranchDeletion } from "../branchDelete";
+import { singleBranchDeleteConfirm } from "../branchDeleteDialog";
 import { useRepoBusy } from "../useRepoBusy";
 import type { BranchInfo } from "../types";
 import Dialog from "../ui/Dialog";
@@ -24,7 +26,6 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, in
   const [selected, setSelected] = useState<string | null>(initialSelected ?? null);
   const [newName, setNewName] = useState("");
   const [renameTo, setRenameTo] = useState("");
-  const [force, setForce] = useState(false);
   const [strategy, setStrategy] = useState<"default" | "stash" | "reset">("default");
   const [localName, setLocalName] = useState("");
   const [checkoutAfterCreate, setCheckoutAfterCreate] = useState(true);
@@ -34,6 +35,7 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, in
   const [localBusy, setBusy] = useState(false);
   const repoBusy = useRepoBusy(repoPath);
   const busy = localBusy || repoBusy;
+  const branchDeleteFlow = useRef(false);
   const confirm = useConfirm();
   const selectedEntry = branches.find((b) => b.name === selected) ?? null;
   const selectedBranch = selectedEntry && !selectedEntry.isRemote ? selectedEntry : null;
@@ -74,8 +76,32 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, in
       return;
     }
     if (!selectedBranch) return;
-    const ok = await confirm({ title: `删除分支 ${selectedBranch.name}？`, body: force ? "强制删除不会检查分支是否已合并，未合并提交可能难以找回。" : "Git 会检查该分支是否已合并。删除分支不会删除远程分支。", confirmLabel: force ? "强制删除" : "删除分支", danger: true, requireAck: force, ackLabel: "我确认强制删除未合并分支" });
-    if (ok) void run(() => api.deleteBranch(repoPath, selectedBranch.name, force), `已删除 ${selectedBranch.name}`);
+    if (branchDeleteFlow.current) return;
+    const target = selectedBranch;
+    branchDeleteFlow.current = true;
+    setError("");
+    try {
+      const statuses = await api.getBranchDeleteStatus(repoPath, [target.name]);
+      const decision = decideBranchDeletion(statuses, [target.name]);
+      if (decision.names.length === 0) {
+        setError(`分支 ${target.name} 已不存在，请刷新列表`);
+        onChanged();
+        return;
+      }
+      const force = decision.force;
+      const ok = await confirm(singleBranchDeleteConfirm(target.name, target.oid, force));
+      if (ok) {
+        await run(
+          () => api.deleteBranch(repoPath, target.name, force),
+          force ? `已强制删除 ${target.name}` : `已删除 ${target.name}`,
+        );
+      }
+    } catch (e) {
+      setError(String(e));
+      setMessage(String(e));
+    } finally {
+      branchDeleteFlow.current = false;
+    }
   };
 
   const confirmReset = async () => {
@@ -163,7 +189,6 @@ export default function BranchDialog({ repoPath, branches, initialStartPoint, in
         <button className="danger-button" disabled={busy || (!selectedBranch && !selectedRemote) || !!selectedBranch?.isHead} onClick={() => void remove()}>
           {selectedRemote ? "删除远程分支…" : "删除…"}
         </button>
-        {!selectedRemote && <label className="force-label"><input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />强制删除</label>}
       </div>
       {selectedBranch && (
         <div className="branch-create">

@@ -839,3 +839,120 @@ fn create_branch_checkout_and_orphan_options() {
     let head = git_repo.find_reference("HEAD").unwrap();
     assert_eq!(head.symbolic_target(), Some("refs/heads/orphan"));
 }
+
+#[test]
+fn branch_delete_status_matches_git_dash_d_semantics() {
+    let workspace = Workspace::new();
+    let repo = workspace.repo("branch-delete-status");
+    repo.commit("base.txt", "base\n");
+
+    git::cli::create_branch(repo.path(), "folder/anchor".into(), None).unwrap();
+
+    git::cli::create_branch(repo.path(), "folder/unmerged".into(), None).unwrap();
+    git::cli::checkout_branch(repo.path(), "folder/unmerged".into()).unwrap();
+    repo.commit("unmerged.txt", "unmerged\n");
+    git::cli::checkout_branch(repo.path(), "main".into()).unwrap();
+
+    git::cli::create_branch(repo.path(), "upstream/merged".into(), None).unwrap();
+    git::cli::checkout_branch(repo.path(), "upstream/merged".into()).unwrap();
+    let upstream_oid = repo.commit("upstream.txt", "upstream\n");
+    git::cli::checkout_branch(repo.path(), "main".into()).unwrap();
+
+    git::cli::create_branch(repo.path(), "folder/fallback".into(), None).unwrap();
+
+    let git_repo = repo.repo();
+    git::cli::remote_add(
+        repo.path(),
+        "origin".into(),
+        "https://example.com/repo.git".into(),
+    )
+    .unwrap();
+    let upstream_oid: git2::Oid = upstream_oid.parse().unwrap();
+    git_repo
+        .reference(
+            "refs/remotes/origin/upstream/merged",
+            upstream_oid,
+            false,
+            "test upstream",
+        )
+        .unwrap();
+    {
+        let mut config = git_repo.config().unwrap();
+        config
+            .set_str("branch.upstream/merged.remote", "origin")
+            .unwrap();
+        config
+            .set_str("branch.upstream/merged.merge", "refs/heads/upstream/merged")
+            .unwrap();
+        config
+            .set_str("branch.folder/fallback.remote", "origin")
+            .unwrap();
+        config
+            .set_str("branch.folder/fallback.merge", "refs/heads/gone")
+            .unwrap();
+    }
+
+    let names = vec![
+        "folder/anchor".to_string(),
+        "folder/unmerged".to_string(),
+        "upstream/merged".to_string(),
+        "folder/fallback".to_string(),
+        "folder/gone".to_string(),
+    ];
+    let statuses = git::repo::get_branch_delete_status(repo.path(), names.clone()).unwrap();
+    assert_eq!(
+        statuses
+            .iter()
+            .map(|status| status.name.as_str())
+            .collect::<Vec<_>>(),
+        names.iter().map(String::as_str).collect::<Vec<_>>()
+    );
+    let status = |name: &str| statuses.iter().find(|status| status.name == name).unwrap();
+    assert!(status("folder/anchor").exists && status("folder/anchor").merged);
+    assert!(status("folder/unmerged").exists && !status("folder/unmerged").merged);
+    assert!(status("upstream/merged").exists && status("upstream/merged").merged);
+    assert!(status("folder/fallback").exists && status("folder/fallback").merged);
+    assert!(!status("folder/gone").exists && !status("folder/gone").merged);
+
+    assert!(
+        git::cli::delete_branch(repo.path(), "folder/unmerged".into(), false).is_err(),
+        "未合并分支必须要求强制删除"
+    );
+    assert!(
+        git::cli::delete_branch(repo.path(), "upstream/merged".into(), false).is_ok(),
+        "合并到 upstream 的分支可以安全删除"
+    );
+    assert!(
+        git::cli::delete_branch(repo.path(), "folder/fallback".into(), false).is_ok(),
+        "upstream ref 缺失时应回退到 HEAD"
+    );
+    assert!(
+        git::cli::delete_branch(repo.path(), "folder/anchor".into(), false).is_ok(),
+        "HEAD 祖先分支可以安全删除"
+    );
+}
+
+#[test]
+fn branch_delete_status_rejects_invalid_names_and_handles_empty() {
+    let workspace = Workspace::new();
+    let repo = workspace.repo("branch-delete-status-invalid");
+    repo.commit("base.txt", "base\n");
+    assert!(git::repo::get_branch_delete_status(repo.path(), Vec::new())
+        .unwrap()
+        .is_empty());
+    for name in [
+        "-D",
+        "--delete",
+        "HEAD",
+        "bad..name",
+        "",
+        "bad name",
+        " leading",
+        "trailing ",
+    ] {
+        assert!(
+            git::repo::get_branch_delete_status(repo.path(), vec![name.to_string()]).is_err(),
+            "{name}"
+        );
+    }
+}

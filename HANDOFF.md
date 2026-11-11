@@ -2,12 +2,12 @@
 
 ## 状态快照
 
-- 最近更新：2026-11-10。0.9.1 已发布并上传 GitHub Release：资源管理器 Commit / View changes 目录作用域、View history 三目标、右键动作无控制台闪烁、Rename 占用提示。NSIS 3.50 MiB、MSI 5.85 MiB、便携 zip 4.81 MiB，SHA256SUMS 校验通过；当前无进行中任务（待人工 GUI 验收）。
+- 最近更新：2026-11-11。分支删除交互改造已完成：删除前预检合并状态，未合并时确认框改为红色「强制删除」；分支目录右键支持本地 / 远程批量删除。前端 76/76、Rust 110/110 测试通过，当前无进行中任务（待 GUI 验收）。0.9.1 已发布并上传 GitHub Release。
 - 远程已关联并推送：origin = https://github.com/zouv/git-extensions，main 与历史标签已推送。
 
 ## 当前任务
 
-- 无进行中任务（本轮 3 项资源管理器反馈已实现，待 GUI 验收）。
+- 无进行中任务（本轮分支删除交互改造已实现，待 GUI 验收）。
 
 ## 进行中
 
@@ -15,10 +15,11 @@
 
 ## 下一步
 
-- 按「待验收」清单完成 0.9.1 GUI 验收；重点确认右键菜单指向 dev 构建时点击不再闪命令行窗口，且 dev.bat / cargo 启动仍有日志；从子目录右键 Commit / View changes / View history 时范围正确；Rename 被占用时显示原因提示。若 Others 仍不足，按设置页提示把超限的目录直排命令改为一级或隐藏后重新保存。验收前请先运行要使用的构建（release unpack 或 dev）并点一次「保存 / 应用」，让菜单命令指向该可执行文件。
+- 按「待验收」清单完成 GUI 验收；本轮重点：分支右键删除时已合并 / 未合并两种确认按钮样式；分支管理弹窗不再显示「强制删除」勾选；本地分支目录右键能删除含嵌套的全部分支，目录含当前分支时菜单禁用并提示；远程分支目录逐个 `push --delete` 并在部分失败时提示明细；过滤 / 分页后删除目录仍以完整名单确认。验收前先运行要使用的构建（release unpack 或 dev）并点一次「保存 / 应用」，让资源管理器菜单命令指向该可执行文件。
 
 ## 验证状态
 
+- 2026-11-11 分支删除交互：`pnpm test` Node 76/76（新增 5 个 `branchDelete` 纯函数用例）、`pnpm build`（tsc + Vite）通过、`cargo test` Rust 110/110（47 lib + 13 repository_capabilities + 21 safety + 14 smoke + 15 workflows）、`cargo fmt --check` 通过。新增 `get_branch_delete_status` 集成测试覆盖 HEAD 祖先、未合并、upstream 已合并、upstream ref 缺失回退 HEAD、不存在分支与非法名称；未做真实 GUI / 远程目录实机验收。
 - 2026-11-10 0.9.1 发布验证：`pnpm test` 71/71、`pnpm build`、`cargo test` 108/108、`cargo fmt --check`、`sh check-docs.sh` 通过；`package` 生成 NSIS 0.9.1（3.50 MiB）、MSI 0.9.1（5.85 MiB）、`unpack/` 便携目录、便携 zip（4.81 MiB）与 `SHA256SUMS.txt`，本地 `sha256sum -c` 三个产物全部 OK；GitHub Release `v0.9.1` 已创建并上传全部 4 个资产。
 - 2026-11-10 0.9.0 发布验证：`pnpm test` 71/71、`pnpm build`、`cargo test` 106/106、`cargo fmt --check`、`sh check-docs.sh` 通过；`package` 生成 NSIS 0.9.0（3.50 MiB）、MSI 0.9.0（5.86 MiB）、`unpack/` 便携目录、便携 zip（4.81 MiB）与 `SHA256SUMS.txt`，本地 `sha256sum -c` 三个产物全部 OK；GitHub Release `v0.9.0` 已创建并上传全部 4 个资产。
 - 2026-11-10 本轮：`pnpm test` Node 71/71、`pnpm build`（tsc + Vite）通过、`cargo test` Rust 108/108（47 lib + 11 repository_capabilities + 21 safety + 14 smoke + 15 workflows）、`cargo fmt --check` 通过。新增 scoped commit 集成测试（普通 / Amend 均只提交目录内暂存内容且保留目录外暂存）与 View history 三上下文单测；无效启动参数的实测确认 debug exe 已无控制台子系统（输出转到父控制台，退出码正确）。Rename 权限错误已在本机复现：Windows 不允许改名被其它进程作为 cwd 的目录；面板改为解释原因，并对瞬时占用重试两次。
@@ -26,7 +27,7 @@
 
 ## 待验收
 
-1. **P0–P2 新增 Git 工作流 GUI**：Merge 分支弹窗与右键合并（默认 / `--no-ff` / `--ff-only` / `--squash`）；Amend 修正提交勾选自动回填 HEAD 信息；远程分支检出跟踪、本地分支重命名、远程分支删除与批量清理已合并分支；变更预览 Hunk 级暂存 / 取消暂存 / 丢弃与右键加入 `.gitignore`；Remotes 远程管理、Pull 策略弹窗、Push `--force-with-lease` & `--tags`；Worktree 新建 / 锁定 / 移除 / 清理与左侧分支 `/` 文件夹树折叠；`Ctrl+Shift+G` 命令日志查看器、`Ctrl+Shift+H` 提交与 `git grep` 搜索；Fixup / Squash 提交与 Rebase Autosquash 重排；导出补丁 / 归档保存对话框与 Git Bisect 横幅工作流。
+1. **P0–P2 新增 Git 工作流 GUI**：Merge 分支弹窗与右键合并（默认 / `--no-ff` / `--ff-only` / `--squash`）；Amend 修正提交勾选自动回填 HEAD 信息；远程分支检出跟踪、本地分支重命名、远程分支删除与批量清理已合并分支；变更预览 Hunk 级暂存 / 取消暂存 / 丢弃与右键加入 `.gitignore`；Remotes 远程管理、Pull 策略弹窗、Push `--force-with-lease` & `--tags`；Worktree 新建 / 锁定 / 移除 / 清理与左侧分支 `/` 文件夹树折叠；`Ctrl+Shift+G` 命令日志查看器、`Ctrl+Shift+H` 提交与 `git grep` 搜索；Fixup / Squash 提交与 Rebase Autosquash 重排；导出补丁 / 归档保存对话框与 Git Bisect 横幅工作流；分支删除预检（已合并普通「删除」/ 未合并红色「强制删除」）与本地 / 远程分支目录右键批量删除（含嵌套、当前分支禁用、远程逐个 `push --delete`）。
 2. **顶部栏、弹窗、通知与命令面板 GUI**：应用图标菜单（打开仓库 / 克隆 / 新建 / 命令面板 / 设置 / 最近仓库 / 关于 / 关闭窗口，键盘与关闭后焦点恢复）；空白区拖动移动窗口、双击最大化 / 还原、右键打开应用菜单；页签悬停显示关闭 X 且不位移、中键只关闭目标；页签右键菜单（关闭 / 关闭其它并列出保留原因 / 在右侧打开仓库并激活 / 别名 / 复制路径 / 文件管理器）；拖动超过 6px 才排序、3px 插入线、Esc / 条外 / 丢失捕获取消、边缘自动滚动；方向键与 Home/End 切换页签、Shift+F10 菜单；「+」紧随末页签且溢出时仍可见。弹窗打开后焦点落在正文 `data-autofocus` 而非关闭 X，等待 2 个轮询周期焦点不跳；嵌套删除确认按 Esc 只关一层；带草稿弹窗按 Esc / 点外部 / 取消均有确认；通知抽屉保留全部错误、清空需确认、成功 toast 悬停暂停；`Ctrl+K` 搜索与执行命令；原生目录 / 文件选择与拖放打开仓库；窄窗口下视图菜单与“更多”菜单可达；资源管理器二级菜单平铺分隔线分组 / 图标 / 16 项上限，Clone 窗口内进度页与「克隆并打开」双按钮；应用菜单「最近打开」不再出现空行。
 3. **仓库页签分组与持久化 GUI**：多选切换与页签并集、分组菜单保持打开以便连续多选、菜单右侧快速 Pin 且不误切组、Default 禁 Pin；管理器颜色改为点击当前色块弹出预设色板，组色同步到头像/菜单/页签色条并重启保持；管理界面逐页签更换分组、编辑显示名。打开 4–6 个仓库后重启，页签数量 / 顺序 / 活动页签 / 分组可见性保持，恢复时仅活动页签加载，未访问页签首次点击才加载；切回页签立即刷新并显示加载 / 错误徽标。
 4. **左侧导航与差异视图 GUI**：组按钮 / Pin 图标与页签栏间距；「本地变更」显示变更面板，选中分支 / 标签 / 全部提交显示对应历史；分支 / 标签过滤与 200 条分页；Submodules 与 Worktrees 分组可折叠、标题计数、空状态；Worktrees 行双击 / Enter 打开为页签；Stash / 子模块固定在侧栏底部。本地变更预览不重复显示文件名 / 文件列表且轮询不闪烁；Inline / Split 切换、上一处 / 下一处（Alt+↑ / ↓ 或 n / p）、折叠未修改、差异块计数、增删统计、文件过滤与 500 条封顶、行右键复制 `路径:行号`，Inline / Split 与换行偏好重启保持；冲突标记数量、合并两侧、继续禁用原因、Rebase 拖放指示可见；Blame 点击提交 SHA 跳转。

@@ -1,6 +1,8 @@
 import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, nextLogRequestId, onLogBatch } from "./api";
 import { hasSessionDrafts } from "./viewState";
+import { decideBranchDeletion, planBranchFolderDelete } from "./branchDelete";
+import { localFolderDeleteConfirm, remoteFolderDeleteConfirm, singleBranchDeleteConfirm } from "./branchDeleteDialog";
 import { useRepoBusy } from "./useRepoBusy";
 import { getRepoOperation } from "./repoOperations";
 import type { AheadBehind, BranchInfo, CommitDetail, ContainedInfo, FileDiff, ConflictDraft, RebaseDraft, OperationState, RepoInfo, Revision, StatusSnapshot, SubmoduleInfo, TagInfo, WorktreeInfo, WorkspaceLaunchAction, WorkspaceLaunchRequest } from "./types";
@@ -142,6 +144,7 @@ export default function RepoWorkspace(props: Props) {
   const refsFingerprint = useRef("");
   const statusRef = useRef<StatusSnapshot>(EMPTY_STATUS);
   const busyRef = useRef(false);
+  const branchDeleteFlow = useRef(false);
   const pollingRef = useRef(false);
   const settingsRef = useRef(settings);
   const selectedOidsRef = useRef<string[]>([]);
@@ -457,9 +460,97 @@ export default function RepoWorkspace(props: Props) {
   }, [compareBase, confirm, openCompare, operation?.kind, repo.path, repoInfo.name, runAction]);
 
   const deleteBranch = useCallback(async (branch: BranchInfo) => {
-    if (!await confirm({ title: `删除分支 ${branch.name}？`, body: "Git 会先检查是否已合并。强制删除请在分支管理中单独勾选。", confirmLabel: "删除分支", danger: true })) return;
-    void runAction(() => api.deleteBranch(repo.path, branch.name, false), `已删除 ${branch.name}`);
-  }, [confirm, repo.path, runAction]);
+    if (branchDeleteFlow.current || busyRef.current || getRepoOperation(repo.path)) return;
+    branchDeleteFlow.current = true;
+    try {
+      const statuses = await api.getBranchDeleteStatus(repo.path, [branch.name]);
+      const decision = decideBranchDeletion(statuses, [branch.name]);
+      if (decision.names.length === 0) {
+        setMessage(`分支 ${branch.name} 已不存在`);
+        notifyRef.current("info", "分支已不存在", `${branch.name} 可能已被外部删除或重命名`);
+        refreshAll();
+        return;
+      }
+      const force = decision.force;
+      if (!await confirm(singleBranchDeleteConfirm(branch.name, branch.oid, force))) return;
+      if (busyRef.current || getRepoOperation(repo.path)) return;
+      await runAction(
+        () => api.deleteBranch(repo.path, branch.name, force),
+        force ? `已强制删除 ${branch.name}` : `已删除 ${branch.name}`,
+      );
+    } catch (e) {
+      setMessage(String(e));
+      notifyRef.current("error", "无法删除分支", String(e));
+    } finally {
+      branchDeleteFlow.current = false;
+    }
+  }, [confirm, refreshAll, repo.path, runAction]);
+
+  const deleteBranchFolder = useCallback(async (prefix: string, kind: "local" | "remote") => {
+    if (branchDeleteFlow.current || busyRef.current || getRepoOperation(repo.path)) return;
+    branchDeleteFlow.current = true;
+    try {
+      const plan = planBranchFolderDelete(branches, prefix, kind);
+      if (kind === "local") {
+        if (plan.headBranch) {
+          notifyRef.current("info", "无法删除目录", `目录 ${prefix}/ 包含当前检出的分支 ${plan.headBranch}，请先切换到其他分支`);
+          return;
+        }
+        if (plan.names.length === 0) {
+          notifyRef.current("info", "没有可删除的分支", `目录 ${prefix}/ 下没有本地分支`);
+          refreshAll();
+          return;
+        }
+        const statuses = await api.getBranchDeleteStatus(repo.path, plan.names);
+        const decision = decideBranchDeletion(statuses, plan.names);
+        if (decision.names.length === 0) {
+          notifyRef.current("info", "没有可删除的分支", "目录下的分支已不存在");
+          refreshAll();
+          return;
+        }
+        if (!await confirm(localFolderDeleteConfirm(prefix, decision))) return;
+        if (busyRef.current || getRepoOperation(repo.path)) return;
+        await runAction(async () => {
+          try {
+            await api.deleteBranches(repo.path, decision.names, decision.force);
+          } catch (e) {
+            refreshAll();
+            throw e;
+          }
+        }, decision.force ? `已强制删除 ${decision.names.length} 个分支` : `已删除 ${decision.names.length} 个分支`);
+        return;
+      }
+
+      if (plan.names.length === 0) {
+        notifyRef.current("info", "没有可删除的分支", `目录 ${prefix}/ 下没有远程分支`);
+        refreshAll();
+        return;
+      }
+      if (!await confirm(remoteFolderDeleteConfirm(prefix, plan.names))) return;
+      if (busyRef.current || getRepoOperation(repo.path)) return;
+      await runAction(async () => {
+        const failures: string[] = [];
+        let deleted = 0;
+        for (const name of plan.names) {
+          try {
+            await api.deleteRemoteBranch(repo.path, name);
+            deleted += 1;
+          } catch (e) {
+            failures.push(`${name}：${String(e)}`);
+          }
+        }
+        refreshAll();
+        if (failures.length > 0) {
+          throw new Error(`已删除 ${deleted}/${plan.names.length} 个远程分支\n${failures.join("\n")}`);
+        }
+      }, `已删除 ${plan.names.length} 个远程分支`);
+    } catch (e) {
+      setMessage(String(e));
+      notifyRef.current("error", "无法删除分支目录", String(e));
+    } finally {
+      branchDeleteFlow.current = false;
+    }
+  }, [branches, confirm, refreshAll, repo.path, runAction]);
 
   const deleteRemoteBranch = useCallback(async (remoteBranch: string) => {
     const ok = await confirm({
@@ -669,7 +760,7 @@ export default function RepoWorkspace(props: Props) {
           onRenameBranch={(branch) => { setBranchSelected(branch.name); setBranchMode("checkout"); setShowBranches(true); }}
           onDeleteRemoteBranch={(remoteBranch) => void deleteRemoteBranch(remoteBranch)}
           onCompare={(ref) => openCompare("HEAD", ref)}
-          onNewBranch={(start) => { setBranchStart(start); setBranchSelected(undefined); setBranchMode("create"); setShowBranches(true); }} onDeleteBranch={deleteBranch}
+          onNewBranch={(start) => { setBranchStart(start); setBranchSelected(undefined); setBranchMode("create"); setShowBranches(true); }} onDeleteBranch={deleteBranch} onDeleteBranchFolder={deleteBranchFolder}
           onDeleteTag={(name) => { void confirm({ title: `删除标签 ${name}？`, body: "只删除本地标签。", danger: true, confirmLabel: "删除标签" }).then((ok) => { if (ok) void runAction(() => api.deleteTag(repo.path, name), `已删除标签 ${name}`); }); }}
           onStash={() => setShowStash(true)} onSubmodules={() => setShowSubmodules(true)} onWorktrees={() => setShowWorktrees(true)}
           onCopyPath={(path) => { void navigator.clipboard?.writeText(path).then(() => setMessage("已复制路径")); }}
