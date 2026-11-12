@@ -962,9 +962,6 @@ export default function RepoWorkspace(props: Props) {
       if (mod) {
         if (key === "f") { event.preventDefault(); document.querySelector<HTMLElement>(".repo-host.active .revision-filter")?.focus(); }
         else if (key === "b") { event.preventDefault(); setLayout((prev) => ({ ...prev, showLeft: !prev.showLeft })); }
-        else if (key === "1") { event.preventDefault(); void switchWorkspace("history"); }
-        else if (key === "2") { event.preventDefault(); void switchWorkspace("changes"); }
-        else if (key === "3") { event.preventDefault(); const selected = selectedOidsRef.current; openCompare(compareBase ?? selected[0] ?? "HEAD", selected[1] ?? "HEAD"); }
         else if (key === "s" && task?.type === "conflict") return;
         return;
       }
@@ -989,11 +986,11 @@ export default function RepoWorkspace(props: Props) {
     const commands: Command[] = [
       { id: `repo:${repo.path}:refresh`, title: "刷新当前仓库", group: "当前仓库", shortcut: "F5", keywords: ["refresh", "reload"], enabled: !busy, run: refreshAll },
       { id: `repo:${repo.path}:filter`, title: "聚焦提交过滤", group: "当前仓库", shortcut: "Ctrl+F", keywords: ["search", "filter"], run: () => document.querySelector<HTMLElement>(".repo-host.active .revision-filter")?.focus() },
-      { id: `repo:${repo.path}:history`, title: "切换到历史工作区", group: "当前仓库", shortcut: "Ctrl+1", run: () => void switchWorkspace("history") },
-      { id: `repo:${repo.path}:changes`, title: "切换到变更工作区", group: "当前仓库", shortcut: "Ctrl+2", run: () => void switchWorkspace("changes") },
+      { id: `repo:${repo.path}:history`, title: "切换到历史工作区", group: "当前仓库", run: () => void switchWorkspace("history") },
+      { id: `repo:${repo.path}:changes`, title: "切换到变更工作区", group: "当前仓库", run: () => void switchWorkspace("changes") },
       { id: `repo:${repo.path}:commit`, title: "打开提交变更面板", group: "当前仓库", shortcut: "Ctrl+Enter", keywords: ["commit", "stage"], enabled: !busy, run: () => { void switchWorkspace("changes").then((ok) => { if (ok) setFocusCommitSignal((value) => value + 1); }); } },
       { id: `repo:${repo.path}:conflict`, title: `解决冲突（${conflictCount}）`, group: "当前仓库", keywords: ["conflict", "merge", "rebase"], enabled: conflictCount > 0, run: showConflict },
-      { id: `repo:${repo.path}:compare`, title: "创建提交 / 分支对比", group: "当前仓库", shortcut: "Ctrl+3", keywords: ["compare", "diff"], run: () => openCompare(compareBase ?? selectedOids[0] ?? "HEAD", "HEAD") },
+      { id: `repo:${repo.path}:compare`, title: "创建提交 / 分支对比", group: "当前仓库", keywords: ["compare", "diff"], run: () => openCompare(compareBase ?? selectedOids[0] ?? "HEAD", "HEAD") },
       { id: `repo:${repo.path}:copy-sha`, title: "复制选中提交 SHA", group: "当前仓库", shortcut: "Ctrl+Shift+C", enabled: selectedOids.length > 0, run: () => { const oid = selectedOids[selectedOids.length - 1]; if (oid) void navigator.clipboard?.writeText(oid); } },
       { id: `repo:${repo.path}:left`, title: "显示 / 隐藏左侧导航", group: "视图", shortcut: "Ctrl+B", run: () => setLayout((prev) => ({ ...prev, showLeft: !prev.showLeft })) },
       { id: `repo:${repo.path}:inspector`, title: "显示 / 隐藏检查器", group: "视图", run: () => setLayout((prev) => ({ ...prev, showInspector: !prev.showInspector })) },

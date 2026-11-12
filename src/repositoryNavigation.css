@@ -1,0 +1,72 @@
+/* 同行顶部导航：沿用原组入口与 Pin 头像样式，限定主窗口作用域。 */
+.title-bar.repository-navigation-title { height: 38px; flex-direction: row; align-items: stretch; }
+.repository-navigation-title .title-app-icon { flex: 0 0 40px; }
+.repository-navigation-title .repository-group-nav { min-width: 32px; max-width: 35%; flex: 0 1 auto; }
+.repository-navigation-title .title-group-button { flex: 0 0 28px; }
+.repository-navigation-title .title-pinned {
+  position: relative;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.repository-navigation-title .title-pinned::-webkit-scrollbar { display: none; }
+.repository-navigation-title .title-pin { flex: 0 0 auto; touch-action: none; }
+/* 选中用完整组色表达；未选中的缩写图标灰化，不再使用外框。 */
+.repository-navigation-title .title-pin.active { background: transparent; box-shadow: none; }
+.repository-navigation-title .title-pin .group-avatar { transition: filter .12s ease, opacity .12s ease; }
+.repository-navigation-title .title-pin:not(.active) .group-avatar { filter: grayscale(1); opacity: .42; }
+.repository-navigation-title .title-pin:not(.active):hover .group-avatar { filter: grayscale(.35); opacity: .75; }
+.repository-navigation-title .title-pin.active .group-avatar { filter: none; opacity: 1; }
+.repository-navigation-title .title-pin:focus-visible { outline: none; }
+.repository-navigation-title .title-pin:focus-visible .group-avatar { outline: 2px solid var(--accent); outline-offset: 2px; }
+.repository-navigation-title .title-pin-insertion {
+  position: absolute;
+  z-index: 3;
+  top: 3px;
+  bottom: 3px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .repository-navigation-title .title-pin .group-avatar { transition: none; }
+}
+.repository-navigation-title .title-repo-search {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  margin: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.repository-navigation-title .title-repo-search:hover { background: var(--hover); color: var(--fg); }
+.repository-navigation-title .title-window-controls { margin-left: 0; }
+.repository-navigation-title .repository-tabs { flex: 1 1 0; min-width: 0; }
+.repository-navigation-title .repository-tab { min-width: 145px; max-width: 240px; touch-action: none; }
+.repository-navigation-title .repository-tab-overflow {
+  width: 28px;
+  height: 28px;
+  align-self: center;
+  flex: 0 0 28px;
+  margin: 0 3px 0 0;
+  padding: 0;
+}
+.repository-navigation-title .context-menu { max-width: min(480px, calc(100vw - 16px)); }
+.repository-navigation-title .context-item > span:not(.menu-check):not(.menu-color) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 620px) {
+  .repository-navigation-title .repository-group-nav { max-width: 25%; margin-right: 4px; }
+  .repository-navigation-title .repository-tab { min-width: 120px; }
+}

@@ -1,3 +1,6 @@
+@import "./repositoryNavigation.css";
+@import "./repositoryManager.css";
+
 :root {
   color-scheme: dark;
   --bg: #0f1115;

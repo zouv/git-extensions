@@ -39,7 +39,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | 改 Reset / 恢复 | `src-tauri/src/git/reset.rs`、`commands.rs`；`src/components/ResetDialog.tsx`、`RecoveryDialog.tsx`、`RepoWorkspace.tsx` | 分支图与高亮 Worker | §2、§3、§4；`arch/ui.md §2` |
 | 改页面布局 / 状态流转 | `src/App.tsx`、`src/RepoWorkspace.tsx`、`src/ui/`、`src/styles.css` | 后端 git 模块 | `arch/ui.md §1–§3` |
 | 改顶部栏 / 窗口控制 / 页签与 Pin 拖拽 | `src/components/TitleBar.tsx`、`RepositoryTabs.tsx`、`src/App.tsx`、`src/tabOrder.ts`、`src-tauri/src/window_host.rs`、`capabilities/default.json` | 后端 git 模块 | `arch/ui.md §1–§3、§5`；§7 窗口生命周期 |
-| 改仓库页签分组 / Pin / 别名 | `src/repoGroups.ts`、`src/components/RepoGroupsDialog.tsx`、`GroupAvatar.tsx`、`TitleBar.tsx`、`RepositoryTabs.tsx`、`src/App.tsx` | 后端 git 模块 | `arch/ui.md §1–§2、§5` |
+| 改仓库页签分组 / 固定 / 别名 / 持久记录与查找 | `src/repoGroups.ts`、`repositoryRecords.ts` / `repositorySession.ts`、`src/components/{RepositoryGroupNav,GroupAvatar,RepoGroupsDialog,RepositoryRecordList,RepositorySearchDialog,TitleBar,RepositoryTabs}.tsx`、`src/App.tsx`、`repositoryNavigation.css` / `repositoryManager.css` | 后端 git 模块 | `arch/ui.md §1–§3、§5` |
 | 改启动恢复 / 页签持久化 | `src/App.tsx`、`src/openRepos.ts`、`tests/open-repos.test.mjs` | 后端 git 模块、其它 UI 组件 | `arch/ui.md §2–§3、§5` |
 | 改命令面板 / 统一快捷键 | `src/commands.ts`、`src/components/CommandPalette.tsx`、`src/App.tsx`、`src/RepoWorkspace.tsx` | 后端 git 模块 | `arch/ui.md §2–§3` |
 | 改弹窗焦点 / 关闭保护 / 通知 | `src/ui/Dialog.tsx`、`src/ui/layerStack.ts`、`src/ui/useDirtyClose.ts`、`src/ui/Confirm.tsx`、`src/components/NotificationCenter.tsx`、`src/App.tsx`、`src/dialogState.ts` | Git 读写模块 | `arch/ui.md §2–§3、§5` |

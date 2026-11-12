@@ -20,12 +20,20 @@ import { loadSettings, saveSettings } from "./settings";
 import { hasDirtyDialogs } from "./dialogState";
 import { fitWindowState, loadWindowState, saveWindowState } from "./windowState";
 import type { WindowState } from "./windowState";
-import { loadOpenRepos, pickActivePath, restoreCandidates, sanitizeRecentRepos, saveOpenRepos } from "./openRepos";
+import { loadOpenRepos, restoreCandidates, sanitizeRecentRepos, saveOpenRepos } from "./openRepos";
+import { canonicalActivePath, closeBlockedPaths, newRepositoryGroup } from "./repositorySession";
 import type { RepoGroupConfig } from "./repoGroups";
 import {
-  DEFAULT_GROUP_ID, ensureGroupActive, groupForRepo, loadRepoGroups, primaryGroupId,
+  ensureGroupActive, groupForPinShortcut, groupForRepo, loadRepoGroups,
   displayRepoName, saveRepoGroups, setRepoAlias, setRepoGroup, visibleRepos,
+  rememberGroupActive, pickVisibleActive, selectGroup, relocateRepoConfig,
 } from "./repoGroups";
+import {
+  loadRepositoryRecords, saveRepositoryRecords, recordRepository, removeRepositoryRecords,
+  relocateRepositoryRecord, repositoryName,
+} from "./repositoryRecords";
+import type { RepositoryRecord } from "./repositoryRecords";
+import RepositorySearchDialog from "./components/RepositorySearchDialog";
 import RepoGroupsDialog from "./components/RepoGroupsDialog";
 import CloneDialog from "./components/CloneDialog";
 import CreateRepositoryDialog from "./components/CreateRepositoryDialog";
@@ -39,8 +47,10 @@ const RECENT_REPOS_KEY = "git-extensions.recentRepos.v2";
 const TEST_REPO = import.meta.env.DEV ? import.meta.env.VITE_TEST_REPO : undefined;
 function rememberActive(path: string | null) {
   if (TEST_REPO) return;
-  if (path) localStorage.setItem(LAST_REPO_KEY, path);
-  else localStorage.removeItem(LAST_REPO_KEY);
+  try {
+    if (path) localStorage.setItem(LAST_REPO_KEY, path);
+    else localStorage.removeItem(LAST_REPO_KEY);
+  } catch { /* 存储不可用不影响当前页签 */ }
 }
 const EMPTY_META: SessionMeta = { busy: false, dirty: false, conflictCount: 0, loading: false, error: null };
 
@@ -76,6 +86,24 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
   const [meta, setMeta] = useState<Record<string, SessionMeta>>({});
   const [repoGroups, setRepoGroups] = useState<RepoGroupConfig>(loadRepoGroups);
   const [showGroupManager, setShowGroupManager] = useState(false);
+  const [managerGroupId, setManagerGroupId] = useState<string | undefined>();
+  const [showRepositorySearch, setShowRepositorySearch] = useState(false);
+  const [records, setRecords] = useState<RepositoryRecord[]>(() => TEST_REPO ? [] : loadRepositoryRecords({
+    openPaths: loadOpenRepos() ?? undefined, recentPaths: recent, groupConfig: repoGroups,
+  }));
+  const [recordErrors, setRecordErrors] = useState<Record<string, string>>({});
+  const [recordBusy, setRecordBusy] = useState(false);
+  const recordsRef = useRef(records);
+  recordsRef.current = records;
+  const reposRef = useRef(repos);
+  reposRef.current = repos;
+  const groupsRef = useRef(repoGroups);
+  groupsRef.current = repoGroups;
+  const metaRef = useRef(meta);
+  metaRef.current = meta;
+  const openingRef = useRef(false);
+  const recordActionRef = useRef(false);
+  const closeActionRef = useRef(false);
   const [sessionRestored, setSessionRestored] = useState(false);
   const [restoring, setRestoring] = useState(() => {
     if (TEST_REPO) return false;
@@ -83,6 +111,8 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
     if (stored !== null) return stored.length > 0;
     try { return localStorage.getItem(LAST_REPO_KEY) !== null; } catch { return false; }
   });
+  const restoringRef = useRef(restoring);
+  restoringRef.current = restoring;
   const [mountedPaths, setMountedPaths] = useState<string[]>([]);
   const noticeId = useRef(0);
   const restoreStartedRef = useRef(false);
@@ -176,6 +206,7 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
 
   useEffect(() => { if (!TEST_REPO) saveSettings(settings); }, [settings]);
   useEffect(() => { if (!TEST_REPO) saveRepoGroups(repoGroups); }, [repoGroups]);
+  useEffect(() => { if (!TEST_REPO) saveRepositoryRecords(records); }, [records]);
   // 任务栏 / Alt+Tab 标题跟随活动仓库和草稿状态，而不是固定为应用名。
   useEffect(() => {
     const repo = repos.find((item) => item.path === activePath);
@@ -198,38 +229,46 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
 
   const openRepo = useCallback(async (path: string): Promise<RepoInfo | null> => {
     const trimmed = path.trim();
-    if (!trimmed || opening) return null;
+    if (!trimmed || openingRef.current || recordActionRef.current || restoringRef.current) return null;
     const insertAfter = openInsertAfter;
+    openingRef.current = true;
     setOpening(true);
     try {
       const info = await api.openRepo(trimmed);
-      const alreadyOpen = repos.some((repo) => repo.path === info.path);
-      setRepos((prev) => {
-        if (prev.some((r) => r.path === info.path)) return prev;
-        if (!insertAfter) return [...prev, info];
-        const index = prev.findIndex((r) => r.path === insertAfter);
-        if (index < 0) return [...prev, info];
-        const next = [...prev];
-        next.splice(index + 1, 0, info);
-        return next;
+      const targetRecorded = recordsRef.current.some((record) => record.path === info.path);
+      const known = targetRecorded || recordsRef.current.some((record) => record.path === trimmed);
+      const currentGroups = groupsRef.current;
+      let nextGroups = trimmed !== info.path ? relocateRepoConfig(currentGroups, trimmed, info.path, targetRecorded) : currentGroups;
+      if (!known) {
+        const target = newRepositoryGroup(nextGroups, insertAfter ? groupForRepo(nextGroups, insertAfter) : undefined);
+        nextGroups = setRepoGroup(nextGroups, info.path, target);
+      }
+      nextGroups = rememberGroupActive(ensureGroupActive(nextGroups, groupForRepo(nextGroups, info.path)), info.path);
+      groupsRef.current = nextGroups;
+      setRepoGroups(nextGroups);
+      const nextRecords = recordRepository(
+        trimmed !== info.path ? relocateRepositoryRecord(recordsRef.current, trimmed, info) : recordsRef.current,
+        info, true,
+      );
+      recordsRef.current = nextRecords;
+      setRecords(nextRecords);
+      setRecordErrors((prev) => {
+        const next = { ...prev }; delete next[trimmed]; delete next[info.path]; return next;
       });
-      // 新仓库归入当前可见的组；「在右侧打开」时归入锚点页签的组，保证相邻可见。
-      setRepoGroups((prev) => {
-        if (insertAfter && !alreadyOpen) {
-          const anchorGroup = groupForRepo(prev, insertAfter);
-          return ensureGroupActive(setRepoGroup(prev, info.path, anchorGroup), anchorGroup);
-        }
-        if (!Object.prototype.hasOwnProperty.call(prev.assignments, info.path)) {
-          const target = prev.activeGroupIds.includes(DEFAULT_GROUP_ID) ? DEFAULT_GROUP_ID : primaryGroupId(prev);
-          return setRepoGroup(prev, info.path, target);
-        }
-        return ensureGroupActive(prev, groupForRepo(prev, info.path));
-      });
+      const currentRepos = reposRef.current;
+      if (!currentRepos.some((repo) => repo.path === info.path)) {
+        const index = insertAfter ? currentRepos.findIndex((repo) => repo.path === insertAfter) : -1;
+        const next = [...currentRepos];
+        next.splice(index < 0 ? next.length : index + 1, 0, info);
+        reposRef.current = next;
+        setRepos(next);
+      }
+      activePathRef.current = info.path;
       setActivePath(info.path);
       rememberActive(info.path);
       setRecent((prev) => {
-        const next = sanitizeRecentRepos([info.path, ...prev]);
-        if (!TEST_REPO) localStorage.setItem(RECENT_REPOS_KEY, JSON.stringify(next));
+        const next = sanitizeRecentRepos([info.path, ...prev.filter((item) => item !== trimmed)]);
+        try { if (!TEST_REPO) localStorage.setItem(RECENT_REPOS_KEY, JSON.stringify(next)); } catch { /* 当前会话继续使用 */ }
         return next;
       });
       setShowOpen(false);
@@ -237,10 +276,11 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       setOpenInsertAfter(null);
       return info;
     } catch (e) {
+      setRecordErrors((prev) => ({ ...prev, [trimmed]: String(e) }));
       notify(trimmed, "error", "无法打开仓库", String(e), "打开仓库");
       return null;
-    } finally { setOpening(false); }
-  }, [notify, opening, openInsertAfter, repos]);
+    } finally { openingRef.current = false; setOpening(false); }
+  }, [notify, openInsertAfter]);
 
   const beginOpen = useCallback((prefill = "") => {
     setOpenInsertAfter(null);
@@ -378,28 +418,47 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
 
     void (async () => {
       const restored: RepoInfo[] = [];
+      const canonicalPaths = new Map<string, string>();
       const failed: { path: string; error: string }[] = [];
       for (const path of candidates) {
         try {
           const info = await api.openRepo(path);
+          canonicalPaths.set(path, info.path);
+          const targetRecorded = recordsRef.current.some((record) => record.path === info.path);
           if (!restored.some((repo) => repo.path === info.path)) restored.push(info);
+          const nextRecords = recordRepository(
+            path === info.path ? recordsRef.current : relocateRepositoryRecord(recordsRef.current, path, info), info, false,
+          );
+          recordsRef.current = nextRecords;
+          setRecords(nextRecords);
+          if (path !== info.path) {
+            const nextGroups = relocateRepoConfig(groupsRef.current, path, info.path, targetRecorded);
+            groupsRef.current = nextGroups;
+            setRepoGroups(nextGroups);
+          }
         } catch (error) {
           failed.push({ path, error: String(error) });
+          setRecordErrors((prev) => ({ ...prev, [path]: String(error) }));
         }
       }
-      const target = pickActivePath(restored.map((repo) => repo.path), last);
+      const target = canonicalActivePath(restored.map((repo) => repo.path), last, canonicalPaths);
+      setRecent((prev) => {
+        const next = sanitizeRecentRepos(prev.map((path) => canonicalPaths.get(path) ?? path));
+        try { if (!TEST_REPO) localStorage.setItem(RECENT_REPOS_KEY, JSON.stringify(next)); } catch { /* 当前会话继续 */ }
+        return next;
+      });
       if (restored.length > 0) {
-        setRepos((prev) => {
-          if (prev.length === 0) return restored;
-          const merged = new Map(restored.map((repo) => [repo.path, repo] as const));
-          for (const repo of prev) if (!merged.has(repo.path)) merged.set(repo.path, repo);
-          return [...merged.values()];
-        });
-        // 恢复期间用户已手动打开并激活仓库时，不覆盖其活动页签。
-        if (activePathRef.current === null && target) {
-          setActivePath(target);
-          rememberActive(target);
-          setRepoGroups((prev) => ensureGroupActive(prev, groupForRepo(prev, target)));
+        const merged = new Map(restored.map((repo) => [repo.path, repo] as const));
+        for (const repo of reposRef.current) if (!merged.has(repo.path)) merged.set(repo.path, repo);
+        const nextRepos = [...merged.values()];
+        reposRef.current = nextRepos;
+        setRepos(nextRepos);
+        // 恢复不改变上次查看范围；失败项留在仓库记录中供重新定位。
+        if (activePathRef.current === null) {
+          const visibleTarget = pickVisibleActive(groupsRef.current, nextRepos, target);
+          activePathRef.current = visibleTarget;
+          setActivePath(visibleTarget);
+          rememberActive(visibleTarget);
         }
       } else if (activePathRef.current === null) {
         rememberActive(null);
@@ -436,74 +495,126 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       return next.length === prev.length ? prev : next;
     });
   }, [repos]);
-  // 切换分组后若当前活动仓库被隐藏，自动切到该组第一个可见页签；空组则清空活动页签。
+  // 当前范围与组内活动记忆决定回退；切换到空组不自动打开成员。
   useEffect(() => {
-    if (activePath && shownRepos.some((repo) => repo.path === activePath)) return;
-    const fallback = shownRepos[0]?.path ?? null;
-    if (fallback !== activePath) { setActivePath(fallback); rememberActive(fallback); }
-  }, [activePath, shownRepos]);
+    if (restoring || (activePath && shownRepos.some((repo) => repo.path === activePath))) return;
+    const fallback = pickVisibleActive(repoGroups, repos, activePath);
+    if (fallback !== activePath) {
+      activePathRef.current = fallback;
+      setActivePath(fallback);
+      rememberActive(fallback);
+    }
+  }, [activePath, repoGroups, repos, restoring]);
+  useEffect(() => {
+    if (!activePath || restoring || !shownRepos.some((repo) => repo.path === activePath)) return;
+    setRepoGroups((prev) => rememberGroupActive(prev, activePath));
+  }, [activePath, restoring, shownRepos]);
 
-  const closeRepo = useCallback(async (path: string) => {
-    const state = meta[path] ?? EMPTY_META;
-    if (state.busy || getRepoOperation(path)) {
-      notify(path, "info", "当前仓库有操作进行中，完成后才能关闭");
-      return;
-    }
-    if (state.dirty && !await confirm({ title: "关闭含未保存内容的仓库？", body: "提交、冲突编辑或 Rebase 计划草稿尚未保存。关闭页签不会删除仓库，但会丢弃这些界面草稿。", confirmLabel: "丢弃草稿并关闭", danger: true })) return;
-    if (getRepoOperation(path)) { notify(path, "info", "当前仓库有操作进行中，完成后才能关闭"); return; }
-    setRepos((prev) => {
-      const index = prev.findIndex((r) => r.path === path);
-      const next = prev.filter((r) => r.path !== path);
-      if (path === activePath) {
-        const fallback = next[Math.min(index, next.length - 1)];
-        setActivePath(fallback?.path ?? null);
-        rememberActive(fallback?.path ?? null);
+  const discardSessions = useCallback((paths: string[]) => {
+    const removed = new Set(paths);
+    const current = reposRef.current;
+    const visible = visibleRepos(groupsRef.current, current);
+    const index = visible.findIndex((repo) => repo.path === activePathRef.current);
+    const next = current.filter((repo) => !removed.has(repo.path));
+    reposRef.current = next;
+    setRepos(next);
+    setMeta((prev) => Object.fromEntries(Object.entries(prev).filter(([path]) => !removed.has(path))));
+    if (activePathRef.current && removed.has(activePathRef.current)) {
+      const remaining = visible.filter((repo) => !removed.has(repo.path));
+      const fallback = remaining[Math.min(Math.max(index, 0), remaining.length - 1)]?.path ?? null;
+      activePathRef.current = fallback;
+      setActivePath(fallback);
+      rememberActive(fallback);
+      if (fallback) {
+        const config = rememberGroupActive(groupsRef.current, fallback);
+        groupsRef.current = config;
+        setRepoGroups(config);
       }
-      return next;
-    });
-    setMeta((prev) => { const next = { ...prev }; delete next[path]; return next; });
-  }, [activePath, confirm, meta, notify]);
+    }
+  }, []);
 
-  const closeOthers = useCallback(async (path: string) => {
-    const closable: typeof shownRepos = [];
-    const kept: { name: string; reason: string }[] = [];
-    for (const repo of shownRepos) {
-      if (repo.path === path) continue;
-      if (meta[repo.path]?.busy || getRepoOperation(repo.path)) kept.push({ name: repo.name, reason: "有操作进行中" });
-      else if (meta[repo.path]?.dirty) kept.push({ name: repo.name, reason: "有未保存草稿" });
-      else closable.push(repo);
-    }
-    if (closable.length === 0) {
-      if (kept.length > 0) {
-        notify(path, "info", "没有可关闭的其它页签", kept.map((item) => `${item.name}：${item.reason}`).join("\n"), "关闭其它");
+  const closeRepo = useCallback(async (path: string): Promise<boolean> => {
+    if (closeActionRef.current || !reposRef.current.some((repo) => repo.path === path)) return false;
+    closeActionRef.current = true;
+    try {
+      const state = metaRef.current[path] ?? EMPTY_META;
+      if (state.busy || getRepoOperation(path)) {
+        notify(path, "info", "当前仓库有操作进行中，完成后才能关闭");
+        return false;
       }
-      setActivePath(path);
-      rememberActive(path);
-      return;
-    }
-    if (kept.length > 0) {
+      if (state.dirty && !await confirm({ title: "关闭含未保存内容的仓库？", body: "提交、冲突编辑或 Rebase 计划草稿尚未保存。关闭页签不会删除仓库或分类记录，但会丢弃这些界面草稿。", confirmLabel: "丢弃草稿并关闭", danger: true })) return false;
+      if (metaRef.current[path]?.busy || getRepoOperation(path)) {
+        notify(path, "info", "当前仓库有操作进行中，完成后才能关闭");
+        return false;
+      }
+      discardSessions([path]);
+      return true;
+    } finally { closeActionRef.current = false; }
+  }, [confirm, discardSessions, notify]);
+
+  const closeRepos = useCallback(async (paths: string[]) => {
+    if (closeActionRef.current) return;
+    closeActionRef.current = true;
+    try {
+      const targets = reposRef.current.filter((repo) => paths.includes(repo.path));
+      const blocked = targets.filter((repo) => metaRef.current[repo.path]?.busy || getRepoOperation(repo.path));
+      const closable = targets.filter((repo) => !blocked.includes(repo));
+      if (closable.length === 0) {
+        if (blocked.length) notify("", "info", "所选仓库有操作进行中，完成后才能关闭");
+        return;
+      }
+      const dirtyPaths = new Set(closable.filter((repo) => metaRef.current[repo.path]?.dirty).map((repo) => repo.path));
+      const dirty = dirtyPaths.size > 0;
       const ok = await confirm({
-        title: `关闭其它 ${closable.length} 个页签？`,
-        body: <div>
-          <p>以下页签会被关闭；带未保存草稿或正在操作的页签将保留。</p>
-          <pre className="confirm-file-list">{kept.map((item) => `${item.name} · ${item.reason}`).join("\n")}</pre>
-        </div>,
-        confirmLabel: `关闭 ${closable.length} 个页签`,
+        title: `关闭 ${closable.length} 个仓库页签？`,
+        body: <div><p>只关闭打开会话，保留仓库记录与归属，不删除磁盘文件。{dirty && "未保存的界面草稿将被丢弃。"}</p>
+          <pre className="confirm-file-list">{closable.map((repo) => displayRepoName(groupsRef.current, repo)).join("\n")}</pre>
+          {blocked.length > 0 && <p>{blocked.length} 个正在操作的仓库将保留。</p>}</div>,
+        confirmLabel: dirty ? "丢弃草稿并关闭" : "关闭页签", danger: dirty,
       });
       if (!ok) return;
-    }
-    const paths = new Set(closable.map((repo) => repo.path));
-    setRepos((prev) => prev.filter((repo) => !paths.has(repo.path)));
-    setMeta((prev) => Object.fromEntries(Object.entries(prev).filter(([repoPath]) => !paths.has(repoPath))));
-    setActivePath(path);
-    rememberActive(path);
-  }, [confirm, meta, notify, shownRepos]);
+      const blockedAfterConfirm = new Set(closeBlockedPaths(closable.map((repo) => repo.path), metaRef.current,
+        (path) => !!getRepoOperation(path), dirtyPaths));
+      const safe = closable.filter((repo) => !blockedAfterConfirm.has(repo.path));
+      discardSessions(safe.map((repo) => repo.path));
+      if (safe.length < closable.length) notify("", "info", "部分仓库状态已变化，已保留对应页签");
+    } finally { closeActionRef.current = false; }
+  }, [confirm, discardSessions, notify]);
+
+  const closeOthers = useCallback(async (path: string) => {
+    if (closeActionRef.current) return;
+    closeActionRef.current = true;
+    try {
+      const targets = visibleRepos(groupsRef.current, reposRef.current).filter((repo) => repo.path !== path);
+      const kept = targets.filter((repo) => metaRef.current[repo.path]?.busy || metaRef.current[repo.path]?.dirty || getRepoOperation(repo.path));
+      const closable = targets.filter((repo) => !kept.includes(repo));
+      if (kept.length > 0) {
+        const ok = closable.length > 0 && await confirm({ title: `关闭当前范围的其它 ${closable.length} 个页签？`,
+          body: <div><p>带草稿或正在操作的页签将保留：</p><pre className="confirm-file-list">{kept.map((repo) => displayRepoName(groupsRef.current, repo)).join("\n")}</pre></div>,
+          confirmLabel: "关闭其它页签" });
+        if (!ok) { notify(path, "info", "已保留带草稿或正在操作的页签"); return; }
+      }
+      const blockedAfterConfirm = new Set(closeBlockedPaths(closable.map((repo) => repo.path), metaRef.current,
+        (repoPath) => !!getRepoOperation(repoPath), new Set()));
+      discardSessions(closable.filter((repo) => !blockedAfterConfirm.has(repo.path)).map((repo) => repo.path));
+      activePathRef.current = path;
+      setActivePath(path);
+      rememberActive(path);
+      setRepoGroups((prev) => rememberGroupActive(prev, path));
+    } finally { closeActionRef.current = false; }
+  }, [confirm, discardSessions, notify]);
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (document.querySelector(".modal-backdrop, .context-menu")) return;
       const mod = event.ctrlKey || event.metaKey;
       if (!mod) return;
+      const activateShown = (repo: (typeof shownRepos)[number]) => {
+        activePathRef.current = repo.path;
+        setActivePath(repo.path);
+        rememberActive(repo.path);
+        setRepoGroups((prev) => rememberGroupActive(prev, repo.path));
+      };
       if (event.key.toLowerCase() === "k") {
         event.preventDefault();
         setShowPalette(true);
@@ -513,12 +624,16 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       } else if (event.key.toLowerCase() === "w" && activePath) {
         event.preventDefault();
         void closeRepo(activePath);
-      } else if (event.key === "Tab" && repos.length > 1) {
+      } else if (!event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) {
+        const target = shownRepos[Number(event.key) - 1];
+        if (!target) return;
         event.preventDefault();
-        const index = repos.findIndex((r) => r.path === activePath);
-        const next = (index + (event.shiftKey ? -1 : 1) + repos.length) % repos.length;
-        setActivePath(repos[next].path);
-        rememberActive(repos[next].path);
+        activateShown(target);
+      } else if (event.key === "Tab" && shownRepos.length > 0) {
+        event.preventDefault();
+        const index = shownRepos.findIndex((r) => r.path === activePath);
+        const next = (index + (event.shiftKey ? -1 : 1) + shownRepos.length) % shownRepos.length;
+        activateShown(shownRepos[next]);
       } else if (event.key === ",") {
         event.preventDefault();
         setShowSettings(true);
@@ -526,7 +641,7 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [activePath, beginOpen, closeRepo, repos]);
+  }, [activePath, beginOpen, closeRepo, shownRepos]);
 
   const updateMeta = useCallback((path: string, value: SessionMeta) => {
     setMeta((prev) => {
@@ -536,10 +651,143 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
     });
   }, []);
 
-  const activateRepo = useCallback((path: string) => {
-    setRepoGroups((prev) => ensureGroupActive(prev, groupForRepo(prev, path)));
+  const activateRepo = useCallback((path: string, global = false) => {
+    const current = groupsRef.current;
+    const next = rememberGroupActive(global ? selectGroup(current, groupForRepo(current, path))
+      : ensureGroupActive(current, groupForRepo(current, path)), path);
+    groupsRef.current = next;
+    setRepoGroups(next);
+    activePathRef.current = path;
     setActivePath(path);
     rememberActive(path);
+    const repo = reposRef.current.find((item) => item.path === path);
+    if (repo) {
+      const nextRecords = recordRepository(recordsRef.current, repo, true);
+      recordsRef.current = nextRecords;
+      setRecords(nextRecords);
+    }
+  }, []);
+
+  const openRecorded = useCallback(async (path: string): Promise<boolean> => {
+    if (reposRef.current.some((repo) => repo.path === path)) {
+      activateRepo(path, true);
+      return true;
+    }
+    const info = await openRepo(path);
+    if (!info) return false;
+    activateRepo(info.path, true);
+    return true;
+  }, [activateRepo, openRepo]);
+
+  const addRecorded = useCallback(async (groupId: string) => {
+    if (recordActionRef.current || openingRef.current || restoring) return;
+    recordActionRef.current = true;
+    setRecordBusy(true);
+    try {
+      const path = await pickDirectory("添加 Git 仓库到列表");
+      if (!path) return;
+      const info = await api.openRepo(path);
+      const targetRecorded = recordsRef.current.some((record) => record.path === info.path);
+      const known = targetRecorded || recordsRef.current.some((record) => record.path === path);
+      let config = relocateRepoConfig(groupsRef.current, path, info.path, targetRecorded);
+      if (!known) config = setRepoGroup(config, info.path, groupId);
+      groupsRef.current = config;
+      setRepoGroups(config);
+      const next = recordRepository(relocateRepositoryRecord(recordsRef.current, path, info), info, false);
+      recordsRef.current = next;
+      setRecords(next);
+      setRecordErrors((prev) => { const errors = { ...prev }; delete errors[path]; delete errors[info.path]; return errors; });
+    } catch (error) { notify("", "error", "无法添加仓库", String(error)); }
+    finally { recordActionRef.current = false; setRecordBusy(false); }
+  }, [notify, restoring]);
+
+  const removeRecorded = useCallback(async (paths: string[]) => {
+    if (recordActionRef.current || openingRef.current || closeActionRef.current || restoring) return;
+    const targets = recordsRef.current.filter((record) => paths.includes(record.path));
+    if (targets.length === 0) return;
+    recordActionRef.current = true;
+    closeActionRef.current = true;
+    setRecordBusy(true);
+    try {
+      const blocked = targets.filter((record) => metaRef.current[record.path]?.busy || getRepoOperation(record.path));
+      if (blocked.length > 0) {
+        notify(blocked[0].path, "info", "所选仓库有操作进行中，完成后才能移除记录");
+        return;
+      }
+      const dirtyPaths = new Set(targets.filter((record) => metaRef.current[record.path]?.dirty).map((record) => record.path));
+      const dirty = dirtyPaths.size > 0;
+      const opened = targets.filter((record) => reposRef.current.some((repo) => repo.path === record.path));
+      const ok = await confirm({ title: `从列表移除 ${targets.length} 个仓库？`,
+        body: <div><p>仅移除应用中的记录、归属与别名，不删除磁盘仓库。{opened.length > 0 && `同时关闭 ${opened.length} 个打开页签。`}{dirty && "未保存的界面草稿将被丢弃。"}</p>
+          <pre className="confirm-file-list">{targets.map((record) => repositoryName(record, groupsRef.current)).join("\n")}</pre></div>,
+        confirmLabel: dirty ? "丢弃草稿、关闭并移除" : opened.length ? "关闭并移除记录" : "移除记录", danger: true });
+      if (!ok) return;
+      if (closeBlockedPaths(targets.map((record) => record.path), metaRef.current,
+        (path) => !!getRepoOperation(path), dirtyPaths).length > 0) {
+        notify("", "info", "仓库状态已变化，未移除记录，请重新确认");
+        return;
+      }
+      const removedPaths = targets.map((record) => record.path);
+      const removed = new Set(removedPaths);
+      discardSessions(removedPaths);
+      const config = groupsRef.current;
+      const nextConfig = { ...config,
+        assignments: Object.fromEntries(Object.entries(config.assignments).filter(([path]) => !removed.has(path))),
+        aliases: Object.fromEntries(Object.entries(config.aliases).filter(([path]) => !removed.has(path))),
+        lastActivePathByGroup: Object.fromEntries(Object.entries(config.lastActivePathByGroup).filter(([, path]) => !removed.has(path))),
+      };
+      groupsRef.current = nextConfig;
+      setRepoGroups(nextConfig);
+      const next = removeRepositoryRecords(recordsRef.current, removedPaths);
+      recordsRef.current = next;
+      setRecords(next);
+      setRecordErrors((prev) => Object.fromEntries(Object.entries(prev).filter(([path]) => !removed.has(path))));
+      setRecent((prev) => {
+        const nextRecent = prev.filter((path) => !removed.has(path));
+        try { if (!TEST_REPO) localStorage.setItem(RECENT_REPOS_KEY, JSON.stringify(nextRecent)); } catch { /* 当前会话继续 */ }
+        return nextRecent;
+      });
+    } finally { recordActionRef.current = false; closeActionRef.current = false; setRecordBusy(false); }
+  }, [confirm, discardSessions, notify, restoring]);
+
+  const relocateRecorded = useCallback(async (path: string) => {
+    if (recordActionRef.current || openingRef.current || closeActionRef.current || restoring) return;
+    if (reposRef.current.some((repo) => repo.path === path)) {
+      notify(path, "info", "请先关闭仓库页签，再重新定位目录");
+      return;
+    }
+    recordActionRef.current = true;
+    setRecordBusy(true);
+    try {
+      const selected = await pickDirectory("重新定位 Git 仓库目录");
+      if (!selected) return;
+      const info = await api.openRepo(selected);
+      const targetRecorded = recordsRef.current.some((record) => record.path === info.path);
+      if (info.path !== path && targetRecorded) {
+        const ok = await confirm({ title: "合并到已有仓库记录？", body: "目标目录已在列表中。保留目标记录的归属与别名，移除旧路径记录；不会删除磁盘文件。", confirmLabel: "合并记录" });
+        if (!ok) return;
+      }
+      const next = relocateRepositoryRecord(recordsRef.current, path, info);
+      recordsRef.current = next;
+      setRecords(next);
+      const config = relocateRepoConfig(groupsRef.current, path, info.path, targetRecorded);
+      groupsRef.current = config;
+      setRepoGroups(config);
+      setRecordErrors((prev) => { const errors = { ...prev }; delete errors[path]; delete errors[info.path]; return errors; });
+      setRecent((prev) => {
+        const nextRecent = sanitizeRecentRepos(prev.map((item) => item === path ? info.path : item));
+        try { if (!TEST_REPO) localStorage.setItem(RECENT_REPOS_KEY, JSON.stringify(nextRecent)); } catch { /* 当前会话继续 */ }
+        return nextRecent;
+      });
+    } catch (error) {
+      setRecordErrors((prev) => ({ ...prev, [path]: String(error) }));
+      notify(path, "error", "无法重新定位仓库", String(error));
+    } finally { recordActionRef.current = false; setRecordBusy(false); }
+  }, [confirm, notify, restoring]);
+
+  const manageGroups = useCallback((groupId?: string) => {
+    setManagerGroupId(groupId);
+    setShowGroupManager(true);
   }, []);
 
   // 全局命令：应用级动作与所有已打开仓库的切换；仓库内动作由 RepoWorkspace 注册。
@@ -549,24 +797,54 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       { id: "app.clone", title: "克隆仓库…", group: "应用", keywords: ["clone"], run: () => setCloneParent("") },
       { id: "app.create", title: "新建仓库…", group: "应用", keywords: ["create", "init"], run: () => setCreateRepositoryPath("") },
       { id: "app.settings", title: "设置…", group: "应用", shortcut: "Ctrl+,", keywords: ["settings", "preferences"], run: () => setShowSettings(true) },
-      { id: "app.groups", title: "管理仓库页签分组…", group: "应用", keywords: ["group", "tab"], run: () => setShowGroupManager(true) },
+      { id: "app.groups", title: "组管理器…", group: "应用", keywords: ["group", "tab", "组管理", "仓库管理"], run: () => manageGroups() },
+      { id: "app.find-repository", title: "查找仓库…", group: "应用", keywords: ["repository", "search", "查找"], run: () => setShowRepositorySearch(true) },
       { id: "app.close-tab", title: "关闭当前仓库页签", group: "应用", shortcut: "Ctrl+W", enabled: !!activePath, run: () => { if (activePath) void closeRepo(activePath); } },
     ];
-    for (const repo of repos) {
+    for (const record of records) {
+      const opened = repos.some((repo) => repo.path === record.path);
       commands.push({
-        id: `app.switch:${repo.path}`,
-        title: `切换到 ${displayRepoName(repoGroups, repo)}`,
-        group: "切换仓库",
-        keywords: [repo.path, repo.name],
-        enabled: repo.path !== activePath,
-        run: () => activateRepo(repo.path),
+        id: `app.switch:${record.path}`,
+        title: `${opened ? "切换到" : "打开"} ${repositoryName(record, repoGroups)}`,
+        group: "仓库",
+        keywords: [record.path, record.name, repoGroups.groups.find((group) => group.id === groupForRepo(repoGroups, record.path))?.name ?? ""],
+        enabled: record.path !== activePath && !opening && !restoring && !recordBusy,
+        run: () => { void openRecorded(record.path); },
       });
     }
     registerCommands("app", commands);
     return () => unregisterCommands("app");
-  }, [activateRepo, activePath, beginOpen, closeRepo, repoGroups, repos]);
+  }, [activePath, beginOpen, closeRepo, manageGroups, openRecorded, opening, recordBusy, records, repoGroups, repos, restoring]);
 
-  const updateRepoGroups = useCallback((next: RepoGroupConfig) => setRepoGroups(next), []);
+  const updateRepoGroups = useCallback((next: RepoGroupConfig) => {
+    groupsRef.current = next;
+    setRepoGroups(next);
+    const fallback = pickVisibleActive(next, reposRef.current, activePathRef.current);
+    activePathRef.current = fallback;
+    setActivePath(fallback);
+    rememberActive(fallback);
+  }, []);
+
+  // Alt+1…9 独占选中固定组，Alt+0 独占未分组；不改变组的归属或固定状态。
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (document.querySelector(".modal-backdrop, .context-menu")) return;
+      if ((event.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true']")) return;
+      let digit: number | null = null;
+      if (/^[0-9]$/.test(event.key)) digit = Number(event.key);
+      else if (/^Digit[0-9]$/.test(event.code)) digit = Number(event.code.slice(5));
+      else if (/^Numpad[0-9]$/.test(event.code)) digit = Number(event.code.slice(6));
+      if (digit === null) return;
+      const config = groupsRef.current;
+      const groupId = groupForPinShortcut(config, digit);
+      if (!groupId) return;
+      event.preventDefault();
+      updateRepoGroups(selectGroup(config, groupId));
+    };
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
+  }, [updateRepoGroups]);
 
   // 页签栏可能只显示部分分组；只重排可见页签占用的槽位，隐藏页签保持原位。
   const reorderRepos = useCallback((orderedVisiblePaths: string[]) => {
@@ -583,8 +861,6 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
   }, []);
 
   // 窗口关闭保护：任一仓库有未保存草稿或写操作进行中时需确认。
-  const metaRef = useRef(meta);
-  metaRef.current = meta;
   const allowCloseRef = useRef(false);
   const closeWindow = useCallback(async () => {
     const entries = Object.entries(metaRef.current);
@@ -640,7 +916,8 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
         onReorderRepo={reorderRepos}
         onRepoGroupsChange={updateRepoGroups}
         onSetRepoAlias={(path, alias) => updateRepoGroups(setRepoAlias(repoGroups, path, alias))}
-        onManageGroups={() => setShowGroupManager(true)}
+        onManageRepoGroups={manageGroups}
+        onSearchRepositories={() => setShowRepositorySearch(true)}
         onCloseWindow={() => void closeWindow()}
         recentRepos={recent}
         onOpenRecent={(path) => { void openRepo(path); }}
@@ -666,13 +943,17 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
         <h1>正在恢复上次打开的仓库…</h1>
         <p>仅加载当前活动页签，其余页签切换时再读取数据。</p>
       </div>}
-      {repos.length > 0 && shownRepos.length === 0 && <div className="welcome-screen">
+      {!restoring && shownRepos.length === 0 && repoGroups.view.kind !== "all-open" && <div className="welcome-screen">
         <Icon name="group" size={42} />
-        <h1>当前分组没有仓库页签</h1>
-        <p>切换分组或在「管理分组…」中把仓库页签移入当前组。</p>
-        <button onClick={() => setShowGroupManager(true)}><Icon name="group" />管理分组</button>
+        <h1>当前范围没有打开的仓库</h1>
+        <p>选择组内成员按需打开，或添加新的仓库；切换分组不会关闭其它仓库。</p>
+        <div className="welcome-actions">
+          <button className="primary" onClick={() => manageGroups(repoGroups.view.kind === "group" ? repoGroups.view.groupId : undefined)}><Icon name="group" />查看组内仓库</button>
+          <button onClick={() => setShowRepositorySearch(true)}><Icon name="search" />查找仓库</button>
+          <button onClick={() => beginOpen()}><Icon name="plus" />打开仓库</button>
+        </div>
       </div>}
-      {repos.length === 0 && !restoring && <div className="welcome-screen">
+      {repos.length === 0 && !restoring && repoGroups.view.kind === "all-open" && <div className="welcome-screen">
         <Icon name="branch" size={42} />
         <h1>Git Extensions</h1>
         <p>打开一个本地 Git 仓库，开始查看历史或提交变更。</p>
@@ -686,7 +967,13 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
           {recent.slice(0, 6).map((path) => <button key={path} title={path} onClick={() => void openRepo(path)}><Icon name="history" size={13} /><span>{path}</span></button>)}
         </div>}
       </div>}
-      {showGroupManager && <RepoGroupsDialog config={repoGroups} repos={repos} onChange={updateRepoGroups} onClose={() => setShowGroupManager(false)} />}
+      {showGroupManager && <RepoGroupsDialog config={repoGroups} records={records} repos={repos}
+        activePath={activePath} meta={meta} errors={recordErrors} busy={opening || recordBusy || restoring}
+        initialGroupId={managerGroupId} onChange={updateRepoGroups} onClose={() => setShowGroupManager(false)}
+        onOpen={openRecorded} onAdd={addRecorded} onCloseRepos={closeRepos} onRemove={removeRecorded} onRelocate={relocateRecorded} />}
+      {showRepositorySearch && <RepositorySearchDialog config={repoGroups} records={records} repos={repos}
+        activePath={activePath} errors={recordErrors} busy={opening || recordBusy || restoring}
+        onClose={() => setShowRepositorySearch(false)} onOpen={openRecorded} onRemove={removeRecorded} onRelocate={relocateRecorded} />}
       {showOpen && <Dialog title="打开 Git 仓库" onClose={() => { if (!opening) { setShowOpen(false); setOpenInsertAfter(null); } }} busy={opening} footer={<>
         <button disabled={opening} onClick={() => { setShowOpen(false); setOpenInsertAfter(null); }}>取消</button>
         <button className="primary" disabled={opening || !openPath.trim()} onClick={() => void openRepo(openPath)}>{opening ? "打开中…" : "打开"}</button>

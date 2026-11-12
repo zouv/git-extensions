@@ -21,9 +21,10 @@
 | `src/ui/useDirtyClose.ts` | 弹窗 dirty 关闭守卫：Esc、遮罩与“取消 / 关闭”按钮共用；同时登记窗口关闭保护 | 新增带草稿的弹窗 |
 | `src/ui/InlineError.tsx` | 统一内联错误（保留多行 Git 输出、复制按钮） | 改错误展示 |
 | `src/ui/listNav.ts` | 列表行方向键 / Home / End 焦点移动 | 改列表键盘行为 |
-| `src/components/TitleBar.tsx` | 自绘顶部栏：应用菜单（打开 / 克隆 / 新建 / 命令面板 / 设置 / 最近仓库 / 关于 / 关闭）、分组多选弹层、Pin、页签、窗口控制 | 改顶部栏 / 窗口行为 |
-| `src/components/RepositoryTabs.tsx` / `NotificationCenter.tsx` | 多仓库页签（拖拽排序、关闭、右键、方向键、加载 / 错误徽标）；通知 toast、通知中心抽屉与错误详情 | 改全局反馈 |
-| `src/components/RepoGroupsDialog.tsx` / `GroupAvatar.tsx` | 分组管理器（CRUD、Pin、色板、逐页签分组 / 别名）与组头像 | 改分组管理交互 |
+| `src/components/TitleBar.tsx` / `RepositoryGroupNav.tsx` | 同行顶部：应用菜单 / 组入口与多选菜单 / Pin 彩色缩写图标 / 打开页签 / 查找与窗口控制；Pin 拖动排序 | 改顶部导航 / 窗口行为 |
+| `src/components/RepositoryTabs.tsx` / `NotificationCenter.tsx` | 可见页签排序 / 关闭 / 键盘 / 溢出列表 / 激活滚入；通知 toast 与错误详情 | 改页签与全局反馈 |
+| `src/components/RepoGroupsDialog.tsx` / `GroupAvatar.tsx` | 左组选右记录的组管理器：CRUD / 固定 / 色板 / 别名 / 多选归组 / 安全关闭移除 | 改分类整理 |
+| `src/components/RepositoryRecordList.tsx` / `RepositorySearchDialog.tsx` | 管理与查找共用记录行、roving 键盘、本地搜索、按需打开与失败定位入口 | 改仓库查找 / 记录列表 |
 | `src/ui/Dialog.tsx` / `dialogSize.ts` | 统一弹窗：初始焦点、焦点陷阱、浮层栈、busy / dirty 关闭保护、焦点恢复；可选四边 / 四角拖拽调整尺寸并按 `sizeKey` 持久化；`closeOnBackdrop=false` 可禁止遮罩关闭 | 改所有弹窗的共同行为 |
 | `src/explorerWindowState.ts` | 资源管理器轻量动作窗口按 action 保存 / 恢复原生窗口尺寸 | 改轻量窗口尺寸规则 |
 | `src/ui/ContextMenu.tsx` | 统一右键菜单：视口定位、焦点循环、`keepOpen` 多选菜单、`children` 一级子菜单、浮层栈 | 改菜单行为 |
@@ -46,14 +47,15 @@
 | `src/components/RepositorySettingsDialog.tsx` | Repository 菜单的仓库设置弹窗；内容与 `explorer/RepositorySettingsWindow.tsx` 共用 | 改仓库设置展示 |
 | `src/components/SettingsDialog.tsx` | 行为设置、分类键盘导航、未保存修改保护、快捷键帮助；可拖拽边框调整并记住尺寸；「应用」生效但不关闭面板、点击遮罩不关闭 | 改设置交互 |
 | `src/explorer/` | 单任务窗口 Host、Commit / Pull / History 轻量界面与原生关闭保护 | 改 Explorer 轻量工作流 |
-| `src/repoGroups.ts` | 页签分组纯数据层：组 CRUD、Pin、颜色、分配、多选并集、别名 | 改分组规则 |
+| `src/repoGroups.ts` | 组 CRUD / 归属 / 别名 / 显式 view / 独立固定顺序 / 组内活动记忆；v1 → v2 迁移 | 改分类与导航规则 |
+| `src/repositoryRecords.ts` / `repositorySession.ts` | 持久目录迁移 / 搜索 / 定位；确认后关闭守卫、规范路径活动目标、新路径默认归组纯函数 | 改记录生命周期 / 会话保护 |
 | `src/openRepos.ts` | 打开页签持久化：路径白名单、缺失 / 空列表语义、恢复候选 | 改启动恢复规则 |
 | `src/tabOrder.ts` | 页签拖拽插入位置与重排纯函数 | 改拖拽排序规则 |
 | `src/settings.ts` / `windowState.ts` / `explorerWindowState.ts` / `explorerMenu.ts` | 行为设置、按仓库布局与 View 显示选项（`GridDisplayOptions`）、主窗口 bounds、轻量动作窗口尺寸、资源管理器菜单配置；localStorage 白名单与离屏修正 | 改持久化规则 |
 | `src/repoOperations.ts` / `useRepoBusy.ts` | 仓库级写状态同步与共享 busy | 改写状态与关闭保护 |
 | `src/api.ts` | 在途读取去重、`writeInvoke`、log-batch 订阅、日期格式化 | 改 IPC 调用方式 |
 | `src/types.ts` | 前后端共享 TS 类型 | 改 IPC 字段 |
-| `src/styles.css` | 全部样式（暗色主题，按注释分段；含命令面板、通知中心、Diff 工具条） | 改外观 |
+| `src/styles.css` / `repositoryNavigation.css` / `repositoryManager.css` | 主题与通用样式；通过顶部 import 加载作用域限定的同行导航、组管理与查找布局 | 改外观 |
 | `src/main.tsx` | 窗口 bootstrap；主窗口挂 App，Explorer 窗口挂 ConfirmProvider + ExplorerWindow | 改窗口入口 |
 
 ---
@@ -62,10 +64,10 @@
 
 | 我要改的东西 | 关键函数 / 锚点 | 备注 |
 |---|---|---|
-| 打开仓库 / 页签 / 启动恢复 | `App.tsx` 的 `openRepo`、`activateRepo`、`closeRepo`、`closeOthers`、`reorderRepos`、启动恢复 effect、`onDragDropEvent`；`openRepos.ts` | 页签持久化 `openRepos.v1`；恢复只挂载活动页签 |
+| 打开仓库 / 页签 / 启动恢复 | `App.tsx` 的 `openRepo`、`activateRepo`、`discardSessions`、`closeRepo`、`closeOthers`、`reorderRepos`、恢复 effect；`openRepos.ts` | 恢复期禁止普通打开；路径规范化同步活动目标；仅懒挂载活动页签 |
 | 全局命令 / 命令面板 | `commands.ts` 的 `registerCommands` / `useCommands`；`App.tsx` 全局命令 effect；`RepoWorkspace.tsx` 活动仓库命令 effect；`CommandPalette.tsx` | `Ctrl+K`；仓库命令只在 `active` 时注册 |
 | 弹窗焦点 / 关闭保护 | `ui/Dialog.tsx` 的 `initialTarget`、`requestClose`、layer effect；`ui/useDirtyClose.ts`；`dialogState.ts` | 焦点 effect 只挂载一次；Esc / 遮罩 / 按钮统一走 dirty 守卫 |
-| 右键菜单 / 多选菜单 | `ui/ContextMenu.tsx`；`TitleBar.tsx` 的 `groupMenuItems`（`keepOpen`） | 分组多选菜单保持打开；浮层栈只让顶层处理 Esc |
+| 右键菜单 / 多选菜单 | `ui/ContextMenu.tsx`；`RepositoryGroupNav.tsx` 的 `menuItems` / `groupItems` | 组勾选保持打开；子项读取最新配置，Esc 只关闭栈顶 |
 | 通知 / 错误反馈 | `NotificationCenter.tsx` 的 `ToastItem`、`clearAll`；`App.tsx` 的 `notify`；`ui/InlineError.tsx` | 成功 toast 4 秒自动消失，hover / focus 暂停；错误保留在通知中心 |
 | 变更预览 / 轮询 | `RepoWorkspace.tsx` 的 `refreshAux`、`pollOnce`；`ChangesPanel.tsx` 的 `showPreview` 与 status effect | 后台重取保留旧 patch；status 无实质变化不重绘 DiffView |
 | 提交 / 暂存 / Amend / Hunk / `.gitignore` | `ChangesPanel.tsx` 的 `run`、`doCommit`、`toggleAmend`、`applyHunk`、`ignorePattern`、`commitError`；`viewState.ts::extractHunkPatch` | Amend 自动回填 HEAD 提交信息；Hunk 丢弃需危险确认 |
@@ -77,7 +79,8 @@
 | Merge / Pull / Remotes / Worktree / 搜索 / 命令日志 / Bisect | `MergeDialog.tsx`、`PullDialog.tsx`、`RemotesDialog.tsx`、`WorktreeDialog.tsx`、`SearchDialog.tsx`、`CommandLogDialog.tsx`；`RepoWorkspace.tsx` 的 Bisect 横幅 | `Ctrl+Shift+H` 打开搜索、`Ctrl+Shift+G` 打开命令日志 |
 | 对比基准 | `RepoWorkspace.tsx` 的 `compareBase`、`onRevisionAction("compare-base")`；`Toolbar.tsx` 的 `compare-base-chip`；`RevisionGrid.tsx` 菜单标签 | 基准 chip 可清除；Esc 先清基准 |
 | 任务视图 / 草稿 | `RepoWorkspace.tsx` 的 `conflictDrafts`、`rebaseDrafts`、`saveConflictDraft`、`saveRebaseDraft`、`switchWorkspace` | 草稿存在会话 maps；关闭页签确认 |
-| 分组管理 / 页签别名 | `repoGroups.ts`；`RepoGroupsDialog.tsx`；`TitleBar.tsx`；`RepositoryTabs.tsx` | 全局持久化；别名只改显示 |
+| 分组导航 / 页签别名 | `repoGroups.ts` 的 `toggleActiveGroup` / `groupForPinShortcut` / `selectGroup` / `selectAllOpen` / `pickVisibleActive` / `reorderPinned`；`RepositoryGroupNav.tsx` | Pin / 菜单多选：全部打开下点击组进入单选、取消最后一组回到全部打开；Alt+1…9 独占固定组、Alt+0 未分组；固定顺序独立；Ctrl+1…9 切页签 |
+| 持久记录管理 / 查找 / 定位 | `repositoryRecords.ts::loadRepositoryRecords / filterRepositoryRecords`；`repositorySession.ts::closeBlockedPaths / canonicalActivePath / newRepositoryGroup`；`App.tsx::openRecorded / addRecorded / closeRepos / removeRecorded / relocateRecorded` | 关闭保留记录；目标已存在时保留其未分组 / 无别名语义 |
 | 设置 / 布局 | `settings.ts` 的 `loadSettings` / `loadLayout`；`SettingsDialog.tsx`；`ui/dialogSize.ts` | 行为全局、布局按仓库；dirty 关闭确认；设置弹窗尺寸独立保存 |
 | 轻量窗口尺寸 | `explorerWindowState.ts` 的 `restoreExplorerWindowSize` / `watchExplorerWindowSize`；`main.tsx` | 按 action 存独立 localStorage 键；窗口创建后先恢复尺寸再 show |
 | 共享 busy / 写调度 | `api.ts` 的 `writeInvoke`；`repoOperations.ts` 的 `runRepoWrite`；`useRepoBusy.ts` | 写组件共享 busy；关闭前复核实时状态 |
@@ -102,7 +105,7 @@
 ### 命令注册与命令面板
 
 - `commands.ts` 维护 `Map<owner, Command[]>` 和版本缓存；`useCommands` 用 `useSyncExternalStore` 订阅。
-- App 注册应用命令（打开 / 克隆 / 新建 / 设置 / 分组 / 关闭页签 / 切换仓库）；`RepoWorkspace` 在 `active` 时注册当前仓库命令（刷新、工作区、视图预设、分支 / Stash / 标签 / 子模块 / Fetch / Pull / Push 等），切走时注销，避免跨仓库执行。
+- App 注册应用命令与全部持久仓库的按需打开 / 切换命令（关键词含原名 / 路径 / 组名）；顶栏查找用独立 `RepositorySearchDialog`，成功后独占目标组。`RepoWorkspace` 只在 `active` 时注册仓库命令，切走注销，避免跨仓库执行。
 - `CommandPalette` 搜索 title / group / keywords / shortcut，↑/↓/Home/End/Enter 操作；执行后先关闭面板再运行命令。
 
 ### 工具栏四菜单与提交导航
@@ -135,9 +138,17 @@
 
 ### 启动恢复与按需挂载
 
-- `loadOpenRepos`（键缺失回退 `lastRepo`，显式 `[]` 表示无页签）→ 串行 `api.openRepo` 只取 `RepoInfo` → 批量 `setRepos` / `setActivePath` / `ensureGroupActive` → 解锁持久化。
-- App 只渲染 `mountedPaths ∪ {activePath}` 的 `RepoWorkspace`；恢复的非活动页签首次激活才挂载并 `refreshAll`。
-- 拖放目录 / 仓库内文件由 `getCurrentWindow().onDragDropEvent` 接收，按路径顺序调用 `openRepo`。
+- `loadOpenRepos`（缺失回退 `lastRepo`，显式 `[]` 不恢复）→ 串行 `api.openRepo` → 同步记录原名 / 规范路径与活动目标 → 批量设置会话 → 解锁持久化。恢复期普通打开有同步门禁，避免最终快照复活已关闭会话；失败目录保留记录和运行期错误。
+- `repositoryRecords.v1` 独立于打开列表与 `repoGroups.v2`；缺键才合并旧归属 / 别名 / 打开 / 最近 / last 可获取路径，新键 `[]` 不重新迁移。旧键保留，未知旧组回落未分组；不虚构已丢失的历史。
+- App 只渲染 `mountedPaths ∪ {activePath}` 的工作区；未打开记录不发 Git 状态请求。切组从组内记忆选仍打开成员，空组只展示入口；Ctrl+Tab 按可见页签循环。拖放与外部打开复用 `openRepo`。
+
+### 仓库记录、分类与关闭保护
+
+- `RepoGroupConfig.view` 是单组 / 全部已打开 / 显式组合的判别联合；`pinnedGroupIds` 不重排 `groups`。`assignments` / `aliases` 仍为归属和别名唯一事实源；记录只存 `path / name / lastOpenedAt`。
+- 添加只验证目录并登记；已有记录打开保留归属，未分组的身份由记录存在性判断，不以稀疏 assignment 判断新旧。仅新路径按单组或相邻锚点归组，全量 / 组合下归未分组。
+- 管理器筛选独立于导航 view，双击 / Enter 才激活。关闭仅清会话与草稿，删除组仅取消归组；移除记录需确认，涉及打开项同时走关闭守卫，绝不删磁盘文件。
+- 批量确认后重新读取 `metaRef` 与同步 `getRepoOperation`，新 dirty / busy 项保留或中止；确认串行门闩避免多个 resolver 互相覆盖。定位已有目标用 `relocateRepoConfig(..., targetAlreadyRecorded=true)` 保留其隐式未分组 / 无别名，不能按缺项继承源覆盖。
+- 路径身份沿用后端返回值与 trim 精确去重，不前端统一小写；只有用户按需打开 / 定位时验证有效性，未打开不等于失效。
 
 ### 写操作后的刷新
 
@@ -175,5 +186,6 @@
 - **读取去重不是长期缓存**：`api.pendingReads` 只合并同参数在途 Promise，完成 / 失败立即释放；动态 ref 固定到 OID 后才给单文件 loader。
 - **自绘顶部栏与窗口生命周期**：`decorations: false`；`data-tauri-drag-region` 只作用于直接元素；窗口控制权限在 capabilities；系统关闭统一走 `closeWindow`，`allowCloseRef` 防循环，关闭失败恢复标记并显示错误；主窗口 `Destroyed` 后显式 `exit(0)`。
 - **分支目录删除必须基于全量列表**：不能用 `localTree` / `remoteTree` 或 `local.slice(0, refLimit)` 收集，否则过滤词与 200 条分页会漏删 / 误删；按 `prefix + "/"` 匹配（不包含同名叶子分支），本地 / 远程分开，远程排除 `origin/HEAD`。含当前 HEAD 的本地目录禁用整目录删除；确认框列出实际将删除的完整名单。预检结果只用于确认框，最终仍由 `git branch -d/-D` 复核。写操作开始时 `writeInvoke` 会作废同仓库在途读取，删除后刷新不会复用旧结果；删除当前历史过滤的 ref 时必须清空 `leftRef`，否则提交图会用失效 revspec 加载。`origin/HEAD` 是符号引用，`get_branches` 与 ref 标签都应跳过，避免它作为远程分支或额外提交图标签出现。
-- **页签分组 / 拖拽 / 启动恢复**：分组是纯 UI 配置，Default 不可改名 / 删除 / Pin；页签拖拽 6px 阈值、条外 / Esc / 失捕取消；`openRepos.v1` 缺失回退 `lastRepo`、显式 `[]` 不回退；恢复只懒挂载活动页签，`sessionRestored` 前禁止持久化，StrictMode 用 ref 防双跑。
+- **页签分组 / 拖拽 / 启动恢复**：Default 内部 ID 不变、界面为未分组，不可改名 / 删除，但可以固定与取消固定；view 与持久记录 / 会话分离。Pin 图标用完整组色表示选中、未选中灰化；指针排序沿用页签的 6px 阈值 / 插入线 / Esc 取消 / 边缘滚动，Alt+1…9 与 Alt+0 独占切组，Ctrl+1…9 按当前可见页签切换。页签 6px 阈值、条外 / Esc / 失捕取消；恢复缺失与 `[]` 不等价，`sessionRestored` 前禁写打开列表，StrictMode 用 ref 防双跑；路径迁移必须同步活动目标。
+- **组记忆与确认竞态**：切组时按记忆挑页签，日常 effect 只纠正不可见活动项，不能把手动激活又拉回旧记忆。批量关闭 / 移除记录用同步门闩及逐路径 dirty 快照，确认等待后必须再复核写状态。
 

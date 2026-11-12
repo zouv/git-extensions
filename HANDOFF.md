@@ -2,12 +2,12 @@
 
 ## 状态快照
 
-- 最近更新：2026-11-12。0.10.0 已发布并上传 GitHub Release（NSIS / MSI / unpack zip / SHA256SUMS）。本版包含：工具栏左侧 Repository / Navigate / View / Commands 四个下拉菜单（Repository 汇总资源管理器、远程 / 子模块 / Worktree、编辑仓库配置文件、Git 维护、仓库设置与关闭页签；Navigate 支持 HEAD / 父子提交 / 共同祖先 / 前后导航 / 快速搜索；View 增加分支范围与远程标签 / 标签 / 相对时间 / 图与列开关并按仓库持久化；Commands 汇总提交、撤销、Pull/Push、Stash、Reset、分支 / 标签 / 合并 / Rebase / 冲突、Cherry-pick、归档、Bisect、reflog、补丁）；新增 `submodule_sync`、`git_maintenance`、`edit_repo_file` IPC；旧「视图」「更多」菜单移除。前端 78/78、Rust 113/113 测试通过，当前无进行中任务（待 GUI 验收）。
+- 最近更新：2026-11-12。0.11.0 版本号与 CHANGELOG 已更新，准备打包并上传 GitHub Release。本版包含：组管理器持久仓库记录 / 搜索 / 定位、同行 Pin 图标导航与指针拖拽、未分组可固定、Alt / Ctrl 数字快捷键、组内活动记忆与关闭保护。前端 104/104、Rust 113/113 测试通过；当前无进行中代码任务（发布流程进行中，GUI 待验收）。
 - 远程已关联并推送：origin = https://github.com/zouv/git-extensions，main 与历史标签已推送。
 
 ## 当前任务
 
-- 无进行中任务（0.10.0 已发布并上传，工具栏四菜单待 GUI 验收）。
+- 0.11.0 发布：版本号三处同步与 CHANGELOG 归档完成；待运行 `package.bat` 生成 NSIS / MSI / unpack / zip，创建 GitHub Release `v0.11.0` 并上传，最后回填发布验证。
 
 ## 进行中
 
@@ -15,9 +15,12 @@
 
 ## 下一步
 
-- 按「待验收」清单完成 GUI 验收；本轮新增重点：Repository / Navigate / View / Commands 四个菜单的图标位置、下拉定位与子菜单（Repository > Git 维护）；Repository 的文件资源管理器、子模块更新 / 同步、编辑 `.gitignore` / `.git/info/exclude` / `.gitattributes` / `.mailmap` / `.git/config`、`git gc`、删除 `index.lock`、仓库设置与关闭页签；Navigate 的 HEAD / 父 / 子 / 首末父 / 共同祖先 / 前后导航与 Alt+↑ / ↓ 快速搜索；View 的分支范围、远程标签 / 标签 / 相对时间 / 图与列开关及重启后按仓库保持；Commands 各命令的禁用状态、确认框与写互斥。旧「视图」「更多」菜单移除后，恢复 / Stash / 标签 / 子模块快捷图标仍可用。验收前先运行要使用的构建（release unpack 或 dev）并点一次「保存 / 应用」，让资源管理器菜单命令指向该可执行文件。
+- 下一步执行：`package.bat` → 校验 `dist/release/` 与 `SHA256SUMS.txt` → `gh release create v0.11.0` 并上传 4 个资产 → 回填发布验证并推送文档提交。
 
 ## 验证状态
+
+- 2026-11-12 组交互细化：`pnpm test` 104/104（未分组固定 / 取消、Alt 快捷键映射、多选开关）、`pnpm build`、`git diff --check`、`sh check-docs.sh` 通过。仅改前端，Rust 沿用同日113/113，未重跑；Pin 指针拖拽、颜色选中、Alt / Ctrl 数字键与窄窗布局均未做 GUI 实测。
+- 2026-11-12 同行顶部 / Pin 回改：`pnpm test` 103/103（含全部视图取消目标组与最后取消回落未分组）、`pnpm build`、`git diff --check`、`sh check-docs.sh` 通过。生产构建仍有大 chunk 提示。仅改前端，Rust 沿用同日113/113，未重跑；本轮未做 GUI 实测，前一轮截图为已弃用布局，不能代替当前验收。
 
 - 2026-11-12 0.10.0 发布验证：版本号三处同步为 0.10.0、CHANGELOG 归档；`package` 生成 NSIS 0.10.0（3.52 MiB）、MSI 0.10.0（5.89 MiB）、`unpack/` 便携目录、便携 zip（4.85 MiB）与 `SHA256SUMS.txt`，本地 `sha256sum -c` 三个产物全部 OK；GitHub Release `v0.10.0` 已创建并上传全部 4 个资产；发布前 `pnpm test` 78/78、`pnpm build`、`cargo test` 113/113、`cargo fmt --check`、`sh check-docs.sh` 通过。
 - 2026-11-12 工具栏四菜单：`pnpm test` Node 78/78（新增 2 个 View 显示选项持久化用例）、`pnpm build`（tsc + Vite）通过；`cargo test` Rust 113/113（47 lib + 14 repository_capabilities + 21 safety + 16 smoke + 15 workflows）、`cargo fmt --check` 通过。新增 `submodule_sync` / `git_maintenance` / `edit_repo_file`；`git_maintenance` 集成测试覆盖删除 index.lock 与非法动作拒绝。未做 GUI 实机验收（菜单定位、子菜单、文件编辑器打开、提交导航、列开关视觉）。
@@ -32,7 +35,7 @@
 
 1. **P0–P2 新增 Git 工作流 GUI**：Merge 分支弹窗与右键合并（默认 / `--no-ff` / `--ff-only` / `--squash`）；Amend 修正提交勾选自动回填 HEAD 信息；远程分支检出跟踪、本地分支重命名、远程分支删除与批量清理已合并分支；变更预览 Hunk 级暂存 / 取消暂存 / 丢弃与右键加入 `.gitignore`；Remotes 远程管理、Pull 策略弹窗、Push `--force-with-lease` & `--tags`；Worktree 新建 / 锁定 / 移除 / 清理与左侧分支 `/` 文件夹树折叠；`Ctrl+Shift+G` 命令日志查看器、`Ctrl+Shift+H` 提交与 `git grep` 搜索；Fixup / Squash 提交与 Rebase Autosquash 重排；导出补丁 / 归档保存对话框与 Git Bisect 横幅工作流；分支删除预检（已合并普通「删除」/ 未合并红色「强制删除」）与本地 / 远程分支目录右键批量删除（含嵌套、当前分支禁用、远程逐个 `push --delete`）；提交图排除 `refs/original/*` 与 `origin/HEAD` 符号引用。
 2. **顶部栏、弹窗、通知与命令面板 GUI**：应用图标菜单（打开仓库 / 克隆 / 新建 / 命令面板 / 设置 / 最近仓库 / 关于 / 关闭窗口，键盘与关闭后焦点恢复）；空白区拖动移动窗口、双击最大化 / 还原、右键打开应用菜单；页签悬停显示关闭 X 且不位移、中键只关闭目标；页签右键菜单（关闭 / 关闭其它并列出保留原因 / 在右侧打开仓库并激活 / 别名 / 复制路径 / 文件管理器）；拖动超过 6px 才排序、3px 插入线、Esc / 条外 / 丢失捕获取消、边缘自动滚动；方向键与 Home/End 切换页签、Shift+F10 菜单；「+」紧随末页签且溢出时仍可见。弹窗打开后焦点落在正文 `data-autofocus` 而非关闭 X，等待 2 个轮询周期焦点不跳；嵌套删除确认按 Esc 只关一层；带草稿弹窗按 Esc / 点外部 / 取消均有确认；通知抽屉保留全部错误、清空需确认、成功 toast 悬停暂停；`Ctrl+K` 搜索与执行命令；原生目录 / 文件选择与拖放打开仓库；窄窗口下四个工具栏菜单可达；资源管理器二级菜单平铺分隔线分组 / 图标 / 16 项上限，Clone 窗口内进度页与「克隆并打开」双按钮；应用菜单「最近打开」不再出现空行；工具栏分支按钮改为下拉（本地分支直接切换，底部进入分支管理）、移除重复「+」按钮、子模块快捷按钮改为文件夹图标；分支管理弹窗未修改直接关闭不弹确认；工具栏左侧 Repository / Navigate / View / Commands 四菜单的定位、子菜单与全部动作，View 显示选项按仓库保持。
-3. **仓库页签分组与持久化 GUI**：多选切换与页签并集、分组菜单保持打开以便连续多选、菜单右侧快速 Pin 且不误切组、Default 禁 Pin；管理器颜色改为点击当前色块弹出预设色板，组色同步到头像/菜单/页签色条并重启保持；管理界面逐页签更换分组、编辑显示名。打开 4–6 个仓库后重启，页签数量 / 顺序 / 活动页签 / 分组可见性保持，恢复时仅活动页签加载，未访问页签首次点击才加载；切回页签立即刷新并显示加载 / 错误徽标。
+3. **仓库导航、管理与持久化 GUI**：同行顶部在宽 / 窄窗与高 DPI 下可用，Pin 彩色缩写头像、横向滚动与右侧页签不重叠；选中为完整组色、未选中灰化，未分组可固定 / 取消固定；组入口菜单顶部「全部打开」勾选，组行多选切换，全部打开下点击组进入单选、取消最后一组回到全部打开，已移除组合查看项；Pin 指针拖动超过 6px 才排序、插入线 / Esc / 边缘滚动正常，Alt+方向键只改固定顺序；Alt+1…9 独占固定组、Alt+0 未分组，Ctrl+1…9 切当前范围第 N 个页签，均不与输入框 / 菜单冲突。组管理器左组选右记录、不改变顶部范围；打开 / 全部筛选、搜索、别名草稿守卫、创建 / 改名 / 颜色 / 删除组、多选归组、关闭保留记录、移除确认不删磁盘文件、定位已有未分组目标保留其归属 / 无别名。查找覆盖关闭记录、打开成功才关闭、失败保留并可定位；跨组独占跳转、组内活动记忆、空组不批量打开、Ctrl+Tab 当前范围、页签激活滚入与溢出列表。打开多个仓库重启后顺序 / 活动 / view / 固定保持，未访问页签首次激活才加载；关闭记录重启仍可管理。当前同行布局与按钮交互尚未实测。
 4. **左侧导航与差异视图 GUI**：组按钮 / Pin 图标与页签栏间距；「本地变更」显示变更面板，选中分支 / 标签 / 全部提交显示对应历史；分支 / 标签过滤与 200 条分页；Submodules 与 Worktrees 分组可折叠、标题计数、空状态；Worktrees 行双击 / Enter 打开为页签；Stash / 子模块固定在侧栏底部。本地变更预览不重复显示文件名 / 文件列表且轮询不闪烁；Inline / Split 切换、上一处 / 下一处（Alt+↑ / ↓ 或 n / p）、折叠未修改、差异块计数、增删统计、文件过滤与 500 条封顶、行右键复制 `路径:行号`，Inline / Split 与换行偏好重启保持；冲突标记数量、合并两侧、继续禁用原因、Rebase 拖放指示可见；Blame 点击提交 SHA 跳转。
 5. **资源管理器、轻量窗口与设置 GUI（含本轮 3 项）**：保存设置后目录 / 目录背景 / 文件均出现菜单，并按上下文只显示适用命令；轻量窗口使用独立单任务布局，Clone（含进度页）/ Create（个人 / 中心 bare）/ Commit / Pull 选项 / Push 选项 / View changes 只读 diff / View stash 工作区 / Add files / Reset file changes / Apply patch（文件 / 目录与 am 冲突）/ 分支与 Checkout / Difftool / Rename（文件与目录改名）可完成；Commit 以当前文件夹 / 选中目录为范围且只提交该目录已暂存内容，View changes 只显示该目录历史；View history 在文件、选中目录与目录背景均可用并查询对应目标，查看提交文件 / diff 并执行 Reset / Rebase，文件上下文含文件内容 View / Blame 页签；Repository settings 展示远程地址 / upstream，View files 以文件树展示当前分支已提交文件，菜单位置支持一级 / 二级 / 三级（Others）/ 隐藏，整棵级联树按目录 / 文件上下文超过 16 项提示并禁止保存；一级项以 `GitExt.Top.*` 紧贴 Git Extensions 下方；Create new repository / Open repository 位于 Branches & Repos 分组；所有动作窗口支持 Esc 关闭、拖拽原生边框缩放并按动作记住尺寸，F5 / Ctrl+R 不再刷新窗口；Open with difftool 窗口启动后保持打开；点击任意菜单项不再闪命令行窗口；Rename 被占用时显示原因提示；设置弹窗支持拖拽四边 / 四角缩放并记住尺寸、点击遮罩不关闭、「应用」按钮即时生效且不关闭面板并自动置灰；Others 配置 3 项以上时全部显示（不再静默截断），旧的重复菜单项被清理；Open repository / Settings 聚焦已有主窗口；关闭含草稿 / 写操作窗口有保护，冲突可转主窗口；关闭最后窗口进程退出。另补窗口状态、三态菜单、150% / 200% DPI、多显示器、安装版 / 便携版及 macOS 实机或 CI。
 

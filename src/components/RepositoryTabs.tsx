@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
   CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent,
@@ -48,6 +48,10 @@ const DRAG_THRESHOLD = 6;
 
 export default function RepositoryTabs(props: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number; repo: RepoInfo } | null>(null);
+  const [listMenu, setListMenu] = useState<{ x: number; y: number } | null>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  const listButtonRef = useRef<HTMLButtonElement>(null);
+  const visiblePaths = props.repos.map((repo) => repo.path).join("\u0000");
   const [dragPath, setDragPath] = useState<string | null>(null);
   const [insertion, setInsertion] = useState<Insertion | null>(null);
   const [status, setStatus] = useState("");
@@ -63,6 +67,35 @@ export default function RepositoryTabs(props: Props) {
   const label = (repo: RepoInfo) => displayRepoName(props.repoGroups, repo);
   const aliasDirty = aliasTarget ? aliasValue !== (props.repoGroups.aliases[aliasTarget.path] ?? "") : false;
   const closeAlias = useDirtyClose(aliasDirty, false, () => setAliasTarget(null));
+
+  // 仅对页签滚动容器调整横向偏移；捕获/排序期间不与边缘滚动争抢。
+  const revealActive = useCallback(() => {
+    if (dragRef.current) return;
+    const scroll = scrollRef.current;
+    const tab = props.activePath ? tabRefs.current.get(props.activePath) : undefined;
+    if (!scroll || !tab) return;
+    const viewport = scroll.getBoundingClientRect();
+    const rect = tab.getBoundingClientRect();
+    if (rect.left < viewport.left) scroll.scrollLeft += rect.left - viewport.left;
+    else if (rect.right > viewport.right) scroll.scrollLeft += rect.right - viewport.right;
+  }, [props.activePath]);
+
+  useLayoutEffect(() => { revealActive(); }, [revealActive, visiblePaths, dragPath]);
+
+  useLayoutEffect(() => {
+    const scroll = scrollRef.current;
+    const list = listRef.current;
+    if (!scroll || !list) return;
+    const update = () => {
+      setOverflowing(scroll.scrollWidth > scroll.clientWidth + 1);
+      revealActive();
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(scroll);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [revealActive, visiblePaths]);
 
   const updateInsertion = useCallback((clientX: number) => {
     const drag = dragRef.current;
@@ -217,7 +250,7 @@ export default function RepositoryTabs(props: Props) {
   };
 
   const blankContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest(".repository-tab, .repository-add")) return;
+    if ((event.target as HTMLElement).closest(".repository-tab, .repository-add, .repository-tab-overflow")) return;
     event.preventDefault();
     event.stopPropagation();
     props.onBlankContextMenu(event.clientX, event.clientY);
@@ -233,10 +266,9 @@ export default function RepositoryTabs(props: Props) {
     <div
       className={`repository-tabs${dragPath ? " dragging" : ""}`}
       ref={stripRef}
-      data-tauri-drag-region
       onContextMenu={blankContextMenu}
     >
-      <div className="repository-tab-scroll" ref={scrollRef} data-tauri-drag-region onWheel={wheelTabs}>
+      <div className="repository-tab-scroll" ref={scrollRef} onWheel={wheelTabs}>
         <div className="repository-tab-list" role="tablist" aria-label="打开的仓库" ref={listRef}>
           {props.repos.map((repo) => {
             const state = props.meta[repo.path];
@@ -294,7 +326,28 @@ export default function RepositoryTabs(props: Props) {
         </div>
       </div>
       <button className="icon-button repository-add" title="打开仓库 (Ctrl+O)" aria-label="打开仓库" onClick={props.onOpen}><Icon name="plus" /></button>
+      {overflowing && <button
+        ref={listButtonRef} type="button" className="icon-button repository-tab-overflow"
+        title="当前视图的仓库页签列表" aria-label="当前视图的仓库页签列表" aria-haspopup="menu" aria-expanded={!!listMenu}
+        onPointerDown={(event) => { if (listMenu) event.stopPropagation(); }}
+        onClick={() => {
+          if (listMenu) { setListMenu(null); return; }
+          const rect = listButtonRef.current?.getBoundingClientRect();
+          if (rect) setListMenu({ x: rect.left, y: rect.bottom + 2 });
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowDown") return;
+          event.preventDefault();
+          const rect = event.currentTarget.getBoundingClientRect();
+          setListMenu({ x: rect.left, y: rect.bottom + 2 });
+        }}
+      ><Icon name="chevron-down" size={15} /></button>}
       <div className="repository-tab-blank" data-tauri-drag-region aria-hidden="true" />
+      {listMenu && <ContextMenu x={listMenu.x} y={listMenu.y} ariaLabel="当前视图的仓库页签" onClose={() => setListMenu(null)} items={props.repos.map((repo) => ({
+        id: repo.path, label: label(repo), title: repo.path, icon: "folder", checked: props.activePath === repo.path,
+        color: groupById(props.repoGroups, groupForRepo(props.repoGroups, repo.path))?.color,
+        onSelect: () => { props.onActivate(repo.path); tabRefs.current.get(repo.path)?.focus({ preventScroll: true }); },
+      }))} />}
       <span className="sr-only" role="status" aria-live="polite">{status}</span>
       {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={[
         { id: "close", label: "关闭", icon: "close" as IconName, shortcut: menu.repo.path === props.activePath ? "Ctrl+W" : undefined, disabled: props.meta[menu.repo.path]?.busy, title: props.meta[menu.repo.path]?.busy ? "操作进行中" : undefined, onSelect: () => props.onClose(menu.repo.path) },
