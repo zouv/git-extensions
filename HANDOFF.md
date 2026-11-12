@@ -2,12 +2,12 @@
 
 ## 状态快照
 
-- 最近更新：2026-11-12。0.11.0 版本号与 CHANGELOG 已更新，准备打包并上传 GitHub Release。本版包含：组管理器持久仓库记录 / 搜索 / 定位、同行 Pin 图标导航与指针拖拽、未分组可固定、Alt / Ctrl 数字快捷键、组内活动记忆与关闭保护。前端 104/104、Rust 113/113 测试通过；当前无进行中代码任务（发布流程进行中，GUI 待验收）。
+- 最近更新：2026-11-12。0.11.0 已发布并上传 GitHub Release（NSIS / MSI / unpack zip / SHA256SUMS）。本版包含：组管理器持久仓库记录 / 搜索 / 定位、同行 Pin 图标导航与指针拖拽、未分组可固定、Alt / Ctrl 数字快捷键、组内活动记忆与关闭保护。前端 104/104、Rust 113/113 测试通过；当前无进行中任务（GUI 待验收）。
 - 远程已关联并推送：origin = https://github.com/zouv/git-extensions，main 与历史标签已推送。
 
 ## 当前任务
 
-- 0.11.0 发布：版本号三处同步与 CHANGELOG 归档完成；待运行 `package.bat` 生成 NSIS / MSI / unpack / zip，创建 GitHub Release `v0.11.0` 并上传，最后回填发布验证。
+- 无进行中任务（0.11.0 已发布并上传，仓库导航 / 组管理器待 GUI 验收）。
 
 ## 进行中
 
@@ -15,10 +15,11 @@
 
 ## 下一步
 
-- 下一步执行：`package.bat` → 校验 `dist/release/` 与 `SHA256SUMS.txt` → `gh release create v0.11.0` 并上传 4 个资产 → 回填发布验证并推送文档提交。
+- 按「待验收」第 3 条实测本轮分组导航、管理器、查找与多仓库恢复；其它既有 Git / 工具栏 / Explorer 待验收项继续保留。
 
 ## 验证状态
 
+- 2026-11-12 0.11.0 发布验证：版本号三处同步为 0.11.0、CHANGELOG 归档；`package` 生成 NSIS 0.11.0（3.53 MiB）、MSI 0.11.0（5.91 MiB）、`unpack/` 便携目录、便携 zip（4.86 MiB）与 `SHA256SUMS.txt`，本地 `sha256sum -c` 三个产物全部 OK；GitHub Release `v0.11.0` 已创建并上传全部 4 个资产（https://github.com/zouv/git-extensions/releases/tag/v0.11.0）；发布前 `pnpm test` 104/104、`pnpm build`、`cargo test` 113/113、`cargo fmt --check`、`sh check-docs.sh` 通过。
 - 2026-11-12 组交互细化：`pnpm test` 104/104（未分组固定 / 取消、Alt 快捷键映射、多选开关）、`pnpm build`、`git diff --check`、`sh check-docs.sh` 通过。仅改前端，Rust 沿用同日113/113，未重跑；Pin 指针拖拽、颜色选中、Alt / Ctrl 数字键与窄窗布局均未做 GUI 实测。
 - 2026-11-12 同行顶部 / Pin 回改：`pnpm test` 103/103（含全部视图取消目标组与最后取消回落未分组）、`pnpm build`、`git diff --check`、`sh check-docs.sh` 通过。生产构建仍有大 chunk 提示。仅改前端，Rust 沿用同日113/113，未重跑；本轮未做 GUI 实测，前一轮截图为已弃用布局，不能代替当前验收。
 
