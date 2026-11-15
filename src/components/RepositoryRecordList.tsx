@@ -84,7 +84,7 @@ export default function RepositoryRecordList(props: RepositoryRecordListProps) {
     }
   };
 
-  return <div className="repository-record-list" ref={listRef} role="list" aria-label="仓库记录" aria-describedby={helpId}
+  return <div className="repository-record-list" ref={listRef} role="list" aria-label="仓库列表" aria-describedby={helpId}
     onFocusCapture={() => setHasFocus(true)} onBlurCapture={(event) => {
       if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setHasFocus(false);
     }}>
@@ -138,6 +138,6 @@ export default function RepositoryRecordList(props: RepositoryRecordListProps) {
         </div>
       </div>;
     })}
-    {records.length === 0 && <div className="repository-record-empty" role="status">{props.emptyMessage ?? "没有匹配的仓库记录"}</div>}
+    {records.length === 0 && <div className="repository-record-empty" role="status">{props.emptyMessage ?? "没有匹配的仓库"}</div>}
   </div>;
 }

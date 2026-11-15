@@ -4,6 +4,7 @@ import { formatDate, formatRelativeDate } from "../api";
 import { DEFAULT_LAYOUT } from "../settings";
 import type { GridDisplayOptions } from "../settings";
 import ContextMenu from "../ui/ContextMenu";
+import type { MenuItem } from "../ui/ContextMenu";
 
 const ROW_H = 28;
 const LANE_W = 14;
@@ -229,30 +230,49 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
       </div>
       {revisions.length === 0 && !loading && <div className="empty-state"><strong>暂无提交记录</strong><span>空仓库或当前过滤条件没有结果。</span></div>}
       {loading && <div className="loading-hint"><span className="spinner" />正在加载 · 已接收 {revisions.length.toLocaleString()} 条</div>}
-      {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} ariaLabel={`提交 ${menu.rev.shortId} 操作`} items={[
-        ...(can("diff") ? [{ id: "diff", label: "查看差异", onSelect: () => onContextAction("diff", menu.rev) }] : []),
-        ...(can("copy-sha") ? [{ id: "copy-sha", label: "复制完整 SHA", icon: "copy" as const, shortcut: "Ctrl+Shift+C", onSelect: () => onContextAction("copy-sha", menu.rev) }] : []),
-        ...(can("copy-subject") ? [{ id: "copy-subject", label: "复制提交主题", icon: "copy" as const, onSelect: () => onContextAction("copy-subject", menu.rev) }] : []),
-        ...(can("compare-base") ? [{ id: "compare-base", label: compareBase === menu.rev.oid ? "取消对比基准" : compareBase ? `与基准 ${compareBase.slice(0, 7)} 对比` : "设为对比基准", icon: "compare" as const, onSelect: () => onContextAction("compare-base", menu.rev) }] : []),
-        ...(can("compare-head") ? [{ id: "compare-head", label: "与当前分支对比", icon: "compare" as const, onSelect: () => onContextAction("compare-head", menu.rev) }] : []),
-        ...(can("new-branch") ? [{ id: "new-branch", label: "在此新建分支…", icon: "branch" as const, onSelect: () => onContextAction("new-branch", menu.rev) }] : []),
-        ...(can("new-tag") ? [{ id: "new-tag", label: "在此新建标签…", icon: "tag" as const, onSelect: () => onContextAction("new-tag", menu.rev) }] : []),
-        ...(can("merge-into-head") ? [{ id: "merge-into-head", label: "合并此提交到当前分支…", icon: "branch" as const, onSelect: () => onContextAction("merge-into-head", menu.rev) }] : []),
-        ...(can("cherry-pick") || can("revert") || can("rebase") || can("reset") || can("interactive-rebase") || can("fixup") || can("squash-commit") ? [{ id: "sep-history", separator: true }] : []),
-        ...(can("cherry-pick") ? [{ id: "cherry", label: "Cherry-pick 此提交…", onSelect: () => onContextAction("cherry-pick", menu.rev) }] : []),
-        ...(can("revert") ? [{ id: "revert", label: "Revert 此提交…", onSelect: () => onContextAction("revert", menu.rev) }] : []),
-        ...(can("fixup") ? [{ id: "fixup", label: "基于已暂存变更创建 Fixup 提交 (修正此提交)", onSelect: () => onContextAction("fixup", menu.rev) }] : []),
-        ...(can("squash-commit") ? [{ id: "squash-commit", label: "基于已暂存变更创建 Squash 提交", onSelect: () => onContextAction("squash-commit", menu.rev) }] : []),
-        ...(can("rebase") ? [{ id: "rebase", label: "将当前分支 Rebase 到此提交…", danger: true, onSelect: () => onContextAction("rebase", menu.rev) }] : []),
-        ...(can("reset") ? [{ id: "reset", label: "Reset 当前 HEAD 到此提交…", danger: true, onSelect: () => onContextAction("reset", menu.rev) }] : []),
-        ...(can("interactive-rebase") ? [{ id: "interactive", label: "从此提交开始交互式 Rebase…", danger: true, onSelect: () => onContextAction("interactive-rebase", menu.rev) }] : []),
-        ...(can("export-patch") || can("export-archive") ? [{ id: "sep-export", separator: true }] : []),
-        ...(can("export-patch") ? [{ id: "export-patch", label: "导出补丁 (.patch)…", onSelect: () => onContextAction("export-patch", menu.rev) }] : []),
-        ...(can("export-archive") ? [{ id: "export-archive", label: "导出归档 (.zip)…", onSelect: () => onContextAction("export-archive", menu.rev) }] : []),
-        ...(can("bisect-bad") || can("bisect-good") ? [{ id: "sep-bisect", separator: true }] : []),
-        ...(can("bisect-bad") ? [{ id: "bisect-bad", label: "Bisect：标记此提交为坏 (Bad)", onSelect: () => onContextAction("bisect-bad", menu.rev) }] : []),
-        ...(can("bisect-good") ? [{ id: "bisect-good", label: "Bisect：标记此提交为好 (Good)", onSelect: () => onContextAction("bisect-good", menu.rev) }] : []),
-      ]} />}
+      {menu && (() => {
+        const copyItems: MenuItem[] = [
+          ...(can("copy-sha") ? [{ id: "copy-sha", label: "复制完整 SHA", icon: "copy" as const, shortcut: "Ctrl+Shift+C", onSelect: () => onContextAction("copy-sha", menu.rev) }] : []),
+          ...(can("copy-subject") ? [{ id: "copy-subject", label: "复制提交主题", icon: "copy" as const, onSelect: () => onContextAction("copy-subject", menu.rev) }] : []),
+        ];
+        const compareItems: MenuItem[] = [
+          ...(can("compare-base") ? [{ id: "compare-base", label: compareBase === menu.rev.oid ? "取消对比基准" : compareBase ? `与基准 ${compareBase.slice(0, 7)} 对比` : "设为对比基准", icon: "compare" as const, onSelect: () => onContextAction("compare-base", menu.rev) }] : []),
+          ...(can("compare-head") ? [{ id: "compare-head", label: "与当前分支对比", icon: "compare" as const, onSelect: () => onContextAction("compare-head", menu.rev) }] : []),
+        ];
+        const branchItems: MenuItem[] = [
+          ...(can("new-branch") ? [{ id: "new-branch", label: "在此新建分支…", icon: "branch" as const, onSelect: () => onContextAction("new-branch", menu.rev) }] : []),
+          ...(can("new-tag") ? [{ id: "new-tag", label: "在此新建标签…", icon: "tag" as const, onSelect: () => onContextAction("new-tag", menu.rev) }] : []),
+          ...(can("merge-into-head") ? [{ id: "merge-into-head", label: "合并此提交到当前分支…", icon: "branch" as const, onSelect: () => onContextAction("merge-into-head", menu.rev) }] : []),
+        ];
+        const historyItems: MenuItem[] = [
+          ...(can("cherry-pick") ? [{ id: "cherry", label: "Cherry-pick 此提交…", onSelect: () => onContextAction("cherry-pick", menu.rev) }] : []),
+          ...(can("revert") ? [{ id: "revert", label: "Revert 此提交…", onSelect: () => onContextAction("revert", menu.rev) }] : []),
+          ...(can("fixup") ? [{ id: "fixup", label: "创建 Fixup 提交（修正此提交）", onSelect: () => onContextAction("fixup", menu.rev) }] : []),
+          ...(can("squash-commit") ? [{ id: "squash-commit", label: "创建 Squash 提交", onSelect: () => onContextAction("squash-commit", menu.rev) }] : []),
+          ...(can("rebase") ? [{ id: "rebase", label: "将当前分支 Rebase 到此提交…", danger: true, onSelect: () => onContextAction("rebase", menu.rev) }] : []),
+          ...(can("reset") ? [{ id: "reset", label: "Reset 当前 HEAD 到此提交…", danger: true, onSelect: () => onContextAction("reset", menu.rev) }] : []),
+          ...(can("interactive-rebase") ? [{ id: "interactive", label: "从此提交开始交互式 Rebase…", danger: true, onSelect: () => onContextAction("interactive-rebase", menu.rev) }] : []),
+        ];
+        const exportItems: MenuItem[] = [
+          ...(can("export-patch") ? [{ id: "export-patch", label: "导出补丁 (.patch)…", icon: "file" as const, onSelect: () => onContextAction("export-patch", menu.rev) }] : []),
+          ...(can("export-archive") ? [{ id: "export-archive", label: "导出归档 (.zip)…", icon: "file" as const, onSelect: () => onContextAction("export-archive", menu.rev) }] : []),
+        ];
+        const bisectItems: MenuItem[] = [
+          ...(can("bisect-bad") ? [{ id: "bisect-bad", label: "标记此提交为坏 (Bad)", icon: "warning" as const, onSelect: () => onContextAction("bisect-bad", menu.rev) }] : []),
+          ...(can("bisect-good") ? [{ id: "bisect-good", label: "标记此提交为好 (Good)", icon: "check" as const, onSelect: () => onContextAction("bisect-good", menu.rev) }] : []),
+        ];
+        const items: MenuItem[] = [
+          ...(can("diff") ? [{ id: "diff", label: "查看差异", icon: "view" as const, onSelect: () => onContextAction("diff", menu.rev) }] : []),
+          ...(copyItems.length > 0 ? [{ id: "copy", label: "复制", icon: "copy" as const, children: copyItems }] : []),
+          ...(compareItems.length > 0 ? [{ id: "compare", label: "对比", icon: "compare" as const, children: compareItems }] : []),
+          ...(branchItems.length > 0 ? [{ id: "sep-branch", separator: true }, { id: "branch-actions", label: "分支与标签", icon: "branch" as const, children: branchItems }] : []),
+          ...(historyItems.length > 0 || exportItems.length > 0 || bisectItems.length > 0 ? [{ id: "sep-history", separator: true }] : []),
+          ...(historyItems.length > 0 ? [{ id: "history-actions", label: "历史操作", icon: "history" as const, children: historyItems }] : []),
+          ...(exportItems.length > 0 ? [{ id: "export", label: "导出", icon: "file" as const, children: exportItems }] : []),
+          ...(bisectItems.length > 0 ? [{ id: "bisect", label: "Bisect 二分排查", icon: "search" as const, children: bisectItems }] : []),
+        ];
+        return <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} ariaLabel={`提交 ${menu.rev.shortId} 操作`} items={items} />;
+      })()}
     </div>
   );
 }

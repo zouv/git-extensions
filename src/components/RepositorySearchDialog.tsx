@@ -59,14 +59,14 @@ export default function RepositorySearchDialog(props: RepositorySearchDialogProp
   }, path);
   const open = (path: string) => void run(async () => {
     if (await propsRef.current.onOpen(path)) propsRef.current.onClose();
-    else setLocalErrors((old) => ({ ...old, [path]: "打开失败。请重新定位目录，或移除这条记录（不删除磁盘文件）。" }));
+    else setLocalErrors((old) => ({ ...old, [path]: "打开失败。请重新定位目录，或从列表中移除（不删除磁盘文件）。" }));
   }, path);
 
   return <>
     <Dialog title="查找仓库" onClose={close} busy={locked} resizable sizeKey="repository-search" minWidth={360} minHeight={320}
-      className="repository-search-dialog" footer={<><span className="repository-manager-footer-hint">↑ / ↓ 浏览 · Enter 打开 · Esc 关闭</span><button disabled={locked || !focused} className="primary" onClick={() => focused && open(focused.path)}>{focused?.path === props.activePath ? "激活仓库" : "打开 / 激活"}</button><button disabled={locked} onClick={close}>关闭</button></>}>
+      className="repository-search-dialog" footer={<><span className="repository-manager-footer-hint">方向键浏览 · 单击选中 · Enter / 双击打开 · Shift+F10 操作</span><button disabled={locked || !focused} className="primary" onClick={() => focused && open(focused.path)}>{focused?.path === props.activePath ? "激活仓库" : "打开 / 激活"}</button><button disabled={locked} onClick={close}>关闭</button></>}>
       <div className="repository-search-content">
-        <input ref={inputRef} data-autofocus className="repository-search-input" aria-label="搜索仓库记录" placeholder="搜索本地别名、仓库名、路径或分组" value={query}
+        <input ref={inputRef} data-autofocus className="repository-search-input" aria-label="搜索仓库" placeholder="搜索本地别名、仓库名、路径或分组" value={query}
           onChange={(event) => { setQuery(event.target.value); setFocusedPath(null); }} onKeyDown={(event) => {
             if (event.key === "Enter") { event.preventDefault(); if (focused && !locked) open(focused.path); }
             else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -75,23 +75,23 @@ export default function RepositorySearchDialog(props: RepositorySearchDialogProp
               list?.focus();
             }
           }} />
-        <div className="repository-search-summary muted">{results.length} 条记录 · {query.trim() ? "按别名、名称、路径与分组筛选" : "最近打开优先，同时间保持记录顺序"}</div>
+        <div className="repository-search-summary muted">{results.length} 个仓库 · {query.trim() ? "按别名、名称、路径与分组筛选" : "最近打开优先，同时间保持列表顺序"}</div>
         <RepositoryRecordList config={props.config} records={results} repos={props.repos} activePath={props.activePath} errors={errors} busy={locked}
-          focusedPath={focusedPath} onFocusPath={setFocusedPath} onOpen={open} openOnClick onContextMenu={(path, x, y) => setMenu({ path, x, y })}
-          emptyMessage={props.records.length === 0 ? "还没有仓库记录，请先打开或添加仓库。" : "没有匹配的仓库，尝试名称、路径或分组。"} />
+          focusedPath={focusedPath} onFocusPath={setFocusedPath} onOpen={open} onContextMenu={(path, x, y) => setMenu({ path, x, y })}
+          emptyMessage={props.records.length === 0 ? "还没有仓库，请先打开或添加仓库。" : "没有匹配的仓库，尝试名称、路径或分组。"} />
         <div className="repository-search-actions">
-          <span className="repository-manager-focused-name muted" title={focused?.path}>{focused ? displayRepoName(props.config, focused) : "没有选中记录"}</span>
+          <span className="repository-manager-focused-name muted" title={focused?.path}>{focused ? displayRepoName(props.config, focused) : "没有选中仓库"}</span>
           <button disabled={locked || !focused} onClick={() => focused && relocate(focused.path)}>重新定位目录…</button>
-          <button className="danger-button" disabled={locked || !focused} onClick={() => focused && void run(() => propsRef.current.onRemove([focused.path]), focused.path)}>移除记录…</button>
+          <button className="danger-button" disabled={locked || !focused} onClick={() => focused && void run(() => propsRef.current.onRemove([focused.path]), focused.path)}>从列表移除…</button>
         </div>
-        <p className="repository-manager-save-note">打开成功才关闭此窗口；失败记录会保留。重新定位由系统目录选择处理；移除只删本地记录，不删除磁盘文件。</p>
+        <p className="repository-manager-save-note">打开成功才关闭此窗口；打开失败的仓库会保留在列表中。重新定位由系统目录选择处理；从列表移除不会删除磁盘文件。</p>
         {message && <div className="repository-manager-inline-error" role="alert">{message}</div>}
       </div>
     </Dialog>
     {menu && <ContextMenu x={menu.x} y={menu.y} ariaLabel="仓库查找结果操作" onClose={() => setMenu(null)} items={[
       { id: "open", label: "打开 / 激活仓库", disabled: locked, onSelect: () => open(menu.path) },
       { id: "relocate", label: "重新定位目录…", disabled: locked, onSelect: () => relocate(menu.path) },
-      { id: "remove", label: "移除记录…（不删磁盘文件）", danger: true, disabled: locked, onSelect: () => void run(() => propsRef.current.onRemove([menu.path]), menu.path) },
+      { id: "remove", label: "从列表移除…（不删磁盘文件）", danger: true, disabled: locked, onSelect: () => void run(() => propsRef.current.onRemove([menu.path]), menu.path) },
     ]} />}
   </>;
 }

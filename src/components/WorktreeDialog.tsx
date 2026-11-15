@@ -63,7 +63,7 @@ export default function WorktreeDialog({ repoPath, onClose, onChanged, onOpenWor
   };
 
   const browseDir = async () => {
-    const picked = await pickDirectory("选择新 Worktree 目录");
+    const picked = await pickDirectory("选择新工作树目录");
     if (picked) setTargetDir(picked);
   };
 
@@ -74,38 +74,38 @@ export default function WorktreeDialog({ repoPath, onClose, onChanged, onOpenWor
     void run(async () => {
       await api.worktreeAdd(repoPath, dir, br, createNewBranch && !!br);
       setTargetDir(""); setBranch("");
-    }, `已创建 Worktree：${dir}`);
+    }, `已创建工作树：${dir}`);
   };
 
   const removeWorktree = async () => {
     if (!current) return;
     const ok = await confirm({
-      title: `移除 Worktree ${current.name}？`,
+      title: `移除工作树 ${current.name}？`,
       body: `将移除链接工作树 ${current.path}${forceRemove ? "（强制移除，包含未提交修改）" : ""}。`,
-      confirmLabel: forceRemove ? "强制移除" : "移除 Worktree",
+      confirmLabel: forceRemove ? "强制移除" : "移除工作树",
       danger: true,
       requireAck: forceRemove,
-      ackLabel: "我确认强制移除该 Worktree 及其中未提交的修改",
+      ackLabel: "我确认强制移除该工作树及其中未提交的修改",
     });
     if (!ok) return;
-    void run(() => api.worktreeRemove(repoPath, current.name, forceRemove), `已移除 Worktree ${current.name}`);
+    void run(() => api.worktreeRemove(repoPath, current.name, forceRemove), `已移除工作树 ${current.name}`);
   };
 
   return (
     <Dialog
-      title="Worktree 多工作树管理"
+      title="工作树管理 (Worktree)"
       wide
       busy={busy}
       onClose={onClose}
       footer={<>
-        <button disabled={busy} onClick={() => void run(() => api.worktreePrune(repoPath), "已清理失效 Worktree 记录")}>
+        <button disabled={busy} onClick={() => void run(() => api.worktreePrune(repoPath), "已清理失效工作树记录")}>
           清理失效记录 (Prune)
         </button>
         <button onClick={onClose} disabled={busy}>关闭</button>
       </>}
     >
       {error && <InlineError message={error} />}
-      <div className="branch-list" role="listbox" aria-label="Worktree 列表">
+      <div className="branch-list" role="listbox" aria-label="工作树列表">
         {worktrees.map((w) => (
           <div
             key={w.name}
@@ -120,12 +120,12 @@ export default function WorktreeDialog({ repoPath, onClose, onChanged, onOpenWor
             <span className="branch-oid">{w.path}</span>
           </div>
         ))}
-        {worktrees.length === 0 && <div className="panel-hint">当前仓库没有额外的 linked worktree。</div>}
+        {worktrees.length === 0 && <div className="panel-hint">当前仓库没有额外的工作树。</div>}
       </div>
       {current && (
         <div className="branch-actions">
           <button disabled={busy} onClick={() => { onOpenWorktree(current.path); onClose(); }}>在新页签打开</button>
-          <button disabled={busy} onClick={() => void run(() => api.worktreeLock(repoPath, current.name, !current.locked), `${current.locked ? "已解锁" : "已锁定"} Worktree ${current.name}`)}>
+          <button disabled={busy} onClick={() => void run(() => api.worktreeLock(repoPath, current.name, !current.locked), `${current.locked ? "已解锁" : "已锁定"}工作树 ${current.name}`)}>
             {current.locked ? "解锁" : "锁定"}
           </button>
           <button className="danger-button" disabled={busy} onClick={() => void removeWorktree()}>移除…</button>
@@ -134,7 +134,7 @@ export default function WorktreeDialog({ repoPath, onClose, onChanged, onOpenWor
       )}
       <div className="dialog-form">
         <div className="branch-create">
-          <input placeholder="新 Worktree 目录路径" disabled={busy} value={targetDir} onChange={(e) => setTargetDir(e.target.value)} />
+          <input placeholder="新工作树目录路径" disabled={busy} value={targetDir} onChange={(e) => setTargetDir(e.target.value)} />
           <button disabled={busy} onClick={() => void browseDir()}>浏览…</button>
         </div>
         <div className="branch-create">
@@ -143,7 +143,7 @@ export default function WorktreeDialog({ repoPath, onClose, onChanged, onOpenWor
             <input type="checkbox" disabled={busy} checked={createNewBranch} onChange={(e) => setCreateNewBranch(e.target.checked)} />
             新建分支 (-b)
           </label>
-          <button className="primary" disabled={busy || !targetDir.trim()} onClick={addWorktree}>新建 Worktree</button>
+          <button className="primary" disabled={busy || !targetDir.trim()} onClick={addWorktree}>新建工作树</button>
         </div>
       </div>
     </Dialog>

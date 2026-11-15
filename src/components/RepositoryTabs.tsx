@@ -264,7 +264,7 @@ export default function RepositoryTabs(props: Props) {
 
   return (
     <div
-      className={`repository-tabs${dragPath ? " dragging" : ""}`}
+      className={`repository-tabs${dragPath ? " dragging" : ""}${overflowing ? " overflowing" : ""}`}
       ref={stripRef}
       onContextMenu={blankContextMenu}
     >

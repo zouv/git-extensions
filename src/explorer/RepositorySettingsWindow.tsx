@@ -85,7 +85,7 @@ export function RepositorySettingsContent({ repo, setMessage }: { repo: RepoInfo
 export default function RepositorySettingsWindow({ target, setMessage }: Props) {
   return <div className="repository-settings-window">
     <div className="repository-settings-toolbar">
-      <strong>Repository settings</strong>
+      <strong>仓库设置</strong>
     </div>
     <RepositorySettingsContent repo={target.repo} setMessage={setMessage} />
   </div>;

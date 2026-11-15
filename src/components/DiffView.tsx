@@ -44,6 +44,10 @@ interface Props {
   onFileAction?: (action: FileAction, file: FileDiff) => void;
   /** 单文件预览时隐藏文件标题与文件列表，避免与外部文件列表重复。 */
   showFileHeader?: boolean;
+  /** 隐藏文件标题时仍显示增删统计。 */
+  showStats?: boolean;
+  /** 检查器窄栏使用下拉文件选择器，不渲染固定宽度文件列。 */
+  compact?: boolean;
   /** 按仓库保存 Inline / Split 与换行偏好。 */
   prefKey?: string;
   /** 工作区 / 暂存区预览时的 Hunk 级暂存、取消暂存与丢弃操作。 */
@@ -52,7 +56,7 @@ interface Props {
 
 type DisplayRow = { kind: "dir"; path: string; depth: number } | { kind: "file"; file: FileDiff; index: number; depth: number };
 
-export default function DiffView({ files, loading, highlightEnabled = true, onFileAction, loadFile, showFileHeader = true, prefKey = "", hunkActions }: Props) {
+export default function DiffView({ files, loading, highlightEnabled = true, onFileAction, loadFile, showFileHeader = true, showStats = true, compact = false, prefKey = "", hunkActions }: Props) {
   const [selected, setSelected] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(400);
@@ -94,10 +98,10 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
   const additions = useMemo(() => parsed.lines.filter((line) => line.kind === "add").length, [parsed]);
   const deletions = useMemo(() => parsed.lines.filter((line) => line.kind === "del").length, [parsed]);
   const contentLines = useMemo(() => parsed.lines.filter((line) => line.kind === "add" || line.kind === "del" || line.kind === "ctx"), [parsed]);
-  // 单文件预览不重复显示文件名：隐藏 diff/index/---/+++ 这些标准路径头。
-  const visibleLines = useMemo(() => showFileHeader
+  // 单文件预览 / 检查器 compact 不重复显示文件名：隐藏 diff/index/---/+++ 这些标准路径头。
+  const visibleLines = useMemo(() => showFileHeader && !compact
     ? parsed.lines
-    : parsed.lines.filter((line) => !(line.kind === "meta" && /^(diff --git|index |--- |\+\+\+ )/.test(line.text))), [parsed, showFileHeader]);
+    : parsed.lines.filter((line) => !(line.kind === "meta" && /^(diff --git|index |--- |\+\+\+ )/.test(line.text))), [parsed, showFileHeader, compact]);
   const displayRows = useMemo(
     () => diffMode === "inline"
       ? buildInlineRows(visibleLines, collapse, expandedFolds)
@@ -262,9 +266,15 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
 
   const renderContent = (line: PatchLine) => {
     const html = highlight.get(line.sourceIndex);
-    if (html === undefined) return line.text || " ";
     const sign = line.kind === "add" ? "+" : line.kind === "del" ? "-" : " ";
-    return <><span className="diff-sign">{sign}</span><span dangerouslySetInnerHTML={{ __html: html }} /></>;
+    return <>
+      <span className="diff-no diff-no-old">{line.oldLine ?? ""}</span>
+      <span className="diff-no diff-no-new">{line.newLine ?? ""}</span>
+      <span className="diff-sign">{sign}</span>
+      {html !== undefined
+        ? <span className="diff-text" dangerouslySetInnerHTML={{ __html: html }} />
+        : <span className="diff-text">{line.content || " "}</span>}
+    </>;
   };
 
   const renderFold = (row: Extract<InlineRow | SplitRow, { kind: "fold" }>, index: number) => (
@@ -352,7 +362,7 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
   if (loading) return <div className="empty-state"><span className="spinner" /><span>正在加载差异…</span></div>;
   if (files.length === 0) return <div className="empty-state"><Icon name="changes" size={28} /><strong>无变更内容</strong><span>选择其它提交或文件查看差异。</span></div>;
 
-  const showFileList = showFileHeader && files.length > 1;
+  const showFileList = showFileHeader && files.length > 1 && !compact;
   const hasHunks = hunkRows.length > 0;
 
   return (
@@ -367,6 +377,7 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
             <div className="diff-file-filter">
               <Icon name="search" size={13} />
               <input aria-label="过滤差异文件" placeholder="过滤文件…" value={fileFilter} onChange={(e) => setFileFilter(e.target.value)} />
+              {fileFilter && <button type="button" className="filter-clear" aria-label="清除文件过滤" title="清除文件过滤" onClick={() => setFileFilter("")}><Icon name="close" size={12} /></button>}
             </div>
             {hiddenFiles > 0 && <div className="diff-file-note">仅显示前 {MAX_FILE_ROWS} 个匹配文件，请继续输入以缩小范围。</div>}
             <div className="diff-file-list" role="listbox" aria-label="差异文件">
@@ -398,12 +409,22 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
         )}
         <div className="diff-main">
           <div className="diff-toolbar">
-            {showFileHeader && <span className="panel-title">{manifestFile?.path}</span>}
-            {showFileHeader && <span className="diff-stat" aria-label={`新增 ${additions} 行，删除 ${deletions} 行`}><span className="diff-stat-add">+{additions}</span><span className="diff-stat-del">−{deletions}</span></span>}
-            {showFileHeader && <span className="diff-toolbar-separator" aria-hidden="true" />}
+            {showFileHeader && (compact && files.length > 1
+              ? <select
+                  className="diff-file-select"
+                  aria-label="选择差异文件"
+                  title={manifestFile?.path}
+                  value={manifestFile ? selected : 0}
+                  onChange={(e) => selectFile(Number(e.target.value))}
+                >
+                  {files.map((entry, index) => <option key={`${entry.path}-${index}`} value={index}>{entry.oldPath ? `${entry.oldPath} → ${entry.path}` : entry.path}</option>)}
+                </select>
+              : <span className="panel-title">{manifestFile?.path}</span>)}
+            {showStats && <span className="diff-stat" aria-label={`新增 ${additions} 行，删除 ${deletions} 行`}><span className="diff-stat-add">+{additions}</span><span className="diff-stat-del">−{deletions}</span></span>}
+            {showStats && <span className="diff-toolbar-separator" aria-hidden="true" />}
             <div className="diff-mode-group" role="group" aria-label="差异视图模式">
-              <button className={`text-toggle${diffMode === "inline" ? " active" : ""}`} aria-pressed={diffMode === "inline"} title="Inline view（行内差异）" onClick={() => changeDiffMode("inline")}>Inline</button>
-              <button className={`text-toggle${diffMode === "split" ? " active" : ""}`} aria-pressed={diffMode === "split"} title="Split view（并排差异）" onClick={() => changeDiffMode("split")}>Split</button>
+              <button className={`text-toggle${diffMode === "inline" ? " active" : ""}`} aria-pressed={diffMode === "inline"} title="行内差异" onClick={() => changeDiffMode("inline")}>行内</button>
+              <button className={`text-toggle${diffMode === "split" ? " active" : ""}`} aria-pressed={diffMode === "split"} title="并排差异" onClick={() => changeDiffMode("split")}>并排</button>
             </div>
             <button className="icon-button diff-prev" title="上一处差异 (Alt+↑ / p)" aria-label="上一处差异" disabled={!hasHunks || activeHunk <= 0} onClick={() => goDiff(-1)}><Icon name="chevron-down" size={14} /></button>
             <button className="icon-button" title="下一处差异 (Alt+↓ / n)" aria-label="下一处差异" disabled={!hasHunks || activeHunk >= hunkRows.length - 1} onClick={() => goDiff(1)}><Icon name="chevron-down" size={14} /></button>

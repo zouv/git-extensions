@@ -182,7 +182,7 @@ export default function LeftPanel(props: Props) {
     ];
     if (menu.kind === "worktree") return [
       { id: "open", label: "在新页签打开", icon: "plus", onSelect: () => props.onOpenWorktree(menu.path) },
-      ...(props.onWorktrees ? [{ id: "manage-wt", label: "管理 Worktrees…", icon: "branch" as const, onSelect: props.onWorktrees }] : []),
+      ...(props.onWorktrees ? [{ id: "manage-wt", label: "管理工作树…", icon: "branch" as const, onSelect: props.onWorktrees }] : []),
       { id: "copy", label: "复制路径", icon: "copy", onSelect: () => props.onCopyPath(menu.path) },
       { id: "reveal", label: "在文件管理器中显示", icon: "external", onSelect: () => props.onRevealPath(menu.path) },
     ];
@@ -238,6 +238,7 @@ export default function LeftPanel(props: Props) {
       <div className="tree-filter">
         <Icon name="search" size={13} />
         <input aria-label="过滤分支和标签" placeholder="过滤分支 / 标签…" value={refFilter} onChange={(e) => { setRefFilter(e.target.value); setRefLimit(200); setFocusKey("changes"); }} onKeyDown={(e) => { if (e.key === "ArrowDown") { e.preventDefault(); e.currentTarget.closest(".left-panel")?.querySelector<HTMLElement>("[data-tree-key]")?.focus(); } }} />
+        {refFilter && <button type="button" className="filter-clear" aria-label="清除引用过滤" title="清除引用过滤" onClick={() => { setRefFilter(""); setRefLimit(200); setFocusKey("changes"); }}><Icon name="close" size={12} /></button>}
       </div>
       <div className="tree-items" role="tree" aria-label="仓库引用" onKeyDown={treeKeyDown}>
         <div
@@ -273,26 +274,26 @@ export default function LeftPanel(props: Props) {
           }}
         ><Icon name="tag" size={14} /><span>{tag.name}</span></div>)}
         {(!collapsed.has("tags") || !!query) && tags.length > refLimit && <button className="tree-more" onClick={() => setRefLimit((value) => value + 200)}>显示更多（还有 {tags.length - refLimit} 个）</button>}
-        {group("submodules", "Submodules", props.submodules.length)}
+        {group("submodules", "子模块", props.submodules.length)}
         {!collapsed.has("submodules") && props.submodules.map((module) => (
           <div className="tree-item" role="treeitem" {...focusProps(`submodule-${module.path}`)} key={module.path} title={`${module.path} · ${module.status}`} onClick={props.onSubmodules} onContextMenu={(e) => openSubmoduleMenu(e, module)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); props.onSubmodules(); } if (e.key === "F10" && e.shiftKey) { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ kind: "submodule", name: module.path, path: module.path, x: r.left, y: r.bottom }); } }}>
             <Icon name="folder" size={14} /><span>{module.path}</span>{module.status !== "clean" && <span className="tree-count">{module.status}</span>}
           </div>
         ))}
         {!collapsed.has("submodules") && props.submodules.length === 0 && <div className="tree-empty">（无子模块）</div>}
-        {group("worktrees", "Worktrees", props.worktrees.length)}
+        {group("worktrees", "工作树", props.worktrees.length)}
         {!collapsed.has("worktrees") && props.worktrees.map((worktree) => (
           <div className="tree-item" role="treeitem" {...focusProps(`worktree-${worktree.path}`)} key={worktree.path} title={worktree.path} onDoubleClick={() => props.onOpenWorktree(worktree.path)} onContextMenu={(e) => openWorktreeMenu(e, worktree)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); props.onOpenWorktree(worktree.path); } if (e.key === "F10" && e.shiftKey) { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ kind: "worktree", name: worktree.name, path: worktree.path, x: r.left, y: r.bottom }); } }}>
             <Icon name="branch" size={14} /><span>{worktree.name}</span>{worktree.locked && <span className="tree-count">locked</span>}
           </div>
         ))}
-        {!collapsed.has("worktrees") && props.worktrees.length === 0 && <div className="tree-empty">（无 linked worktree）</div>}
+        {!collapsed.has("worktrees") && props.worktrees.length === 0 && <div className="tree-empty">（无工作树）</div>}
       </div>
       {props.conflictCount > 0 && <button className="conflict-entry" onClick={() => props.onWorkspace("changes")}><Icon name="conflict" />{props.conflictCount} 个冲突待解决</button>}
       <div className="left-panel-footer">
-        <button onClick={props.onStash}><Icon name="stash" size={14} />Stash</button>
-        <button onClick={props.onSubmodules}><Icon name="folder" size={14} />子模块</button>
-        {props.onWorktrees && <button onClick={props.onWorktrees}><Icon name="branch" size={14} />Worktrees</button>}
+        <button onClick={props.onStash} title="Stash"><Icon name="stash" size={14} /><span>Stash</span></button>
+        <button onClick={props.onSubmodules} title="子模块"><Icon name="folder" size={14} /><span>子模块</span></button>
+        {props.onWorktrees && <button onClick={props.onWorktrees} title="工作树"><Icon name="branch" size={14} /><span>工作树</span></button>}
       </div>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} ariaLabel={`${menu.name} 操作`} />}
     </aside>

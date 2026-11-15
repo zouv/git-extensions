@@ -25,7 +25,7 @@ export interface MenuItem {
   separator?: boolean;
   /** 多选类菜单保持打开，便于连续切换多个项目。 */
   keepOpen?: boolean;
-  /** 子菜单；仅 Repository > Git maintenance 使用。 */
+  /** 一级子菜单；Esc / 点击外部关闭整条菜单链。 */
   children?: MenuItem[];
   trailingAction?: MenuTrailingAction;
   onSelect?: () => void;

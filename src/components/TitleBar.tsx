@@ -110,6 +110,7 @@ export default function TitleBar(props: Props) {
       />
       <button type="button" className="title-repo-search" title="查找仓库" aria-label="查找仓库" onClick={props.onSearchRepositories}>
         <Icon name="search" size={16} />
+        <span className="title-repo-search-label">查找仓库</span>
       </button>
       <div className="title-window-controls">
         <button className="title-win-btn" title="最小化" aria-label="最小化" onClick={() => void win.minimize()}><Icon name="minimize" size={15} /></button>

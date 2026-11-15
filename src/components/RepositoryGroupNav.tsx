@@ -45,6 +45,16 @@ export default function RepositoryGroupNav({ config, onChange, onManage }: Props
   latest.current = { config, onChange, onManage };
   const pinned = pinnedGroups(config);
   const numberedPins = config.pinnedGroupIds.filter((id) => id !== DEFAULT_GROUP_ID);
+  const scopeLabel = (() => {
+    const view = config.view;
+    if (view.kind === "all-open") return "全部打开";
+    if (view.kind === "group") {
+      const groupId = view.groupId;
+      return config.groups.find((group) => group.id === groupId)?.name ?? "分组";
+    }
+    const names = view.groupIds.map((id) => config.groups.find((group) => group.id === id)?.name).filter((name): name is string => !!name);
+    return names.length === 1 ? names[0] : `${names.length} 个分组`;
+  })();
   const openAt = (element: HTMLElement) => {
     const rect = element.getBoundingClientRect();
     setMenu({ x: rect.left, y: rect.bottom + 2 });
@@ -212,7 +222,7 @@ export default function RepositoryGroupNav({ config, onChange, onManage }: Props
   });
   const menuItems: MenuItem[] = [
     { id: "all-open", label: "全部打开", checked: config.view.kind === "all-open", keepOpen: true,
-      title: "显示全部已打开仓库，不会批量打开未打开的记录",
+      title: "显示全部已打开仓库，不会批量打开未打开的仓库",
       onSelect: () => {
         const state = latest.current;
         state.onChange(state.config.view.kind === "all-open"
@@ -227,12 +237,13 @@ export default function RepositoryGroupNav({ config, onChange, onManage }: Props
   return (
     <div className="title-group-cluster repository-group-nav" role="navigation" aria-label="仓库分组">
       <button type="button" className={`icon-button title-group-button${config.view.kind !== "all-open" ? " has-group" : ""}`}
-        title="仓库页签分组（可多选）" aria-label="仓库页签分组" aria-haspopup="menu" aria-expanded={!!menu}
+        title={`仓库页签分组（当前：${scopeLabel}；可多选）`} aria-label={`仓库页签分组，当前${scopeLabel}`} aria-haspopup="menu" aria-expanded={!!menu}
         onPointerDown={(event) => { if (menu) event.stopPropagation(); }}
         onClick={(event) => { if (menu) setMenu(null); else openAt(event.currentTarget); }}
         onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); openAt(event.currentTarget); } }}>
         <Icon name="group" size={17} />
       </button>
+      <span className="title-group-scope" title="当前页签范围">{scopeLabel}</span>
       {pinned.length > 0 && <div className="title-pinned" ref={stripRef} role="group" aria-label="已 Pin 的仓库页签分组（拖动或 Alt+方向键排序）">
         {pinned.map((group) => (
           <button key={group.id} type="button" data-group-id={group.id}

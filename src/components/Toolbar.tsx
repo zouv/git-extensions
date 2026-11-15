@@ -91,7 +91,7 @@ function ToolButton({ icon, label, title, onClick, disabled = false, primary = f
 }
 
 function MenuButton({ icon, label, open, onClick, buttonRef }: { icon: IconName; label: string; open: boolean; onClick: () => void; buttonRef: RefObject<HTMLButtonElement | null> }) {
-  return <button ref={buttonRef} type="button" className="tool-button menu-tool-button" title={`${label} 菜单`} aria-label={`${label} 菜单`} aria-haspopup="menu" aria-expanded={open} onPointerDown={(event) => { if (open) event.stopPropagation(); }} onClick={onClick}><Icon name={icon} /><Icon name="chevron-down" size={11} /></button>;
+  return <button ref={buttonRef} type="button" className="tool-button menu-tool-button" title={`${label} 菜单`} aria-label={`${label} 菜单`} aria-haspopup="menu" aria-expanded={open} onPointerDown={(event) => { if (open) event.stopPropagation(); }} onClick={onClick}><Icon name={icon} /><span className="menu-tool-label">{label}</span><Icon name="chevron-down" size={11} /></button>;
 }
 
 export default function Toolbar(props: Props) {
@@ -101,11 +101,13 @@ export default function Toolbar(props: Props) {
   const [viewMenu, setViewMenu] = useState<Point | null>(null);
   const [commandsMenu, setCommandsMenu] = useState<Point | null>(null);
   const [branchMenu, setBranchMenu] = useState<Point | null>(null);
+  const [moreMenu, setMoreMenu] = useState<Point | null>(null);
   const repositoryButton = useRef<HTMLButtonElement>(null);
   const navigateButton = useRef<HTMLButtonElement>(null);
   const viewButton = useRef<HTMLButtonElement>(null);
   const commandsButton = useRef<HTMLButtonElement>(null);
   const branchButton = useRef<HTMLButtonElement>(null);
+  const moreButton = useRef<HTMLButtonElement>(null);
   const openMenu = (element: HTMLElement | null, setter: (value: Point | null) => void) => {
     if (!element) return;
     const rect = element.getBoundingClientRect();
@@ -129,7 +131,7 @@ export default function Toolbar(props: Props) {
     { id: "update-submodules", label: "更新所有子模块", icon: "pull", disabled: busy, onSelect: props.onUpdateAllSubmodules },
     { id: "sync-submodules", label: "同步所有子模块", icon: "refresh", disabled: busy, onSelect: props.onSyncAllSubmodules },
     { id: "sep-repo-3", separator: true },
-    { id: "worktrees", label: "管理 Worktree…", icon: "branch", shortcut: "Ctrl+Alt+W", onSelect: props.onWorktrees },
+    { id: "worktrees", label: "管理工作树…", icon: "branch", shortcut: "Ctrl+Alt+W", onSelect: props.onWorktrees },
     { id: "sep-repo-4", separator: true },
     { id: "edit-gitignore", label: "编辑 .gitignore", icon: "edit", disabled: busy, onSelect: () => props.onEditRepoFile("gitignore") },
     { id: "edit-exclude", label: "编辑 .git/info/exclude", icon: "edit", disabled: busy, onSelect: () => props.onEditRepoFile("exclude") },
@@ -144,7 +146,7 @@ export default function Toolbar(props: Props) {
       { id: "recovery", label: "恢复历史（HEAD 备份与 reflog）…", icon: "history", disabled: busy, onSelect: props.onRecovery },
       { id: "command-log", label: "Git 命令执行日志…", shortcut: "Ctrl+Shift+G", onSelect: props.onCommandLog },
     ] },
-    { id: "repo-settings", label: "Repository settings…", icon: "settings", onSelect: props.onRepositorySettings },
+    { id: "repo-settings", label: "仓库设置…", icon: "settings", onSelect: props.onRepositorySettings },
     { id: "sep-repo-6", separator: true },
     { id: "close-repo", label: "关闭仓库页签", icon: "close", shortcut: "Ctrl+W", onSelect: props.onCloseRepo },
   ];
@@ -237,13 +239,20 @@ export default function Toolbar(props: Props) {
     { id: "manage-branches", label: "分支管理…", icon: "branch" as const, shortcut: "Ctrl+Shift+B", onSelect: props.onBranches },
   ];
 
+  const moreItems: MenuItem[] = [
+    { id: "more-recovery", label: "恢复历史：HEAD 备份与 reflog", icon: "history", disabled: busy, onSelect: props.onRecovery },
+    { id: "more-stash", label: "Stash (Ctrl+Shift+S)", icon: "stash", disabled: busy, onSelect: props.onStash },
+    { id: "more-tags", label: "标签 (Ctrl+Shift+T)", icon: "tag", disabled: busy, onSelect: props.onTags },
+    { id: "more-submodules", label: "子模块 (Ctrl+Shift+M)", icon: "folder", disabled: busy, onSelect: props.onSubmodules },
+  ];
+
   return (
     <div className="toolbar">
       <div className="toolbar-group toolbar-menu-group">
-        <MenuButton icon="repository" label="Repository" open={!!repositoryMenu} buttonRef={repositoryButton} onClick={() => toggleMenu(repositoryMenu, setRepositoryMenu, repositoryButton.current)} />
-        <MenuButton icon="navigate" label="Navigate" open={!!navigateMenu} buttonRef={navigateButton} onClick={() => toggleMenu(navigateMenu, setNavigateMenu, navigateButton.current)} />
-        <MenuButton icon="view" label="View" open={!!viewMenu} buttonRef={viewButton} onClick={() => toggleMenu(viewMenu, setViewMenu, viewButton.current)} />
-        <MenuButton icon="commands" label="Commands" open={!!commandsMenu} buttonRef={commandsButton} onClick={() => toggleMenu(commandsMenu, setCommandsMenu, commandsButton.current)} />
+        <MenuButton icon="repository" label="仓库" open={!!repositoryMenu} buttonRef={repositoryButton} onClick={() => toggleMenu(repositoryMenu, setRepositoryMenu, repositoryButton.current)} />
+        <MenuButton icon="navigate" label="导航" open={!!navigateMenu} buttonRef={navigateButton} onClick={() => toggleMenu(navigateMenu, setNavigateMenu, navigateButton.current)} />
+        <MenuButton icon="view" label="视图" open={!!viewMenu} buttonRef={viewButton} onClick={() => toggleMenu(viewMenu, setViewMenu, viewButton.current)} />
+        <MenuButton icon="commands" label="命令" open={!!commandsMenu} buttonRef={commandsButton} onClick={() => toggleMenu(commandsMenu, setCommandsMenu, commandsButton.current)} />
       </div>
       <div className="toolbar-separator" />
       <div className="toolbar-group">
@@ -274,10 +283,10 @@ export default function Toolbar(props: Props) {
       {props.workspace === "history" && <>
         <ToolButton icon="compare" title="创建提交 / 分支对比" disabled={busy} onClick={props.onCompare} />
         {props.compareBase && <button type="button" className="compare-base-chip" title="当前对比基准；点击清除" onClick={props.onClearCompareBase}>基准 {props.compareBase.slice(0, 7)}<Icon name="close" size={11} /></button>}
-        <div className="filter-box"><Icon name="search" /><input className="revision-filter" aria-label="过滤提交" placeholder="过滤提交… (Ctrl+F)" value={filter} onChange={(e) => props.onFilter(e.target.value)} />{filter && <button aria-label="清除过滤" onClick={() => props.onFilter("")}><Icon name="close" size={12} /></button>}</div>
+        <div className="filter-box"><Icon name="search" /><input className="revision-filter" aria-label="过滤提交" placeholder="过滤提交… (Ctrl+F)" value={filter} onChange={(e) => props.onFilter(e.target.value)} />{filter && <button type="button" className="filter-clear" aria-label="清除过滤" title="清除过滤" onClick={() => props.onFilter("")}><Icon name="close" size={12} /></button>}</div>
         <ToolButton icon="search" title="高级提交与代码搜索 (Ctrl+Shift+H)" onClick={props.onSearch} />
+        <span className="revision-count" title="当前提交数量">{revisionCount.toLocaleString()} 条</span>
       </>}
-      <span className="revision-count" title="当前提交数量">{revisionCount.toLocaleString()} 条</span>
       <ToolButton icon="settings" title="设置与快捷键 (Ctrl+,)" onClick={props.onSettings} />
       <div className="toolbar-overflow">
         <ToolButton icon="history" title="恢复历史：HEAD 备份与 reflog" disabled={busy} onClick={props.onRecovery} />
@@ -285,11 +294,19 @@ export default function Toolbar(props: Props) {
         <ToolButton icon="tag" title="标签 (Ctrl+Shift+T)" disabled={busy} onClick={props.onTags} />
         <ToolButton icon="folder" title="子模块 (Ctrl+Shift+M)" disabled={busy} onClick={props.onSubmodules} />
       </div>
-      {repositoryMenu && <ContextMenu x={repositoryMenu.x} y={repositoryMenu.y} onClose={() => setRepositoryMenu(null)} ariaLabel="Repository" items={repositoryItems} />}
-      {navigateMenu && <ContextMenu x={navigateMenu.x} y={navigateMenu.y} onClose={() => setNavigateMenu(null)} ariaLabel="Navigate" items={navigateItems} />}
-      {viewMenu && <ContextMenu x={viewMenu.x} y={viewMenu.y} onClose={() => setViewMenu(null)} ariaLabel="View" items={viewItems} />}
-      {commandsMenu && <ContextMenu x={commandsMenu.x} y={commandsMenu.y} onClose={() => setCommandsMenu(null)} ariaLabel="Commands" items={commandItems} />}
+      <div className="toolbar-more">
+        <button ref={moreButton} type="button" className="tool-button" title="更多操作" aria-label="更多操作" aria-haspopup="menu" aria-expanded={!!moreMenu}
+          onPointerDown={(event) => { if (moreMenu) event.stopPropagation(); }}
+          onClick={() => { if (moreMenu) setMoreMenu(null); else openMenu(moreButton.current, setMoreMenu); }}>
+          <Icon name="more" />
+        </button>
+      </div>
+      {repositoryMenu && <ContextMenu x={repositoryMenu.x} y={repositoryMenu.y} onClose={() => setRepositoryMenu(null)} ariaLabel="仓库" items={repositoryItems} />}
+      {navigateMenu && <ContextMenu x={navigateMenu.x} y={navigateMenu.y} onClose={() => setNavigateMenu(null)} ariaLabel="导航" items={navigateItems} />}
+      {viewMenu && <ContextMenu x={viewMenu.x} y={viewMenu.y} onClose={() => setViewMenu(null)} ariaLabel="视图" items={viewItems} />}
+      {commandsMenu && <ContextMenu x={commandsMenu.x} y={commandsMenu.y} onClose={() => setCommandsMenu(null)} ariaLabel="命令" items={commandItems} />}
       {branchMenu && <ContextMenu x={branchMenu.x} y={branchMenu.y} onClose={() => setBranchMenu(null)} ariaLabel="切换分支" items={branchItems} />}
+      {moreMenu && <ContextMenu x={moreMenu.x} y={moreMenu.y} onClose={() => setMoreMenu(null)} ariaLabel="更多操作" items={moreItems} />}
     </div>
   );
 }

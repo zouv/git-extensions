@@ -107,7 +107,7 @@ export default function RepoGroupsDialog(props: RepoGroupsDialogProps) {
   const openRecord = (path: string) => void run(async () => {
     if (await propsRef.current.onOpen(path)) {
       setLocalErrors((old) => { const next = { ...old }; delete next[path]; return next; });
-    } else setLocalErrors((old) => ({ ...old, [path]: "打开失败。请重新定位仓库目录，或移除记录。" }));
+    } else setLocalErrors((old) => ({ ...old, [path]: "打开失败。请重新定位仓库目录，或从列表中移除。" }));
   }, path);
   const relocateRecord = (path: string) => void run(async () => {
     await propsRef.current.onRelocate(path);
@@ -135,7 +135,7 @@ export default function RepoGroupsDialog(props: RepoGroupsDialogProps) {
       if (!groupById(current, editor.id)) { setMessage("分组已不存在，请取消编辑。"); return; }
       next = renameGroup(current, editor.id, editor.value);
     } else {
-      if (!propsRef.current.records.some((record) => record.path === editor.path)) { setMessage("仓库记录已不存在，请取消编辑。"); return; }
+      if (!propsRef.current.records.some((record) => record.path === editor.path)) { setMessage("仓库已不存在，请取消编辑。"); return; }
       next = setRepoAlias(current, editor.path, editor.value);
     }
     if (editor.kind !== "alias" && (next === current || !editor.value.trim())) {
@@ -160,7 +160,7 @@ export default function RepoGroupsDialog(props: RepoGroupsDialogProps) {
     const currentGroup = groupById(configRef.current, id);
     if (!currentGroup || id === DEFAULT_GROUP_ID) return;
     const count = reposInGroup(configRef.current, propsRef.current.records, id).length;
-    const ok = await confirm({ title: `删除分组 ${currentGroup.name}？`, body: <p>组内 {count} 条仓库记录将回落到未分组（Default）。记录、别名和打开的页签都会保留，不会删除磁盘文件。</p>, confirmLabel: "删除分组", danger: true });
+    const ok = await confirm({ title: `删除分组 ${currentGroup.name}？`, body: <p>组内 {count} 个仓库将回到未分组（Default）。仓库、别名和打开的页签都会保留，不会删除磁盘文件。</p>, confirmLabel: "删除分组", danger: true });
     if (!ok || propsRef.current.busy) return;
     propsRef.current.onChange(deleteGroup(configRef.current, id));
     if (groupId === id) chooseGroup(DEFAULT_GROUP_ID);
@@ -194,9 +194,9 @@ export default function RepoGroupsDialog(props: RepoGroupsDialogProps) {
       { id: "open", label: openPaths.has(path) ? "激活仓库" : "打开仓库", disabled: locked, onSelect: () => openRecord(path) },
       { id: "alias", label: "编辑显示别名…", disabled: locked || !target, onSelect: () => void beginEditor({ kind: "alias", path, initial: config.aliases[path] ?? "", value: config.aliases[path] ?? "" }) },
       { id: "relocate", label: "重新定位目录…", disabled: locked, onSelect: () => relocateRecord(path) },
-      { id: "close", label: "关闭页签（保留记录）", disabled: locked || !openPaths.has(path), onSelect: () => void run(() => propsRef.current.onCloseRepos([path])) },
+      { id: "close", label: "关闭页签（保留在列表中）", disabled: locked || !openPaths.has(path), onSelect: () => void run(() => propsRef.current.onCloseRepos([path])) },
       { id: "separator", separator: true },
-      { id: "remove", label: "移除记录…（不删磁盘文件）", danger: true, disabled: locked, onSelect: () => void run(() => propsRef.current.onRemove([path])) },
+      { id: "remove", label: "从列表移除…（不删磁盘文件）", danger: true, disabled: locked, onSelect: () => void run(() => propsRef.current.onRemove([path])) },
     ];
   })() : [];
 
@@ -205,11 +205,11 @@ export default function RepoGroupsDialog(props: RepoGroupsDialogProps) {
       className="repository-manager-dialog" footer={<><span className="repository-manager-footer-hint">方向键浏览 · 空格勾选 · Enter / 双击打开 · Shift+F10 操作</span><button disabled={locked} onClick={close}>关闭</button></>}>
       <div className="repository-manager-layout">
         <aside className="repository-manager-sidebar" aria-label="仓库分组">
-          <div className="repository-manager-sidebar-heading">记录与分组</div>
+          <div className="repository-manager-sidebar-heading">仓库与分组</div>
           <div className="repository-manager-groups" role="navigation" aria-label="本地分组筛选">
             {navIds.map((id) => {
               const item = groupById(config, id);
-              const name = id === ALL_RECORDS ? "所有记录" : id === DEFAULT_GROUP_ID ? "未分组" : item?.name ?? "";
+              const name = id === ALL_RECORDS ? "全部仓库" : id === DEFAULT_GROUP_ID ? "未分组" : item?.name ?? "";
               const count = id === ALL_RECORDS ? records.length : reposInGroup(config, records, id).length;
               return <button key={id} ref={(element) => { if (element) groupButtons.current.set(id, element); else groupButtons.current.delete(id); }}
                 className={`repository-manager-group${groupId === id ? " selected" : ""}`} aria-current={groupId === id ? "true" : undefined}
@@ -229,12 +229,12 @@ export default function RepoGroupsDialog(props: RepoGroupsDialogProps) {
               </button>;
             })}
           </div>
-          <p className="repository-manager-local-note">这里的选择只筛选记录，不改变顶部视图。</p>
+          <p className="repository-manager-local-note">这里只筛选下方列表，不影响顶部页签范围。</p>
         </aside>
         <section className="repository-manager-members" aria-label="成员管理">
           <div className="repository-manager-member-heading">
-            <h4>{groupId === ALL_RECORDS ? "所有记录" : groupId === DEFAULT_GROUP_ID ? "未分组" : group?.name}</h4>
-            <span className="muted">{visible.length} / {members.length}</span>
+            <h4>{groupId === ALL_RECORDS ? "全部仓库" : groupId === DEFAULT_GROUP_ID ? "未分组" : group?.name}</h4>
+            <span className="muted">显示 {visible.length} / 共 {members.length}</span>
             <button disabled={locked} aria-haspopup="menu" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMenu({ kind: "group", id: groupId, x: rect.left, y: rect.bottom + 4 }); }}>分组操作 ▾</button>
             <button disabled={locked} onClick={() => void run(() => propsRef.current.onAdd(groupId === ALL_RECORDS ? DEFAULT_GROUP_ID : groupId))}>添加仓库…</button>
           </div>
@@ -245,19 +245,19 @@ export default function RepoGroupsDialog(props: RepoGroupsDialogProps) {
           <div className="repository-manager-selection-bar">
             <label><input type="checkbox" disabled={locked || visible.length === 0} checked={visible.length > 0 && selectedPaths.length === visible.length}
               ref={(element) => { if (element) element.indeterminate = selectedPaths.length > 0 && selectedPaths.length < visible.length; }}
-              onChange={(event) => event.target.checked ? selectAll() : setSelected(new Set())} />全选结果</label>
+              onChange={(event) => event.target.checked ? selectAll() : setSelected(new Set())} />全选当前结果</label>
             <span className="muted">已选 {selectedPaths.length}</span>
             <select aria-label="移动到分组" value={moveTo} disabled={locked} onChange={(event) => setMoveTo(event.target.value)}>{config.groups.map((item) => <option key={item.id} value={item.id}>{item.id === DEFAULT_GROUP_ID ? "未分组" : item.name}</option>)}</select>
             <button disabled={locked || selectedPaths.length === 0} onClick={moveSelected}>移动归组</button>
             <button disabled={locked || selectedOpened.length === 0} onClick={() => void run(() => propsRef.current.onCloseRepos(selectedOpened))}>关闭已选页签</button>
-            <button className="danger-button" disabled={locked || selectedPaths.length === 0} onClick={() => void run(() => propsRef.current.onRemove(selectedPaths))}>移除已选记录…</button>
+            <button className="danger-button" disabled={locked || selectedPaths.length === 0} onClick={() => void run(() => propsRef.current.onRemove(selectedPaths))}>从列表移除…</button>
           </div>
           <RepositoryRecordList config={config} records={visible} repos={props.repos} activePath={props.activePath} meta={props.meta} errors={errors} busy={locked}
             focusedPath={focusedPath} onFocusPath={setFocusedPath} onOpen={openRecord} selectedPaths={selected}
             onToggleSelection={toggleSelection} onSelectAll={selectAll} onContextMenu={(path, x, y) => setMenu({ kind: "record", path, x, y })}
-            emptyMessage={records.length === 0 ? "还没有仓库记录，点击“添加仓库”开始。" : "当前分组或筛选下没有仓库记录。"} />
+            emptyMessage={records.length === 0 ? "还没有仓库，点击“添加仓库”开始。" : "当前分组或筛选下没有仓库。"} />
           <div className="repository-manager-record-actions">
-            <span className="repository-manager-focused-name muted" title={focused?.path}>{focused ? displayRepoName(config, focused) : "选中记录以操作"}</span>
+            <span className="repository-manager-focused-name muted" title={focused?.path}>{focused ? displayRepoName(config, focused) : "选中仓库以操作"}</span>
             <button disabled={locked || !focused} onClick={() => focused && openRecord(focused.path)}>{focused && openPaths.has(focused.path) ? "激活" : "打开"}</button>
             <button disabled={locked || !focused} onClick={() => focused && void beginEditor({ kind: "alias", path: focused.path, initial: config.aliases[focused.path] ?? "", value: config.aliases[focused.path] ?? "" })}>编辑别名…</button>
             <button disabled={locked || !focused} onClick={() => focused && relocateRecord(focused.path)}>重新定位…</button>
@@ -269,11 +269,11 @@ export default function RepoGroupsDialog(props: RepoGroupsDialogProps) {
               placeholder={editor.kind === "alias" ? "留空恢复仓库原名" : "分组名称"} /><button type="submit" className="primary" disabled={locked || (editor.kind !== "alias" && !editor.value.trim())}>保存并立即生效</button><button type="button" disabled={locked} onClick={() => void cancelEditor()}>取消编辑</button></div>
             <span className="muted">{editor.kind === "alias" ? "别名仅影响本地显示，不更改仓库目录。输入在点击保存后立即生效。" : "输入在点击保存后立即生效。"}</span>
           </form>}
-          <p className="repository-manager-save-note">分类移动、颜色与固定立即保存；分组名称和别名输入需点击保存。关闭页签保留记录；移除记录不删除磁盘文件。</p>
+          <p className="repository-manager-save-note">分类移动、颜色与固定立即保存；分组名称和别名输入需点击保存。关闭页签后仓库仍保留在列表中；从列表移除不会删除磁盘文件。</p>
           {message && <div className="repository-manager-inline-error" role="alert">{message}</div>}
         </section>
       </div>
     </Dialog>
-    {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} ariaLabel={menu.kind === "group" ? "分组标题操作" : "仓库记录操作"} onClose={() => setMenu(null)} />}
+    {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} ariaLabel={menu.kind === "group" ? "分组标题操作" : "仓库操作"} onClose={() => setMenu(null)} />}
   </>;
 }

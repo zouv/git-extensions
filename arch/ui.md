@@ -189,3 +189,9 @@
 - **页签分组 / 拖拽 / 启动恢复**：Default 内部 ID 不变、界面为未分组，不可改名 / 删除，但可以固定与取消固定；view 与持久记录 / 会话分离。Pin 图标用完整组色表示选中、未选中灰化；指针排序沿用页签的 6px 阈值 / 插入线 / Esc 取消 / 边缘滚动，Alt+1…9 与 Alt+0 独占切组，Ctrl+1…9 按当前可见页签切换。页签 6px 阈值、条外 / Esc / 失捕取消；恢复缺失与 `[]` 不等价，`sessionRestored` 前禁写打开列表，StrictMode 用 ref 防双跑；路径迁移必须同步活动目标。
 - **组记忆与确认竞态**：切组时按记忆挑页签，日常 effect 只纠正不可见活动项，不能把手动激活又拉回旧记忆。批量关闭 / 移除记录用同步门闩及逐路径 dirty 快照，确认等待后必须再复核写状态。
 
+- **窄窗布局依赖容器查询与宽度上限**：提交图以 `.workspace-main` 为命名容器隐藏作者 / 日期 / SHA 列，`.rev-refs` 保持固定宽度以对齐标题；检查器与 changes 列表用 `max-width: calc(100% - 380px/340px)` 给核心视图留空间。不要恢复 `.revision-content min-width:500` 或固定 400 / 420 面板宽度；否则 900–1100px 窗口会再次裁切。
+- **提交框标题、Amend 与字数统计必须流式排列**：`.commit-title-count` 不能恢复绝对定位覆盖标题输入框；标题 / 正文都处理 Ctrl+Enter 提交。
+- **DiffView 的 compact / showStats 分离**：检查器差异页传 `compact`（文件下拉选择器、隐藏标准路径头），`showFileHeader=false` 时仍可用 `showStats` 显示 +/−；Inline 行号在 `renderContent` 渲染，不要只给 Split 加行号。
+- **工具栏响应式不能只隐藏不补位**：四菜单文字标签在 1280px 以下收起；1100px 以下 `.toolbar-overflow` 必须换成真实 `.toolbar-more` 菜单，否则恢复历史 / Stash / 标签 / 子模块入口会静默消失。
+- **查找弹窗单击只聚焦**：`RepositoryRecordList` 用 Enter / 双击打开，不要再传 `openOnClick`；否则鼠标用户无法先选中再重新定位 / 从列表移除。
+- **术语与快捷键帮助**：Git 命令保留英文，应用概念统一中文；快捷键说明集中在 `commands.ts::SHORTCUT_HELP` 的分组数组，新增快捷键时同步。

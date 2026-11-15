@@ -126,19 +126,19 @@ export default function SettingsDialog({ settings, onSave, onApply, onClose, exp
         </>}
         {category === "interface" && <>
           <h4>界面</h4>
-          <label className="setting-row"><span>diff 语法高亮</span><input type="checkbox" checked={draft.highlightEnabled} disabled={saving} onChange={(e) => update("highlightEnabled", e.target.checked)} /></label>
+          <label className="setting-row"><span>Diff 语法高亮</span><input type="checkbox" checked={draft.highlightEnabled} disabled={saving} onChange={(e) => update("highlightEnabled", e.target.checked)} /></label>
           <label className="setting-row"><span>新仓库默认显示导航</span><input type="checkbox" checked={draft.showLeftPanel} disabled={saving} onChange={(e) => update("showLeftPanel", e.target.checked)} /></label>
           <div className="settings-note">面板尺寸与位置按仓库独立保存。</div>
         </>}
         {category === "system" && <>
-          <h4>Shell extension</h4>
+          <h4>资源管理器集成</h4>
           <fieldset className="shell-settings-section" disabled={saving || !explorerIntegrationSupported}>
-            <legend>Windows Explorer integration</legend>
+            <legend>Windows 资源管理器集成</legend>
             <label className="setting-row"><span>启用资源管理器 Git Extensions 右键菜单</span><input type="checkbox" checked={draft.explorerContextMenuEnabled} onChange={(e) => update("explorerContextMenuEnabled", e.target.checked)} /></label>
             <p className="settings-description">为目录、目录背景和文件添加菜单，仅对当前用户生效，无需管理员权限。文件菜单不包含 Clone / Create new repository；Windows 11 中位于“显示更多选项”。</p>
           </fieldset>
           <fieldset className="shell-settings-section" disabled={saving || !explorerIntegrationSupported}>
-            <legend>Cascaded context menu</legend>
+            <legend>级联右键菜单</legend>
             <label className="shell-always-row"><input type="checkbox" checked={draft.explorerAlwaysShowAllCommands} onChange={(e) => update("explorerAlwaysShowAllCommands", e.target.checked)} /><span>始终显示全部命令</span></label>
             <div className="settings-note">勾选后，未隐藏的命令全部展开到顶级，不再放入 Git Extensions 二级菜单。</div>
             <div className="shell-level-counts">
@@ -173,8 +173,8 @@ export default function SettingsDialog({ settings, onSave, onApply, onClose, exp
                   </div>)}
                 </div>)}
               </div>
-              <div className="shell-menu-preview" aria-label="Context menu preview">
-                <h5>Context menu preview</h5>
+              <div className="shell-menu-preview" aria-label="右键菜单预览">
+                <h5>右键菜单预览</h5>
                 {!draft.explorerContextMenuEnabled && <div className="settings-note">当前未启用，以下为保存并启用后的预览。</div>}
                 {(preview.groups.length > 0 || preview.otherGroups.length > 0) && <div>Git Extensions &gt;
                   <div className="shell-menu-preview-children">
@@ -184,7 +184,7 @@ export default function SettingsDialog({ settings, onSave, onApply, onClose, exp
                     </div>)}
                     {preview.otherGroups.length > 0 && <div>
                       <div className="shell-menu-preview-separator" />
-                      <div>Others &gt;
+                      <div>其他 (Others) &gt;
                         <div className="shell-menu-preview-children">
                           {preview.otherGroups.map((group, groupIndex) => <div key={group.id}>
                             {groupIndex > 0 && <div className="shell-menu-preview-separator" />}
@@ -198,18 +198,21 @@ export default function SettingsDialog({ settings, onSave, onApply, onClose, exp
                 {preview.topLevel.length > 0 && <>
                   <div className="shell-menu-preview-separator" />
                   <div className="settings-note">一级（紧贴 Git Extensions 下方，按设置顺序）</div>
-                  {preview.topLevel.map((spec) => <div key={spec.action}>GitExt {spec.label}</div>)}
+                  {preview.topLevel.map((spec) => <div key={spec.action}>Git Extensions {spec.label}</div>)}
                 </>}
                 {preview.topLevel.length === 0 && preview.groups.length === 0 && preview.otherGroups.length === 0 && <div className="settings-note">（无菜单项）</div>}
               </div>
             </div>
-            <div className="settings-note">菜单位置：一级 = 系统右键菜单（紧贴 Git Extensions 下方）；二级 = Git Extensions 子菜单；三级 = Others 子菜单；隐藏 = 不显示。Windows 对整棵级联菜单（Git Extensions 子菜单 + Others 子菜单）合计最多渲染 16 个命令，超出部分会被系统静默丢弃；设置页按目录 / 文件上下文分别提示，不会自动移动其它命令。一级是系统右键菜单，不受此限制。便携版移动程序位置后，请重新启用菜单。</div>
+            <div className="settings-note">菜单位置：一级 = 系统右键菜单（紧贴 Git Extensions 下方）；二级 = Git Extensions 子菜单；三级 = 其他 (Others) 子菜单；隐藏 = 不显示。Windows 对整棵级联菜单（Git Extensions 子菜单 + 其他子菜单）合计最多渲染 16 个命令，超出部分会被系统静默丢弃；设置页按目录 / 文件上下文分别提示，不会自动移动其它命令。一级是系统右键菜单，不受此限制。便携版移动程序位置后，请重新启用菜单。</div>
           </fieldset>
           {!explorerIntegrationSupported && <div className="settings-note" role="status">当前操作系统不支持资源管理器右键菜单集成。</div>}
         </>}
         {category === "shortcuts" && <div className="shortcut-help">
           <h4>快捷键</h4>
-          {SHORTCUT_HELP.map((item) => <div key={item.keys}><kbd>{item.keys}</kbd>{item.text}</div>)}
+          {SHORTCUT_HELP.map((group) => <section className="shortcut-group" key={group.title}>
+            <h5>{group.title}</h5>
+            {group.items.map((item) => <div className="shortcut-row" key={item.keys}><kbd>{item.keys}</kbd><span>{item.text}</span></div>)}
+          </section>)}
         </div>}
       </section>
     </div>

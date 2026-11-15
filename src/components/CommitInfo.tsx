@@ -7,6 +7,7 @@ interface Props {
   loading: boolean;
   onCopy?: (text: string, label: string) => void;
   onFilterRef?: (name: string) => void;
+  onOpenCommit?: (oid: string) => void;
 }
 
 function RefButtons({ names, onFilterRef }: { names: string[]; onFilterRef?: (name: string) => void }) {
@@ -15,7 +16,7 @@ function RefButtons({ names, onFilterRef }: { names: string[]; onFilterRef?: (na
     : <span key={name}>{name}</span>)}</span>;
 }
 
-export default function CommitInfo({ commit, contained, loading, onCopy, onFilterRef }: Props) {
+export default function CommitInfo({ commit, contained, loading, onCopy, onFilterRef, onOpenCommit }: Props) {
   if (loading) return <div className="panel-hint">提交信息加载中…</div>;
   if (!commit) return <div className="panel-hint">选择一个提交查看详情</div>;
   return (
@@ -34,17 +35,19 @@ export default function CommitInfo({ commit, contained, loading, onCopy, onFilte
         {commit.parents.length > 0 && (
           <div>
             <span className="meta-label">父提交</span>
-            {commit.parents.map((p) => <code key={p} className="parent-oid" title={p}>{p.slice(0, 7)}</code>)}
+            {commit.parents.map((p) => onOpenCommit
+              ? <button type="button" className="parent-oid ref-link" key={p} title={p} onClick={() => onOpenCommit(p)}>{p.slice(0, 7)}</button>
+              : <code key={p} className="parent-oid" title={p}>{p.slice(0, 7)}</code>)}
           </div>
         )}
         {contained?.describe && (
           <div><span className="meta-label">最近标签</span>{contained.describe}</div>
         )}
         {contained && contained.branches.length > 0 && (
-          <div><span className="meta-label">包含于</span><RefButtons names={contained.branches} onFilterRef={onFilterRef} /></div>
+          <div><span className="meta-label">包含于分支</span><RefButtons names={contained.branches} onFilterRef={onFilterRef} /></div>
         )}
         {contained && contained.tags.length > 0 && (
-          <div><span className="meta-label">标签</span><RefButtons names={contained.tags} onFilterRef={onFilterRef} /></div>
+          <div><span className="meta-label">包含于标签</span><RefButtons names={contained.tags} onFilterRef={onFilterRef} /></div>
         )}
       </div>
       <pre className="commit-message">{commit.message}</pre>

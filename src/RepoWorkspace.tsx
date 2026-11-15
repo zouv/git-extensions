@@ -1002,7 +1002,7 @@ export default function RepoWorkspace(props: Props) {
       { id: `repo:${repo.path}:branches`, title: "分支管理…", group: "Git 操作", shortcut: "Ctrl+Shift+B", enabled: !busy, run: () => { setBranchStart(undefined); setBranchSelected(undefined); setBranchMode("checkout"); setShowBranches(true); } },
       { id: `repo:${repo.path}:merge`, title: "合并分支到当前 HEAD…", group: "Git 操作", keywords: ["merge", "squash"], enabled: !busy, run: () => setMergeTarget("") },
       { id: `repo:${repo.path}:remotes`, title: "远程仓库管理 (Remotes)…", group: "Git 操作", keywords: ["remote", "origin", "upstream"], enabled: !busy, run: () => setShowRemotes(true) },
-      { id: `repo:${repo.path}:worktrees`, title: "Worktree 多工作树管理…", group: "Git 操作", keywords: ["worktree"], enabled: !busy, run: () => setShowWorktrees(true) },
+      { id: `repo:${repo.path}:worktrees`, title: "工作树管理…", group: "Git 操作", keywords: ["worktree"], enabled: !busy, run: () => setShowWorktrees(true) },
       { id: `repo:${repo.path}:pull-options`, title: "Pull 选项（Rebase / Autostash）…", group: "Git 操作", keywords: ["pull", "rebase", "autostash"], enabled: !busy, run: () => setShowPullOptions(true) },
       { id: `repo:${repo.path}:search`, title: "高级搜索（提交历史 / 代码全文）…", group: "当前仓库", shortcut: "Ctrl+Shift+H", keywords: ["search", "grep", "author"], run: () => setShowSearch(true) },
       { id: `repo:${repo.path}:command-log`, title: "Git 命令执行日志…", group: "当前仓库", shortcut: "Ctrl+Shift+G", keywords: ["log", "command", "cli"], run: () => setShowCommandLog(true) },
@@ -1098,7 +1098,7 @@ export default function RepoWorkspace(props: Props) {
                 <button className="icon-button" title={maximized ? "还原 (Esc)" : "最大化"} aria-label={maximized ? "还原检查器" : "最大化检查器"} onClick={() => setMaximized(!maximized)}>{maximized ? "↙" : "↗"}</button>
                 <button className="icon-button" title="关闭检查器" aria-label="关闭检查器" onClick={() => { setMaximized(false); setLayout((prev) => ({ ...prev, showInspector: false })); }}><Icon name="close" /></button>
               </div>
-              <div className="inspector-content" role="tabpanel" id={`${inspectorId}-panel`} aria-labelledby={`${inspectorId}-${inspectorTab}-tab`}>{commitError ? <InlineError message={commitError} /> : inspectorTab === "details" ? <CommitInfo commit={commit} contained={contained} loading={detailLoading} onCopy={(text, label) => { void navigator.clipboard?.writeText(text).then(() => setMessage(`已复制${label}`)); }} onFilterRef={(name) => { setLeftRef(name); setWorkspace("history"); }} /> : <DiffView files={commitDiff} loadFile={loadCommitFile} loading={detailLoading} highlightEnabled={settings.highlightEnabled} onFileAction={onCommitFileAction} prefKey={repo.path} />}</div>
+              <div className="inspector-content" role="tabpanel" id={`${inspectorId}-panel`} aria-labelledby={`${inspectorId}-${inspectorTab}-tab`}>{commitError ? <InlineError message={commitError} /> : inspectorTab === "details" ? <CommitInfo commit={commit} contained={contained} loading={detailLoading} onCopy={(text, label) => { void navigator.clipboard?.writeText(text).then(() => setMessage(`已复制${label}`)); }} onFilterRef={(name) => { setLeftRef(name); setWorkspace("history"); }} onOpenCommit={(oid) => goToRevision(oid, "父提交")} /> : <DiffView files={commitDiff} loadFile={loadCommitFile} loading={detailLoading} highlightEnabled={settings.highlightEnabled} onFileAction={onCommitFileAction} prefKey={repo.path} compact />}</div>
             </section>
           </>}
         </div>
@@ -1108,7 +1108,7 @@ export default function RepoWorkspace(props: Props) {
         <span className="status-message" role="status" aria-live="polite">
           <button type="button" className={`status-message-button${busy ? " busy" : ""}`} title={message} onClick={() => setStatusDetailsOpen(true)}>{busy && <span className="spinner" />}<span className="status-message-text">{message}</span></button>
         </span>
-        <span>{filteredRevisions.length.toLocaleString()} 条</span>
+        <span>{task ? "任务视图" : workspace === "changes" ? `${changeCount} 个变更` : selectedRevision ? `已选 ${selectedRevision.shortId}` : "未选择提交"}</span>
       </div>
       {resetTarget && <ResetDialog repoPath={repo.path} target={resetTarget} onClose={() => setResetTarget(null)} onChanged={refreshAll} onNotify={props.onNotify} />}
       {showRecovery && <RecoveryDialog repoPath={repo.path} onClose={() => setShowRecovery(false)} onRestore={(oid) => { setShowRecovery(false); setResetTarget(oid); }} />}

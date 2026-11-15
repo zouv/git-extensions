@@ -10,10 +10,10 @@ export interface ExplorerMenuGroupSpec {
 }
 
 export const EXPLORER_MENU_GROUPS: readonly ExplorerMenuGroupSpec[] = [
-  { id: "repository", label: "Repository & sync" },
-  { id: "branches", label: "Branches & Repos" },
-  { id: "files", label: "Files & history" },
-  { id: "settings", label: "Settings" },
+  { id: "repository", label: "仓库与同步" },
+  { id: "branches", label: "分支与仓库" },
+  { id: "files", label: "文件与历史" },
+  { id: "settings", label: "设置" },
 ];
 
 /** 注册表级联菜单整棵树（含 Others 子项）最多渲染 16 个命令；只提示，不自动调整用户配置。 */

@@ -309,13 +309,15 @@ export default function ChangesPanel(props: Props) {
     <div className="changes-panel">
       <div className="changes-left" style={{ width: props.width }}>
         {props.error && <InlineError message={props.error} />}
-        <div className="changes-filter"><Icon name="search" size={14} /><input aria-label="过滤变更文件" placeholder="过滤文件…" value={filter} onChange={(e) => setFilter(e.target.value)} /></div>
+        <div className="changes-filter"><Icon name="search" size={14} /><input aria-label="过滤变更文件" placeholder="过滤文件…" value={filter} onChange={(e) => setFilter(e.target.value)} />{filter && <button type="button" className="filter-clear" aria-label="清除文件过滤" title="清除文件过滤" onClick={() => setFilter("")}><Icon name="close" size={12} /></button>}</div>
         {props.conflictCount > 0 && <button className="conflict-banner" onClick={props.onOpenConflict}><Icon name="conflict" /><span>{props.conflictCount} 个冲突待解决</span><strong>进入解决 →</strong></button>}
         {renderList("unstaged", status.unstaged)}
         {renderList("staged", status.staged)}
         <div className="commit-box">
           {commitError && <InlineError message={commitError} />}
-          <input ref={commitTitleRef} aria-label="提交标题" placeholder="提交标题（必填）" disabled={busy} value={title} onChange={(e) => { setTitle(e.target.value); setCommitError(""); }} />
+          <input ref={commitTitleRef} aria-label="提交标题" placeholder="提交标题（必填）" disabled={busy} value={title} onChange={(e) => { setTitle(e.target.value); setCommitError(""); }} onKeyDown={(e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doCommit(); }
+          }} />
           <div className="commit-title-count">
             <label className="amend-checkbox" title="修正上一次提交（git commit --amend）">
               <input type="checkbox" disabled={busy} checked={amend} onChange={(e) => void toggleAmend(e.target.checked)} />
@@ -336,6 +338,7 @@ export default function ChangesPanel(props: Props) {
           highlightEnabled={props.highlightEnabled}
           onFileAction={props.onFileAction}
           showFileHeader={false}
+          showStats
           prefKey={repoPath}
           hunkActions={preview.file.status !== "conflicted" ? {
             staged: preview.side === "staged",

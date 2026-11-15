@@ -567,7 +567,7 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       const dirty = dirtyPaths.size > 0;
       const ok = await confirm({
         title: `关闭 ${closable.length} 个仓库页签？`,
-        body: <div><p>只关闭打开会话，保留仓库记录与归属，不删除磁盘文件。{dirty && "未保存的界面草稿将被丢弃。"}</p>
+        body: <div><p>只关闭打开会话，保留仓库列表中的条目与归属，不删除磁盘文件。{dirty && "未保存的界面草稿将被丢弃。"}</p>
           <pre className="confirm-file-list">{closable.map((repo) => displayRepoName(groupsRef.current, repo)).join("\n")}</pre>
           {blocked.length > 0 && <p>{blocked.length} 个正在操作的仓库将保留。</p>}</div>,
         confirmLabel: dirty ? "丢弃草稿并关闭" : "关闭页签", danger: dirty,
@@ -711,7 +711,7 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
     try {
       const blocked = targets.filter((record) => metaRef.current[record.path]?.busy || getRepoOperation(record.path));
       if (blocked.length > 0) {
-        notify(blocked[0].path, "info", "所选仓库有操作进行中，完成后才能移除记录");
+        notify(blocked[0].path, "info", "所选仓库有操作进行中，完成后才能从列表移除");
         return;
       }
       const dirtyPaths = new Set(targets.filter((record) => metaRef.current[record.path]?.dirty).map((record) => record.path));
@@ -720,11 +720,11 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       const ok = await confirm({ title: `从列表移除 ${targets.length} 个仓库？`,
         body: <div><p>仅移除应用中的记录、归属与别名，不删除磁盘仓库。{opened.length > 0 && `同时关闭 ${opened.length} 个打开页签。`}{dirty && "未保存的界面草稿将被丢弃。"}</p>
           <pre className="confirm-file-list">{targets.map((record) => repositoryName(record, groupsRef.current)).join("\n")}</pre></div>,
-        confirmLabel: dirty ? "丢弃草稿、关闭并移除" : opened.length ? "关闭并移除记录" : "移除记录", danger: true });
+        confirmLabel: dirty ? "丢弃草稿、关闭并从列表移除" : opened.length ? "关闭并从列表移除" : "从列表移除", danger: true });
       if (!ok) return;
       if (closeBlockedPaths(targets.map((record) => record.path), metaRef.current,
         (path) => !!getRepoOperation(path), dirtyPaths).length > 0) {
-        notify("", "info", "仓库状态已变化，未移除记录，请重新确认");
+        notify("", "info", "仓库状态已变化，未从列表移除，请重新确认");
         return;
       }
       const removedPaths = targets.map((record) => record.path);
@@ -764,7 +764,7 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       const info = await api.openRepo(selected);
       const targetRecorded = recordsRef.current.some((record) => record.path === info.path);
       if (info.path !== path && targetRecorded) {
-        const ok = await confirm({ title: "合并到已有仓库记录？", body: "目标目录已在列表中。保留目标记录的归属与别名，移除旧路径记录；不会删除磁盘文件。", confirmLabel: "合并记录" });
+        const ok = await confirm({ title: "合并到列表中的已有仓库？", body: "目标目录已在列表中。保留目标仓库的归属与别名，移除旧路径条目；不会删除磁盘文件。", confirmLabel: "合并条目" });
         if (!ok) return;
       }
       const next = relocateRepositoryRecord(recordsRef.current, path, info);
@@ -945,10 +945,10 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       </div>}
       {!restoring && shownRepos.length === 0 && repoGroups.view.kind !== "all-open" && <div className="welcome-screen">
         <Icon name="group" size={42} />
-        <h1>当前范围没有打开的仓库</h1>
-        <p>选择组内成员按需打开，或添加新的仓库；切换分组不会关闭其它仓库。</p>
+        <h1>当前分组里还没有打开的仓库</h1>
+        <p>从分组中选择仓库打开，或添加新的仓库。切换分组不会关闭其它仓库。</p>
         <div className="welcome-actions">
-          <button className="primary" onClick={() => manageGroups(repoGroups.view.kind === "group" ? repoGroups.view.groupId : undefined)}><Icon name="group" />查看组内仓库</button>
+          <button className="primary" onClick={() => manageGroups(repoGroups.view.kind === "group" ? repoGroups.view.groupId : undefined)}><Icon name="group" />打开分组中的仓库…</button>
           <button onClick={() => setShowRepositorySearch(true)}><Icon name="search" />查找仓库</button>
           <button onClick={() => beginOpen()}><Icon name="plus" />打开仓库</button>
         </div>
