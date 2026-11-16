@@ -29,11 +29,21 @@ async function readVersion() {
 }
 
 async function readExeName() {
-  const cargo = await readFile(join(root, "src-tauri", "Cargo.toml"), "utf8");
-  const packageSection = /\[package\]([\s\S]*?)(?:\n\[|$)/.exec(cargo)?.[1] ?? "";
-  const match = /^\s*name\s*=\s*"([^"]+)"/m.exec(packageSection);
-  if (!match) throw new Error("Cannot read package name from src-tauri/Cargo.toml");
-  const exe = join(buildRoot, `${match[1]}.exe`);
+  // tauri build 按 mainBinaryName 重命名 cargo 产物（不含 .exe），
+  // 未配置时沿用 Cargo 包名。
+  const config = JSON.parse(
+    await readFile(join(root, "src-tauri", "tauri.conf.json"), "utf8"),
+  );
+  let name = typeof config.mainBinaryName === "string" ? config.mainBinaryName : "";
+  if (!name) {
+    const cargo = await readFile(join(root, "src-tauri", "Cargo.toml"), "utf8");
+    const packageSection = /\[package\]([\s\S]*?)(?:\n\[|$)/.exec(cargo)?.[1] ?? "";
+    const match = /^\s*name\s*=\s*"([^"]+)"/m.exec(packageSection);
+    if (!match) throw new Error("Cannot read package name from src-tauri/Cargo.toml");
+    name = match[1];
+  }
+  name = name.replace(/\.exe$/i, "");
+  const exe = join(buildRoot, `${name}.exe`);
   try {
     await stat(exe);
   } catch {
