@@ -47,6 +47,7 @@ export const EXPLORER_MENU_ACTIONS: readonly ExplorerMenuActionSpec[] = [
   { action: "add-files", label: "Add files...", group: "files", defaultPlacement: "cascade" },
   { action: "apply-patch", label: "Apply patch...", group: "files", defaultPlacement: "cascade" },
   { action: "rename", label: "Rename...", group: "files", defaultPlacement: "cascade" },
+  { action: "ignore", label: "Add to ignore...", group: "files", defaultPlacement: "cascade" },
   { action: "repository-settings", label: "Repository settings...", group: "settings", defaultPlacement: "cascade" },
   { action: "settings", label: "Settings", group: "settings", defaultPlacement: "cascade" },
 ];

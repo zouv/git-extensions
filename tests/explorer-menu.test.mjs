@@ -22,11 +22,11 @@ const setPlacements = (actions, placement) => {
 test("默认菜单保持四个顶级项和其余级联项", () => {
   const placements = defaultExplorerMenuPlacements();
   const preview = explorerMenuPreview(placements, false);
-  assert.equal(EXPLORER_MENU_ACTIONS.length, 20);
+  assert.equal(EXPLORER_MENU_ACTIONS.length, 21);
   assert.deepEqual(preview.topLevel.map((item) => item.action), ["clone", "commit", "create-repository", "open-repository"]);
-  assert.equal(preview.cascade.length, 16);
+  assert.equal(preview.cascade.length, 17);
   assert.equal(preview.others.length, 0);
-  assert.equal(explorerMenuItems(placements).length, 20);
+  assert.equal(explorerMenuItems(placements).length, 21);
 });
 
 test("级联项按使用场景分组且顶级项不重复出现", () => {
@@ -52,9 +52,9 @@ test("级联项按使用场景分组且顶级项不重复出现", () => {
 test("级别计数按上下文校验整个级联树的 16 项上限，且不自动移动命令", () => {
   const actions = EXPLORER_MENU_ACTIONS.map((item) => item.action);
   const allCascade = setPlacements(actions, "cascade");
-  // 目录上下文可用 18 项、文件上下文 10 项；全部直排时目录上下文超限。
-  assert.equal(explorerMenuLevelCounts(allCascade, false).directoryTotal, 18);
-  assert.equal(explorerMenuLevelCounts(allCascade, false).fileTotal, 10);
+  // 目录上下文可用 19 项、文件上下文 11 项；全部直排时目录上下文超限。
+  assert.equal(explorerMenuLevelCounts(allCascade, false).directoryTotal, 19);
+  assert.equal(explorerMenuLevelCounts(allCascade, false).fileTotal, 11);
   assert.equal(explorerMenuLevelCounts(allCascade, false).issues.length, 1);
 
   // 用户场景：13 个目录直排 + Others（自身 1 项）+ 3 个目录子项 = 17。
@@ -103,11 +103,11 @@ test("全部展开只处理未隐藏命令且不创建级联节点", () => {
   assert.equal(preview.cascade.length, 0);
   assert.equal(preview.others.length, 0);
   assert.equal(preview.otherGroups.length, 0);
-  assert.equal(preview.topLevel.length, 19);
+  assert.equal(preview.topLevel.length, 20);
   assert.equal(preview.topLevel.some((item) => item.action === "pull"), false);
   assert.equal(preview.topLevel.some((item) => item.action === "push"), true);
   const counts = explorerMenuLevelCounts(placements, true);
-  assert.equal(counts.level1, 19);
+  assert.equal(counts.level1, 20);
   assert.equal(counts.issues.length, 0);
 });
 

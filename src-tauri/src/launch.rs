@@ -32,10 +32,11 @@ pub enum ExplorerAction {
     RepositorySettings,
     ViewFiles,
     Rename,
+    Ignore,
 }
 
 impl ExplorerAction {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::Clone,
         Self::CreateRepository,
         Self::Commit,
@@ -56,6 +57,7 @@ impl ExplorerAction {
         Self::RepositorySettings,
         Self::ViewFiles,
         Self::Rename,
+        Self::Ignore,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -80,6 +82,7 @@ impl ExplorerAction {
             Self::RepositorySettings => "repository-settings",
             Self::ViewFiles => "view-files",
             Self::Rename => "rename",
+            Self::Ignore => "ignore",
         }
     }
 
@@ -115,6 +118,7 @@ impl ExplorerAction {
             Self::RepositorySettings => "Repository settings",
             Self::ViewFiles => "View files",
             Self::Rename => "Rename",
+            Self::Ignore => "Add to ignore",
         }
     }
 }

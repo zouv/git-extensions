@@ -67,6 +67,9 @@ impl Context {
             // 重命名作用于选中的文件或目录；目录背景菜单里的 %V 是当前
             // 文件夹本身，在那里提供重命名容易误操作，故只在一级上下文出现。
             ExplorerAction::Rename => !self.background,
+            // Add to ignore 作用于选中的文件或目录；目录背景的 %V 是当前
+            // 文件夹本身，那里选择的“目标”含义不明确，故只在一级上下文出现。
+            ExplorerAction::Ignore => !self.background,
         }
     }
 }
@@ -133,6 +136,7 @@ const GROUPS: [GroupSpec; 4] = [
             ExplorerAction::AddFiles,
             ExplorerAction::ApplyPatch,
             ExplorerAction::Rename,
+            ExplorerAction::Ignore,
         ],
     },
     GroupSpec {
@@ -328,9 +332,10 @@ const ICON_FILES: &[(&str, &[u8])] = &[
     ),
     ("others.ico", include_bytes!("../../icons/menu/others.ico")),
     ("rename.ico", include_bytes!("../../icons/menu/rename.ico")),
+    ("ignore.ico", include_bytes!("../../icons/menu/ignore.ico")),
 ];
 
-const ACTIONS: [ActionSpec; 20] = [
+const ACTIONS: [ActionSpec; 21] = [
     ActionSpec {
         action: ExplorerAction::Clone,
         label: "Clone...",
@@ -451,6 +456,12 @@ const ACTIONS: [ActionSpec; 20] = [
         key: "GitExt.Rename",
         icon: "rename.ico",
     },
+    ActionSpec {
+        action: ExplorerAction::Ignore,
+        label: "Add to ignore...",
+        key: "GitExt.Ignore",
+        icon: "ignore.ico",
+    },
 ];
 
 fn action_spec(action: ExplorerAction) -> &'static ActionSpec {
@@ -462,6 +473,23 @@ fn action_spec(action: ExplorerAction) -> &'static ActionSpec {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExplorerError(String);
+
+/// 返回某个动作在资源管理器菜单中使用的图标（ICO 的 16×16 PNG 帧）。
+/// 供轻量窗口自绘标题栏复用，保证与右键菜单里的图标完全一致。
+pub fn action_icon_data(action: ExplorerAction) -> Option<&'static [u8]> {
+    let file = action_spec(action).icon;
+    let (_, bytes) = ICON_FILES.iter().find(|(name, _)| *name == file)?;
+    // 生成器把 16×16 PNG 存为 ICO 第一个目录项；PNG 同时是合法图片格式，
+    // 前端可直接用 data URL 显示，不需要额外的图片解码依赖。
+    let count = u16::from_le_bytes(bytes.get(4..6)?.try_into().ok()?) as usize;
+    if count == 0 {
+        return None;
+    }
+    let entry = bytes.get(6..22)?;
+    let size = u32::from_le_bytes(entry.get(8..12)?.try_into().ok()?) as usize;
+    let offset = u32::from_le_bytes(entry.get(12..16)?.try_into().ok()?) as usize;
+    bytes.get(offset..offset.checked_add(size)?.min(bytes.len()))
+}
 
 impl ExplorerError {
     fn new(message: impl Into<String>) -> Self {
@@ -2030,8 +2058,8 @@ mod tests {
             .flat_map(|group| group.actions.iter().copied())
             .filter(|action| CONTEXTS[2].supports(*action))
             .collect();
-        assert_eq!(directory_actions.len(), 18);
-        assert_eq!(file_actions.len(), 10);
+        assert_eq!(directory_actions.len(), 19);
+        assert_eq!(file_actions.len(), 11);
 
         // 目录上下文的直排项 + Others + Others 子项合计不能超过 16。
         let mut placements = [MenuPlacement::Hidden; ExplorerAction::ALL.len()];
@@ -2673,5 +2701,14 @@ mod tests {
     #[test]
     fn supported_matches_the_target_without_touching_registry() {
         assert_eq!(supported(), cfg!(target_os = "windows"));
+    }
+
+    #[test]
+    fn action_icon_data_returns_the_first_embedded_png_frame() {
+        for action in ExplorerAction::ALL {
+            let png = action_icon_data(action).expect("menu icon exists");
+            assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "action {action}");
+            assert!(png.len() > 100, "action {action}");
+        }
     }
 }

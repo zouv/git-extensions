@@ -5,6 +5,7 @@ use crate::error::{GitError, GitResult};
 pub mod explorer;
 
 use crate::git::{open, validate_relative_path};
+use base64::Engine as _;
 
 #[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct ExplorerIntegrationInfo {
@@ -16,6 +17,18 @@ pub fn get_explorer_integration_info() -> ExplorerIntegrationInfo {
     ExplorerIntegrationInfo {
         supported: explorer::supported(),
     }
+}
+
+/// 轻量窗口标题栏用：返回菜单动作图标的 16×16 PNG（data URL），
+/// 与资源管理器右键菜单里的图标来自同一份内嵌资源。
+#[tauri::command]
+pub fn get_explorer_action_icon(action: crate::launch::ExplorerAction) -> Option<String> {
+    explorer::action_icon_data(action).map(|png| {
+        format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(png)
+        )
+    })
 }
 
 #[tauri::command]

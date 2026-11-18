@@ -470,6 +470,14 @@ body.dialog-resizing { user-select: none; }
 .path-input-row { display: flex; gap: 6px; min-width: 0; }
 .path-input-row input { flex: 1; min-width: 0; }
 .path-input-row button { flex: 0 0 auto; }
+.branch-combo { position: relative; display: flex; gap: 6px; min-width: 0; }
+.branch-combo input { flex: 1; min-width: 0; }
+.branch-combo > button { flex: 0 0 32px; padding: 3px 6px; }
+.branch-combo-menu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; max-height: 180px; overflow: auto; padding: 4px; background: var(--elevated); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
+.branch-combo-menu button, .branch-combo-empty { display: block; width: 100%; padding: 5px 8px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.branch-combo-menu button { border: 0; background: transparent; color: var(--fg); }
+.branch-combo-menu button:hover:not(:disabled), .branch-combo-menu button[aria-selected="true"] { background: var(--selected); }
+.branch-combo-menu .inline-error { padding: 5px 8px; }
 .recent-repos { display: flex; flex-direction: column; gap: 3px; }
 .section-label { color: var(--muted); font-size: 11px; margin: 4px 0; }
 .recent-repos button { justify-content: flex-start; border: 0; background: transparent; color: var(--muted); }
@@ -663,17 +671,19 @@ body.dialog-resizing { user-select: none; }
 .file-picker-list button:hover, .file-picker-list button:focus { background: var(--selected); }
 .patch-preview { max-height: 42vh; min-height: 100px; margin: 0; padding: 10px; overflow: auto; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
 
-/* Explorer 轻量窗口：原生标题栏 + 单任务内容，不挂载主工作区布局。 */
+/* Explorer 轻量窗口：自绘标题栏 + 单任务内容，不挂载主工作区布局。 */
 .portable-window { display: flex; flex-direction: column; width: 100vw; height: 100vh; min-width: 0; min-height: 0; background: var(--bg); color: var(--fg); }
-.portable-header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--surface); }
-.portable-header > div { display: flex; min-width: 0; align-items: baseline; gap: 12px; }
-.portable-header strong { font-size: 13px; }
-.portable-header span { min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.portable-header button { flex: 0 0 auto; }
+.portable-title-bar { padding-left: 8px; gap: 8px; align-items: center; }
+.portable-title-icon { display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: 0 0 16px; }
+.portable-title-icon img { display: block; width: 16px; height: 16px; pointer-events: none; }
+.portable-title-label { display: flex; align-items: center; height: 100%; font-size: 13px; font-weight: 600; line-height: 1; white-space: nowrap; flex: 0 0 auto; }
+.portable-title-detail { display: flex; align-items: center; height: 100%; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
 .portable-message { flex: 0 0 auto; padding: 7px 14px; border-bottom: 1px solid var(--border); background: var(--elevated); color: var(--muted); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .portable-content { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
 body.portable-window .modal-backdrop { position: static; width: 100%; height: 100%; padding: 0; overflow: hidden; background: transparent; }
 body.portable-window .modal { width: 100%; height: 100%; max-width: none; max-height: none; border: 0; border-radius: 0; box-shadow: none; }
+body.portable-window .modal-header { display: none; }
+body.portable-window .modal-header + .modal-body { flex: 1; min-height: 0; }
 body.portable-window .modal-body { min-height: 0; }
 .portable-changes { display: flex; width: 100%; height: 100%; min-height: 0; }
 .portable-changes > .changes-panel { flex: 1; height: 100%; }

@@ -12,9 +12,34 @@ pub struct CloneProgress {
     pub line: String,
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloneOptionsDto {
+    pub branch: Option<String>,
+    pub init_submodules: Option<bool>,
+    pub depth_one: Option<bool>,
+    pub single_branch: Option<bool>,
+}
+
+impl From<CloneOptionsDto> for cli::CloneOptions {
+    fn from(value: CloneOptionsDto) -> Self {
+        Self {
+            branch: value.branch.unwrap_or_default(),
+            init_submodules: value.init_submodules.unwrap_or(false),
+            depth_one: value.depth_one.unwrap_or(false),
+            single_branch: value.single_branch.unwrap_or(false),
+        }
+    }
+}
+
 #[tauri::command]
-pub async fn clone_repository(path: String, url: String) -> GitResult<String> {
-    run_blocking(move || cli::clone_repository(path, url)).await
+pub async fn clone_repository(
+    path: String,
+    url: String,
+    options: Option<CloneOptionsDto>,
+) -> GitResult<String> {
+    let options = options.map(cli::CloneOptions::from).unwrap_or_default();
+    run_blocking(move || cli::clone_repository_with_options(path, url, options, |_| {})).await
 }
 
 #[tauri::command]
@@ -22,10 +47,12 @@ pub async fn clone_repository_with_progress(
     app: tauri::AppHandle,
     path: String,
     url: String,
+    options: Option<CloneOptionsDto>,
     operation_id: String,
 ) -> GitResult<String> {
+    let options = options.map(cli::CloneOptions::from).unwrap_or_default();
     run_blocking(move || {
-        cli::clone_repository_with_progress(path, url, |line| {
+        cli::clone_repository_with_options(path, url, options, |line| {
             if let Err(error) = app.emit(
                 CLONE_PROGRESS_EVENT,
                 CloneProgress {
@@ -38,6 +65,12 @@ pub async fn clone_repository_with_progress(
         })
     })
     .await
+}
+
+/// 只读查询远程分支列表，不申请写锁，也不改动任何仓库状态。
+#[tauri::command]
+pub async fn list_remote_branches(url: String) -> GitResult<Vec<String>> {
+    super::operations::run_read(move || cli::list_remote_branches(url)).await
 }
 
 #[tauri::command]
@@ -788,6 +821,15 @@ pub async fn worktree_prune(path: String) -> GitResult<String> {
 #[tauri::command]
 pub async fn ignore_file(path: String, pattern: String) -> GitResult<String> {
     run_blocking(move || cli::ignore_file(path, pattern)).await
+}
+
+#[tauri::command]
+pub async fn ignore_file_at(
+    path: String,
+    directory: Option<String>,
+    pattern: String,
+) -> GitResult<String> {
+    run_blocking(move || cli::ignore_file_at(path, directory, pattern)).await
 }
 
 #[tauri::command]

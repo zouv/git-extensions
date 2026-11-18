@@ -33,6 +33,7 @@ $Icons = @(
     @{ Name = "repository-settings";    Glyph = 0xE838; Color = "#0EA5E9" },
     @{ Name = "view-files";             Glyph = 0xE7C3; Color = "#0891B2" },
     @{ Name = "rename";                 Glyph = 0xE8AC; Color = "#D97706" },
+    @{ Name = "ignore";                 Glyph = 0xE711; Color = "#DC2626" },
     @{ Name = "others";                 Glyph = 0xE712; Color = "#64748B" }
 )
 

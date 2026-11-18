@@ -19,14 +19,16 @@ import StashWindow from "./StashWindow";
 import RepositorySettingsWindow from "./RepositorySettingsWindow";
 import ViewFilesWindow from "./ViewFilesWindow";
 import RenamePathDialog from "./RenamePathDialog";
+import IgnorePathDialog from "./IgnorePathDialog";
 import { watchExplorerWindowSize } from "../explorerWindowState";
+import PortableTitleBar from "./PortableTitleBar";
 import { closeCurrentWindow, usePortableCloseGuard } from "./portableWindow";
 
 const PORTABLE_ACTIONS: ExplorerAction[] = [
   "clone", "create-repository", "commit", "pull", "push", "view-stash", "view-changes",
   "checkout-branch", "checkout-revision", "create-branch", "open-with-difftool",
   "file-history", "view-files", "reset-file-changes", "add-files", "apply-patch",
-  "repository-settings", "rename",
+  "repository-settings", "rename", "ignore",
 ];
 
 function actionLabel(action: ExplorerAction) {
@@ -40,17 +42,12 @@ function Frame({ action, target, message, children }: {
   children: React.ReactNode;
 }) {
   return <div className="portable-window">
-    <header className="portable-header">
-      <div>
-        <strong>{actionLabel(action)}</strong>
-        {target && <span title={target.repo.path}>
-          {target.repo.name}
-          {target.relativePath ? ` / ${target.relativePath}` : ""}
-          {target.repo.headBranch ? ` · ${target.repo.headBranch}` : ""}
-        </span>}
-      </div>
-      <button onClick={() => void closeCurrentWindow()} aria-label="关闭窗口">关闭</button>
-    </header>
+    <PortableTitleBar
+      action={action}
+      title={actionLabel(action)}
+      detail={target ? [target.repo.name, target.relativePath, target.repo.headBranch].filter(Boolean).join(" · ") : undefined}
+      onClose={() => void closeCurrentWindow()}
+    />
     {message && <div className="portable-message" role="status">{message}</div>}
     <div className="portable-content">{children}</div>
   </div>;
@@ -165,7 +162,10 @@ export default function ExplorerWindow({ launch }: { launch: LaunchRequest }) {
 
   const openInMain = async (path: string) => {
     setBusy(true);
-    try { await api.openRepositoryInMain(path); await closeCurrentWindow(); }
+    try {
+      await api.openRepositoryInMain(path);
+      await closeCurrentWindow(true);
+    }
     catch (reason) { setError(String(reason)); setBusy(false); throw reason; }
   };
 
@@ -178,12 +178,12 @@ export default function ExplorerWindow({ launch }: { launch: LaunchRequest }) {
   }
   if (launch.action === "clone") {
     return <Frame action={launch.action} target={null} message={message}>
-      <CloneDialog initialParent={launch.path ?? ""} onOpen={openInMain} onClose={() => void closeCurrentWindow()} onBusyChange={setBusy} />
+      <CloneDialog initialParent={launch.path ?? ""} onOpen={openInMain} onClose={() => void closeCurrentWindow(true)} onBusyChange={setBusy} />
     </Frame>;
   }
   if (launch.action === "create-repository") {
     return <Frame action={launch.action} target={null} message={message}>
-      <CreateRepositoryDialog initialPath={launch.path ?? ""} onOpen={openInMain} onClose={() => void closeCurrentWindow()} onBusyChange={setBusy} onMessage={(text) => notify("info", text)} />
+      <CreateRepositoryDialog initialPath={launch.path ?? ""} onOpen={openInMain} onClose={() => void closeCurrentWindow(true)} onBusyChange={setBusy} onMessage={(text) => notify("info", text)} />
     </Frame>;
   }
   if (error) {
@@ -304,6 +304,18 @@ export default function ExplorerWindow({ launch }: { launch: LaunchRequest }) {
           setMessage={(text) => notify("info", text)}
         />
         : <div className="empty-state" role="alert"><strong>无法重命名仓库根目录</strong><span>请在资源管理器中右键具体的文件或子目录。</span></div>;
+      break;
+    case "ignore":
+      content = target.scope === "file" || target.scope === "directory"
+        ? <IgnorePathDialog
+          repoPath={repoPath}
+          relativePath={target.relativePath ?? ""}
+          scope={target.scope}
+          onClose={() => void closeCurrentWindow()}
+          onDirtyChange={setDirty}
+          setMessage={(text) => notify("info", text)}
+        />
+        : <div className="empty-state" role="alert"><strong>请选择文件或目录</strong><span>请在资源管理器中右键具体的文件或子目录。</span></div>;
       break;
     default:
       content = <div className="empty-state">不支持的动作</div>;

@@ -217,7 +217,7 @@ fn create_explorer_window(app: &AppHandle, request: LaunchRequest) -> Result<(),
         .inner_size(width, height)
         .min_inner_size(min_width, min_height)
         .resizable(true)
-        .decorations(true)
+        .decorations(false)
         .visible(false)
         .build();
 

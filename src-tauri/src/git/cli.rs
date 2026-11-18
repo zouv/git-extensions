@@ -313,13 +313,19 @@ fn read_git_progress(
     Ok(bytes)
 }
 
-/// 与 `run_git_with_env` 语义一致，但把 stderr 的进度行实时交给调用方。
-fn run_git_with_progress<F>(repo_path: &str, args: &[String], mut progress: F) -> GitResult<String>
+/// 与 `run_git_with_env` 语义一致，但把 stderr 的进度行实时交给调用方，
+/// 并允许为 Git 及凭证 helper 设置受控环境变量。
+fn run_git_with_progress_env<F>(
+    repo_path: &str,
+    args: &[String],
+    envs: &[(&str, &OsStr)],
+    mut progress: F,
+) -> GitResult<String>
 where
     F: FnMut(&str) + Send,
 {
     let started = Instant::now();
-    let mut child = git_command(repo_path, args, &[])
+    let mut child = git_command(repo_path, args, envs)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -491,8 +497,18 @@ fn path_string(path: &Path) -> String {
     value
 }
 
+/// 克隆选项：branch 为空时使用远端 HEAD；depth_one / single_branch 对应
+/// `git clone --depth 1` / `--single-branch`；init_submodules 对应 `--recurse-submodules`。
+#[derive(Debug, Clone, Default)]
+pub struct CloneOptions {
+    pub branch: String,
+    pub init_submodules: bool,
+    pub depth_one: bool,
+    pub single_branch: bool,
+}
+
 pub fn clone_repository(path: String, url: String) -> GitResult<String> {
-    clone_repository_with_progress(path, url, |_| {})
+    clone_repository_with_options(path, url, CloneOptions::default(), |_| {})
 }
 
 pub fn clone_repository_with_progress<F>(
@@ -503,23 +519,79 @@ pub fn clone_repository_with_progress<F>(
 where
     F: FnMut(&str) + Send,
 {
+    clone_repository_with_options(path, url, CloneOptions::default(), progress)
+}
+
+pub fn clone_repository_with_options<F>(
+    path: String,
+    url: String,
+    options: CloneOptions,
+    progress: F,
+) -> GitResult<String>
+where
+    F: FnMut(&str) + Send,
+{
     let _write = acquire_target_write(&path)?;
     if url.trim().is_empty() || url.starts_with('-') || url.contains(['\0', '\n', '\r']) {
         return Err(GitError::InvalidInput("invalid clone URL".into()));
     }
+    let branch = options.branch.trim();
+    if !branch.is_empty() {
+        validate_ref_name(branch, "heads")?;
+    }
     let target = validate_new_target(&path, true)?;
-    run_git_with_progress(
-        &path_string(&target.parent),
-        &[
-            "clone".into(),
-            "--progress".into(),
-            "--".into(),
-            url,
-            path_string(&target.target),
-        ],
-        progress,
-    )?;
+    let mut args = vec!["clone".into(), "--progress".into()];
+    if options.init_submodules {
+        args.push("--recurse-submodules".into());
+    }
+    if options.depth_one {
+        args.extend(["--depth".into(), "1".into()]);
+    }
+    if options.single_branch {
+        args.push("--single-branch".into());
+    }
+    if !branch.is_empty() {
+        args.extend(["--branch".into(), branch.to_string()]);
+    }
+    args.push("--".into());
+    args.push(url);
+    args.push(path_string(&target.target));
+    // 凭证由本机 Git credential helper 处理；禁止弹出交互式密码提示。
+    let envs = [("GIT_TERMINAL_PROMPT", OsStr::new("0"))];
+    run_git_with_progress_env(&path_string(&target.parent), &args, &envs, progress)?;
     Ok(path_string(&target.target.canonicalize()?))
+}
+
+/// 查询远程仓库的分支名，不写入任何仓库状态；仅在用户点击「查询远程分支」时调用。
+pub fn list_remote_branches(url: String) -> GitResult<Vec<String>> {
+    let url = url.trim();
+    if url.is_empty() || url.starts_with('-') || url.contains(['\0', '\n', '\r']) {
+        return Err(GitError::InvalidInput("invalid clone URL".into()));
+    }
+    let args = vec![
+        "ls-remote".into(),
+        "--heads".into(),
+        "--".into(),
+        url.to_string(),
+    ];
+    let envs = [("GIT_TERMINAL_PROMPT", OsStr::new("0"))];
+    let output = git_command("", &args, &envs)
+        .stdin(Stdio::null())
+        .output()?;
+    if !output.status.success() {
+        return Err(GitError::Cli(command_failure_details(&output)));
+    }
+    let mut names = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if let Some((_, name)) = line.split_once("refs/heads/") {
+            let name = name.trim();
+            if !name.is_empty() && !names.iter().any(|existing| existing == name) {
+                names.push(name.to_string());
+            }
+        }
+    }
+    names.sort();
+    Ok(names)
 }
 
 pub fn create_repository(path: String) -> GitResult<String> {
@@ -2804,20 +2876,46 @@ pub fn worktree_prune(path: String) -> GitResult<String> {
 }
 
 pub fn ignore_file(path: String, pattern: String) -> GitResult<String> {
+    ignore_file_at(path, None, pattern)
+}
+
+/// 把 pattern 追加到仓库内指定目录（相对路径，None / 空 = 根目录）的
+/// .gitignore；目标目录必须已存在，重复条目不追加。
+pub fn ignore_file_at(
+    path: String,
+    directory: Option<String>,
+    pattern: String,
+) -> GitResult<String> {
     let _write = acquire_write(&path)?;
     let entry = pattern.trim();
     if entry.is_empty() || entry.contains(['\0', '\n', '\r']) {
         return Err(GitError::InvalidInput("invalid gitignore pattern".into()));
     }
     let repo = open(&path)?;
-    let gitignore_path = resolve_worktree_path(&repo, ".gitignore")?;
+    let folder = directory.unwrap_or_default();
+    let folder = folder.trim().trim_matches('/');
+    let relative = if folder.is_empty() {
+        ".gitignore".to_string()
+    } else {
+        format!("{folder}/.gitignore")
+    };
+    let gitignore_path = resolve_worktree_path(&repo, &relative)?;
+    if !gitignore_path
+        .parent()
+        .map(|parent| parent.is_dir())
+        .unwrap_or(false)
+    {
+        return Err(GitError::InvalidInput(
+            "ignore target directory does not exist".into(),
+        ));
+    }
     let existing = match std::fs::read_to_string(&gitignore_path) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(error) => return Err(error.into()),
     };
     if existing.lines().any(|line| line.trim() == entry) {
-        return Ok(format!("{entry} already in .gitignore"));
+        return Ok(format!("{entry} already in {relative}"));
     }
     let mut updated = existing;
     if !updated.is_empty() && !updated.ends_with('\n') {
@@ -2826,7 +2924,7 @@ pub fn ignore_file(path: String, pattern: String) -> GitResult<String> {
     updated.push_str(entry);
     updated.push('\n');
     std::fs::write(&gitignore_path, updated)?;
-    Ok(format!("Added {entry} to .gitignore"))
+    Ok(format!("Added {entry} to {relative}"))
 }
 
 pub fn bisect_start(

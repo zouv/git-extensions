@@ -254,15 +254,22 @@ export interface RecoveryEntry { oid: string; label: string; time: number; backu
 export interface ConflictDraft { file: ConflictFile; result: string; resolveAsDeletion: boolean }
 export interface RebaseDraft { plan: RebasePlan; entries: RebaseTodoEntry[]; dirty: boolean }
 
-export type ExplorerAction = "clone" | "create-repository" | "commit" | "open-repository" | "pull" | "push" | "view-stash" | "view-changes" | "checkout-branch" | "checkout-revision" | "create-branch" | "open-with-difftool" | "file-history" | "reset-file-changes" | "add-files" | "apply-patch" | "settings" | "repository-settings" | "view-files" | "rename";
+export type ExplorerAction = "clone" | "create-repository" | "commit" | "open-repository" | "pull" | "push" | "view-stash" | "view-changes" | "checkout-branch" | "checkout-revision" | "create-branch" | "open-with-difftool" | "file-history" | "reset-file-changes" | "add-files" | "apply-patch" | "settings" | "repository-settings" | "view-files" | "rename" | "ignore";
 export type ExplorerMenuPlacement = "top" | "cascade" | "others" | "hidden";
 export type ExplorerMenuPlacements = Record<ExplorerAction, ExplorerMenuPlacement>;
 export interface ExplorerMenuItem { action: ExplorerAction; placement: ExplorerMenuPlacement }
 export interface LaunchRequest { action: ExplorerAction; path: string | null }
-export type WorkspaceLaunchAction = Exclude<ExplorerAction, "clone" | "create-repository" | "open-repository" | "settings" | "repository-settings" | "view-files" | "rename">;
+export type WorkspaceLaunchAction = Exclude<ExplorerAction, "clone" | "create-repository" | "open-repository" | "settings" | "repository-settings" | "view-files" | "rename" | "ignore">;
 export interface WorkspaceLaunchRequest { id: number; action: WorkspaceLaunchAction }
 export interface ExplorerIntegrationInfo { supported: boolean }
 export interface CloneProgress { operationId: string; line: string }
+/** branch 为空表示使用远端 HEAD；其余字段映射到 git clone 的同名选项。 */
+export interface CloneOptions {
+  branch: string;
+  initSubmodules: boolean;
+  depthOne: boolean;
+  singleBranch: boolean;
+}
 export interface PatchPreview { patchOid: string; summary: string }
 export interface FileContent { content: string; binary: boolean; truncated: boolean; size: number }
 export interface PatchFileInfo { path: string; name: string; subject: string; author: string; date: string; mailbox: boolean }

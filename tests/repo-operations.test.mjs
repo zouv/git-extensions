@@ -74,6 +74,7 @@ test("取消订阅幂等，不能移除后续组件的订阅", async () => {
 
 test("全部正式写 API 都经过共享调度", async () => {
   const path = "repo-api";
+  const options = { branch: "", initSubmodules: true, depthOne: false, singleBranch: false };
   const writes = [
     ["stageFiles", [path, ["a"]]], ["unstageFiles", [path, ["a"]]], ["commit", [path, "message"]],
     ["createBranch", [path, "feature"]], ["checkoutBranch", [path, "feature"]], ["deleteBranch", [path, "feature", false]],
@@ -84,8 +85,9 @@ test("全部正式写 API 都经过共享调度", async () => {
     ["createTag", [path, "v1"]], ["deleteTag", [path, "v1"]], ["submoduleUpdate", [path]],
     ["saveResolvedFile", [path, "a", "resolved"]], ["continueOperation", [path]], ["abortOperation", [path]],
     ["discardFiles", [path, ["a"]]], ["deleteUntrackedFiles", [path, ["a"]]], ["startInteractiveRebase", [path, { branch: "refs/heads/main", entries: [] }]],
-    ["cloneRepository", [path, "https://example.com/repo.git"]], ["createRepository", [path]],
-    ["cloneRepositoryWithProgress", [path, "https://example.com/repo.git", "clone-op"]],
+    ["cloneRepository", [path, "https://example.com/repo.git", options]],
+    ["createRepository", [path]],
+    ["cloneRepositoryWithProgress", [path, "https://example.com/repo.git", options, "clone-op"]],
     ["addFiles", [path, "*.txt", false]], ["resetChanges", [path, ["a"], false]],
     ["checkoutRevision", [path, "abc"]], ["applyPatch", [path, "change.patch", "patch-oid"]],
     ["applyPatchFile", [path, "C:\\change.patch", false, false]],
@@ -113,6 +115,7 @@ test("全部正式写 API 都经过共享调度", async () => {
 });
 
 test("新增资源管理器能力完整传递 IPC 命令与参数", async () => {
+  const options = { branch: "", initSubmodules: true, depthOne: false, singleBranch: false };
   const received = [];
   setInvoke((command, args) => { received.push([command, args]); return Promise.resolve(null); });
   const cases = [
@@ -126,8 +129,9 @@ test("新增资源管理器能力完整传递 IPC 命令与参数", async () => 
     [() => api.pullWithOutput("C:\\repo"), "pull_with_output", { path: "C:\\repo" }],
     [() => api.getExplorerIntegrationInfo(), "get_explorer_integration_info", {}],
     [() => api.setExplorerContextMenuEnabled(true, [{ action: "pull", placement: "top" }], true), "set_explorer_context_menu_enabled", { enabled: true, items: [{ action: "pull", placement: "top" }], alwaysShowAllCommands: true }],
-    [() => api.cloneRepository("C:\\parent\\repo", "https://example.com/repo.git"), "clone_repository", { path: "C:\\parent\\repo", url: "https://example.com/repo.git" }],
-    [() => api.cloneRepositoryWithProgress("C:\\parent\\repo", "https://example.com/repo.git", "clone-op"), "clone_repository_with_progress", { path: "C:\\parent\\repo", url: "https://example.com/repo.git", operationId: "clone-op" }],
+    [() => api.cloneRepository("C:\\parent\\repo", "https://example.com/repo.git", options), "clone_repository", { path: "C:\\parent\\repo", url: "https://example.com/repo.git", options }],
+    [() => api.cloneRepositoryWithProgress("C:\\parent\\repo", "https://example.com/repo.git", options, "clone-op"), "clone_repository_with_progress", { path: "C:\\parent\\repo", url: "https://example.com/repo.git", options, operationId: "clone-op" }],
+    [() => api.listRemoteBranches("https://example.com/repo.git"), "list_remote_branches", { url: "https://example.com/repo.git" }],
     [() => api.createRepository("C:\\repo"), "create_repository", { path: "C:\\repo", bare: false }],
     [() => api.previewAddFiles("C:\\repo", "*.txt", true), "preview_add_files", { path: "C:\\repo", filter: "*.txt", force: true }],
     [() => api.addFiles("C:\\repo", "*.txt", true), "add_files", { path: "C:\\repo", filter: "*.txt", force: true }],

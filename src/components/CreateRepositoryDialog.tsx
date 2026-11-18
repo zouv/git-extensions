@@ -32,13 +32,13 @@ export default function CreateRepositoryDialog({ initialPath, onOpen, onClose, o
       if (selected) setPath(selected);
     } catch (e) { setError(String(e)); }
   };
-  const create = async () => {
+  const create = async (open: boolean) => {
     if (busy || !path.trim()) return;
     setBusy(true); setError(null);
     try {
       const target = await api.createRepository(path.trim(), bare);
-      if (bare) {
-        onMessage?.(`已创建中心仓库：${target || path.trim()}`);
+      if (bare || !open) {
+        onMessage?.(`已创建${bare ? "中心仓库" : "仓库"}：${target || path.trim()}`);
         onClose();
         return;
       }
@@ -47,7 +47,7 @@ export default function CreateRepositoryDialog({ initialPath, onOpen, onClose, o
     } catch (e) { setError(String(e)); }
     finally { setBusy(false); }
   };
-  return <Dialog title="创建新仓库" onClose={close} busy={busy} footer={<><button disabled={busy} onClick={close}>取消</button><button className="primary" disabled={busy || !path.trim()} onClick={() => void create()}>{bare ? "创建" : "创建并打开"}</button></>}>
+  return <Dialog title="创建新仓库" onClose={close} busy={busy} footer={<><button disabled={busy} onClick={close}>取消</button><button className="primary" disabled={busy || !path.trim()} onClick={() => void create(!bare)}>{bare ? "创建" : "创建并打开"}</button>{!bare && <button disabled={busy || !path.trim()} onClick={() => void create(false)}>创建</button>}</>}>
     <div className="dialog-form">
       <label><span>仓库目录</span><div className="path-input-row"><input data-autofocus disabled={busy} value={path} onChange={(e) => setPath(e.target.value)} /><button type="button" disabled={busy} onClick={() => void browse()}>浏览…</button></div></label>
       <fieldset className="repository-type" disabled={busy}>

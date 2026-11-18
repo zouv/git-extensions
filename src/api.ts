@@ -22,9 +22,9 @@ import type {
   RebasePlan,
   PushInfo,
   ResetMode, ResetPreview, ResetResult, RecoveryEntry,
-  ExplorerIntegrationInfo, LaunchRequest, PatchPreview, ExplorerMenuItem,
+  ExplorerIntegrationInfo, LaunchRequest, PatchPreview, ExplorerMenuItem, ExplorerAction,
   WindowBootstrap, ExplorerTarget, ScopedHistoryEntry, CommandOutput,
-  RemoteInfo, CommandLogEntry, GrepMatch, MergeMode, PullMode, CloneProgress,
+  RemoteInfo, CommandLogEntry, GrepMatch, MergeMode, PullMode, CloneProgress, CloneOptions,
   PatchFileInfo, PatchApplyState, FileContent,
   BranchDeleteStatus,
   RepoFileTarget, GitMaintenanceAction,
@@ -174,6 +174,8 @@ export const api = {
   worktreePrune: (path: string) => writeInvoke<string>("worktree_prune", { path }),
   ignoreFile: (path: string, pattern: string) =>
     writeInvoke<string>("ignore_file", { path, pattern }),
+  ignoreFileAt: (path: string, directory: string | null, pattern: string) =>
+    writeInvoke<string>("ignore_file_at", { path, directory, pattern }),
   getCommandLog: (path?: string) => invoke<CommandLogEntry[]>("get_command_log", { path }),
   clearCommandLog: () => invoke<void>("clear_command_log", {}),
   searchCommits: (
@@ -241,11 +243,16 @@ export const api = {
   scopedHistory: (path: string, file: string | null, follow: boolean, maxCount = 500) =>
     invoke<ScopedHistoryEntry[]>("scoped_history", { path, file, follow, maxCount }),
   getExplorerIntegrationInfo: () => invoke<ExplorerIntegrationInfo>("get_explorer_integration_info", {}),
+  getExplorerActionIcon: (action: ExplorerAction) =>
+    invoke<string | null>("get_explorer_action_icon", { action }),
   setExplorerContextMenuEnabled: (enabled: boolean, items: ExplorerMenuItem[], alwaysShowAllCommands: boolean) =>
     invoke<void>("set_explorer_context_menu_enabled", { enabled, items, alwaysShowAllCommands }),
-  cloneRepository: (path: string, url: string) => writeInvoke<string>("clone_repository", { path, url }),
-  cloneRepositoryWithProgress: (path: string, url: string, operationId: string) =>
-    writeInvoke<string>("clone_repository_with_progress", { path, url, operationId }),
+  cloneRepository: (path: string, url: string, options: CloneOptions) =>
+    writeInvoke<string>("clone_repository", { path, url, options }),
+  cloneRepositoryWithProgress: (path: string, url: string, options: CloneOptions, operationId: string) =>
+    writeInvoke<string>("clone_repository_with_progress", { path, url, options, operationId }),
+  listRemoteBranches: (url: string) =>
+    invoke<string[]>("list_remote_branches", { url }),
   createRepository: (path: string, bare = false) => writeInvoke<string>("create_repository", { path, bare }),
   previewAddFiles: (path: string, filter: string, force = false) =>
     invoke<CommandOutput>("preview_add_files", { path, filter, force }),

@@ -6,7 +6,7 @@
 
 | 文件 | 职责 |
 |---|---|
-| `src-tauri/src/launch.rs` | 20 个固定 `ExplorerAction`、`opens_main_window`、严格 `OsString` 参数解析、`LaunchRequest` |
+| `src-tauri/src/launch.rs` | 21 个固定 `ExplorerAction`、`opens_main_window`、严格 `OsString` 参数解析、`LaunchRequest` |
 | `src-tauri/src/window_host.rs` | 单实例请求路由、按窗口 pending 队列、主窗口确保 / 聚焦、轻量窗口创建、最后窗口退出 |
 | `src-tauri/src/system.rs` / `system/explorer.rs` | 平台能力 IPC；HKCU 平铺分组菜单（分隔线）计划、内嵌图标物化、文件 / 目录上下文、所有权保护、注册 / 注销、回滚与 Shell 刷新 |
 | `src-tauri/src/lib.rs` / `main.rs` | Rebase editor 优先；注册第一个插件 single-instance，创建窗口后按首请求分流 |
@@ -14,8 +14,8 @@
 | `src/App.tsx` | 完整主窗口恢复页签；订阅 `main-launch-available`，串行消费 Open repository / Settings 请求 |
 | `src/explorer/ExplorerWindow.tsx` | 轻量窗口总入口、动作分发、错误 / 关闭保护；不挂载页签、主工作区和持久化 effect |
 | `src/explorer/{CommitWindow,HistoryWindow,StashWindow,RepositorySettingsWindow,ViewFilesWindow}.tsx` | 提交 / 变更、只读 View changes / 文件历史（含文件内容 View / Blame 页签）、工作区 + stash 管理窗口、当前仓库只读设置、HEAD 文件树 / 内容浏览 |
-| `src/explorer/ResetChangesDialog.tsx` / `RenamePathDialog.tsx` | Reset file changes 确认与真正重置；Rename 输入新名称并执行 `git mv` |
-| `src/explorer/portableWindow.ts` / `src/explorerWindowState.ts` | 原生标题栏关闭保护与关闭当前窗口；轻量窗口按动作保存 / 恢复尺寸 |
+| `src/explorer/ResetChangesDialog.tsx` / `RenamePathDialog.tsx` / `IgnorePathDialog.tsx` | Reset file changes 确认与真正重置；Rename 输入新名称并执行 `git mv`；Add to ignore 选择写入根目录 / 所属目录 `.gitignore` |
+| `src/explorer/PortableTitleBar.tsx` / `src/explorer/portableWindow.ts` / `src/explorerWindowState.ts` | 所有轻量窗口共用的自绘标题栏（复用右键菜单图标 + 标题 + 仓库/操作信息 + 最小化 / 最大化 / 关闭，空白区可拖动）；原生标题栏关闭保护与关闭当前窗口；轻量窗口按动作保存 / 恢复尺寸 |
 | `src/explorerMenu.ts` / `settings.ts` / `components/SettingsDialog.tsx` | 固定动作表、三态 placement 白名单与迁移、命令列表及实时预览 |
 | `src/components/{Clone,CreateRepository,CheckoutRevision,DiffTool,ApplyPatch,Push,Stash,Branch}Dialog.tsx` | 轻量窗口复用的显式输入、预览、确认与忙碌状态；Clone 含窗口内进度页 |
 | `src/components/{AddFilesDialog,BlameView,BlameDialog,PullDialog}.tsx` | Add files（pathspec + dry-run/force）、Blame 列表、可复用的 Pull 选项弹窗 |
@@ -25,25 +25,27 @@
 
 | 任务 | 函数 / 锚点 | 约定 |
 |---|---|---|
-| 改菜单项或命令行 | `explorer.rs` 的 `ACTIONS`、`GROUPS`、`ICON_FILES`、`CONTEXTS`、`build_configured_plan`、`command_line` | 同步 `launch.rs::ExplorerAction`、`explorerMenu.ts`（含 `EXPLORER_MENU_GROUPS`、上下文支持表）、`types.ts`；`Context::supports` 区分目录 / 文件动作，Rename 不进目录背景；一级键用 `GitExt.Top.NN.action` 紧跟 Git Extensions，二级键用「组前缀.动作序号.action」，三级用 `Others` 容器；整棵级联树（含 Others 子项）超过 16 项只报错不自动迁移 |
+| 改菜单项或命令行 | `explorer.rs` 的 `ACTIONS`、`GROUPS`、`ICON_FILES`、`CONTEXTS`、`build_configured_plan`、`command_line` | 同步 `launch.rs::ExplorerAction`、`explorerMenu.ts`（含 `EXPLORER_MENU_GROUPS`、上下文支持表）、`types.ts`；`Context::supports` 区分目录 / 文件动作，Rename / Ignore 只在一级上下文（不进目录背景）；一级键用 `GitExt.Top.NN.action` 紧跟 Git Extensions，二级键用「组前缀.动作序号.action」，三级用 `Others` 容器；整棵级联树（含 Others 子项）超过 16 项只报错不自动迁移 |
 | 改 Add files / Reset file changes | `cli.rs::preview_add_files`、`add_files`、`reset_changes`；`AddFilesDialog.tsx`、`ResetChangesDialog.tsx` | Add files 的 Filter 按 Git pathspec 语义，Show files 走 `--dry-run`；Reset 用 `git restore --source=HEAD --staged --worktree`，可同时 clean 新增文件 |
 | 改 Stash 窗口 | `cli.rs::stash_push_ex`、`StashWindow.tsx` | `stash push` 不能带 `--literal-pathspecs`（会破坏 `-u`）；选中路径用 `:(literal)` 保护；stash diff 复用 `get_commit_files` / `get_commit_file_diff` |
 | 改 Apply patch | `cli.rs::{list_patch_directory,apply_patch_file_ex,apply_patch_directory_ex,get_patch_apply_state,continue_patch,skip_patch,abort_patch}`、`ApplyPatchDialog.tsx` | 自动识别 diff / mailbox；目录按文件名顺序逐个应用；`git am` 冲突在窗口内 continue/skip/abort，并映射为 `applyPatch` 操作状态 |
 | 改 Pull / Push | `cli.rs::{pull_ex_advanced,push_ex_advanced}`、`PullDialog.tsx`、`PushDialog.tsx` | Pull 支持 upstream / 指定 remote+branch / fetch-only / prune / tag 模式；Push 支持 force-with-lease、force、tags、recurse-submodules=check |
 | 改 Branch / Checkout | `cli.rs::{create_branch_ex,checkout_branch_ex,checkout_remote_branch_ex,checkout_revision_ex}`、`BranchDialog.tsx`、`CheckoutRevisionDialog.tsx` | 切换策略 default / stash / reset；创建分支可 checkout / orphan；切换 revision 可 force |
-| 改克隆进度 | `cli.rs::clone_repository_with_progress`、`commands.rs::clone_repository_with_progress`、`CloneDialog.tsx` | stderr 按 `\r` / `\n` 分行经 `clone-progress` 事件推送；前端按 `operationId` 过滤；仍走仓库写互斥与 CLI |
+| 改克隆进度与选项 | `cli.rs::{clone_repository_with_options,list_remote_branches}`、`commands.rs::{clone_repository,clone_repository_with_progress,list_remote_branches}`、`CloneDialog.tsx` | stderr 按 `\r` / `\n` 分行经 `clone-progress` 事件推送；前端按 `operationId` 过滤；branch 经 `validate_ref_name` 校验后以 `--branch` 传递，`initSubmodules` / `depthOne` / `singleBranch` 对应 `--recurse-submodules` / `--depth 1` / `--single-branch`；远程分支只在用户点击「查询远程分支」后用 `git ls-remote --heads --` 只读查询；仍走仓库写互斥与 CLI |
 | 改注册 / 注销 / 布局迁移 | `explorer.rs::build_known_plan`、`reconcile`、`disable_owned_key`、`notify_shell_association_changed` | 三种上下文均纳入 known；成功变更后 `SHChangeNotify(SHCNE_ASSOCCHANGED)`；自动测试不写真实 HKCU |
 | 改窗口路由 | `window_host.rs::route_request`、`queue_main_request`、`create_explorer_window`、`window_destroyed` | 请求先入对应窗口队列再创建窗口；主窗口事件只作唤醒，前端再排空队列 |
 | 改启动参数 | `launch.rs::parse_launch_request`、`opens_main_window` | 只有 Open repository / Settings 进入主窗口；路径允许目录或文件 |
 | 改文件目标 | `repo.rs::resolve_explorer_target`、`history.rs::scoped_history` | 文件从父目录 discover；返回仓库根、scope、相对路径；禁止 `.git` 与逃逸路径 |
 | 改 Commit / View changes 的目录作用域 | `cli.rs::commit_ex_scoped`、`ChangesPanel.tsx` 的 `scopePath`、`HistoryWindow.tsx` | Commit 用临时 index 只提交 scope 下已暂存内容并保留真实 index 其它改动；View changes / View history 用 scope 作为 pathspec；目录根为 null |
-| 改轻量动作 | `ExplorerWindow.tsx` 动作 switch、对应 `src/explorer/*` | 复用现有 Dialog；轻量入口不得写 openRepos / settings / windowState；写操作仍走 api / lease；窗口尺寸由 `explorerWindowState.ts` 按动作存 localStorage，`main.tsx` 在 show 前恢复 |
+| 改轻量窗口标题栏 | `window_host.rs::create_explorer_window` 的 `decorations(false)`、`ExplorerWindow.tsx::Frame`、`PortableTitleBar.tsx`、`styles.css`、`system.rs::get_explorer_action_icon` | 所有轻量窗口去掉原生标题栏，统一用 `PortableTitleBar`；图标通过 IPC 复用 `explorer.rs::action_icon_data` 从内嵌菜单 ICO 取出的 16×16 PNG（data URL），与右键菜单完全一致；标题栏整体和图标 / 文字是拖动区，控制按钮设 `data-tauri-drag-region="false"`；图标与文字均 16px 高、垂直居中；拖动区依赖 `core:window:allow-start-dragging`；关闭按钮走 `closeCurrentWindow()` 守卫 |
+| 改轻量动作 | `ExplorerWindow.tsx` 动作 switch、对应 `src/explorer/*`、`styles.css::body.portable-window .modal-header` | 复用现有 Dialog；轻量窗口内所有 Dialog 的界面内标题栏（含「X」按钮）由 `body.portable-window` 样式整体隐藏，标题 / 状态 / 关闭只由顶部 `PortableTitleBar` 呈现；轻量入口不得写 openRepos / settings / windowState；写操作仍走 api / lease；窗口尺寸由 `explorerWindowState.ts` 按动作存 localStorage，`main.tsx` 在 show 前恢复 |
 | 改 Rename | `cli.rs::rename_path`、`validate_rename_name`、`RenamePathDialog.tsx` | 仅同目录改名；`git mv` 只处理已跟踪内容；仓库根、路径分隔符、`.git`、Windows 保留名与已存在目标一律拒绝 |
+| 改 Add to ignore | `cli.rs::{ignore_file,ignore_file_at}`、`commands.rs::ignore_file_at`、`api.ts::ignoreFileAt`、`IgnorePathDialog.tsx` | 根目录 / 指定目录相对路径写入对应 `.gitignore`，目标目录必须已存在；规则按行去重；路径经 `validate_relative_path` + `resolve_worktree_path` 防逃逸与符号链接；默认规则根目录用完整相对路径、所属目录用末段名称；目录加 `/` 后缀 |
 | 改菜单设置 / 预览 | `explorerMenu.ts` 纯预览；`SettingsDialog.tsx` 系统集成分类；`App.tsx::saveSettingsDialog` | 三态 top / cascade / hidden；启用时保存即重注册，成功后才保存 / 关闭 |
 
 ## 3. 启动与窗口链路
 
-- 设置默认关闭。启用写入 `HKCU\Software\Classes\Directory\shell`、`Directory\Background\shell` 与 `*\shell`；目录传 `%1`、背景传 `%V`、文件传 `%1`。上下文规则与参考项目对齐：克隆 / 新建仓库只在目录上下文；Commit / Pull / Push / View stash / View changes / Checkout / Create branch 只在目录上下文；Open with difftool / Apply patch 只在文件上下文；View history / Open repository / Reset file changes / Add files / Settings / Repository settings / View files 在文件、目录与目录背景中都显示，View history 对文件用 `--follow`、对目录 / 当前文件夹按目录过滤。静态注册表菜单无法判断目录是否为有效 Git 仓库。
+- 设置默认关闭。启用写入 `HKCU\Software\Classes\Directory\shell`、`Directory\Background\shell` 与 `*\shell`；目录传 `%1`、背景传 `%V`、文件传 `%1`。上下文规则与参考项目对齐：克隆 / 新建仓库只在目录上下文；Commit / Pull / Push / View stash / View changes / Checkout / Create branch 只在目录上下文；Open with difftool / Apply patch 只在文件上下文；Add to ignore 对选中的文件或目录有效（目录背景不注册，因为 `%V` 的目标含义不明确）；View history / Open repository / Reset file changes / Add files / Settings / Repository settings / View files 在文件、目录与目录背景中都显示，View history 对文件用 `--follow`、对目录 / 当前文件夹按目录过滤。静态注册表菜单无法判断目录是否为有效 Git 仓库。
 - 菜单位置支持一级 / 二级 / 三级（Others）/ 隐藏。一级项使用 `GitExt.Top.NN.<action>` 键，`T` > `M` 保证它们紧跟 `GitExt.Menu` 之后，并按键名中的全局序号与设置页顺序一致。二级菜单按分组平铺，组间用 `CommandFlags=0x20` 分隔；分组为 Repository & sync（Clone / Commit / Pull / Push / Stash / Changes）、Branches & Repos（Create new repository / Open repository / 分支动作）、Files & history、Settings；超出一级/二级配置的命令由用户显式设为三级，集中到 `Others` 子菜单（`GitExt.Menu\shell\99.Others` → `GitExt.Menu\others\shell\...`）。
 - Windows 对 `ExtendedSubCommandsKey` 生成的整棵级联菜单（Git Extensions 子菜单 + `Others` 及其子项）合计最多渲染 16 个命令；超出部分被系统静默丢弃，且计数按目录 / 文件上下文的实际可用命令分别统计。`validate_levels` 返回错误、设置页提示并禁止保存，不会自动移动用户配置；参考项目使用原生 COM Shell Extension，不受此限。
 - 成功同步（`set_enabled`）后会递归清理 `GitExt.*` 命名空间里带 `GitExtensionsOwner` 标记、但不在 known 计划中的遗留键：旧开发版的分组顺序会产生 `30.03.reset-file-changes` 之类的重复菜单项，既重复显示又占用 16 项容量；清理只删除确认由本应用拥有的键，外部值 / 子键存在时保留父键。
@@ -53,6 +55,8 @@
 - `window_host` 为每个窗口保存 `initial`（首个请求，重复 bootstrap 时原样返回）与 `pending` 请求。`main` / `open-repository` / `settings` 进入唯一完整主窗口；其余动作各创建 `action-N` 轻量窗口。主窗口已存在时先 `unminimize → show → set_focus`，再入队并 emit `main-launch-available`；前端先订阅事件，再调用 `take_pending_launches` 排空，避免丢请求。
 - 前端启动 `get_window_bootstrap` 决定渲染完整 `App` 或 `ExplorerWindow`；轻量窗口在 `main.tsx` 外层包 `ConfirmProvider`，保证弹窗 dirty 关闭与危险确认可用。轻量窗口隐藏创建，React 提交后调用 `show_current_window`；若前端页面加载失败（例如菜单指向的 dev 构建没有 Vite 服务），`show_after_timeout` 会在 3 秒后兜底显示窗口，避免「点了菜单没反应」。`main.tsx` 在捕获阶段拦截 F5 / Ctrl+R，防止刷新清空窗口启动上下文。不读取 / 保存主窗口的窗口几何、页签、分组或最近仓库。
 - exe 始终使用 Windows GUI 子系统，Explorer 从注册表菜单启动新进程时不会闪控制台窗口；调试构建在标准句柄缺失时 `AttachConsole(ATTACH_PARENT_PROCESS)` 并用 `CONOUT$` 恢复 stdout / stderr（已有句柄 / 重定向保持原样），所以 dev.bat / cargo / tauri dev 启动时日志仍可见。派生 `git` / `explorer.exe` 的 `CREATE_NO_WINDOW` 仍是独立要求。
+- 轻量窗口在 `create_explorer_window` 中以 `decorations(false)` 创建，统一由 `PortableTitleBar` 自绘标题栏：左侧复用 Explorer 菜单图标 + 标题 + 仓库 / 操作信息，右侧最小化 / 最大化 / 还原 / 关闭。图标通过 `get_explorer_action_icon` 从 `explorer.rs::ICON_FILES` 的内嵌 ICO 取第一帧 PNG 转 data URL，因此和右键菜单里的图标是同一份资源；标题栏整体及图标 / 文字带 `data-tauri-drag-region="deep"`，控制按钮显式设为 `"false"`，图标和文字统一 16px 高垂直居中。标题栏控件用 `getCurrentWindow()` 的 `minimize` / `toggleMaximize` / `isMaximized` + `onResized`。窗口关闭按钮仍走 `closeCurrentWindow()` 的 busy / dirty 守卫；操作成功后应用主动关窗用 `closeCurrentWindow(true)`。
+- 轻量窗口的原生关闭由 `portableWindow.ts::usePortableCloseGuard` 在 `closeRequested` 上按 busy / dirty 拦截。`closeCurrentWindow()`（无参）发 `close()` 走同一守卫，供用户取消使用；操作成功后应用主动关窗必须传 `force=true` 改走 `destroy()`：它不发 `closeRequested`、仍能触发 Rust 的 `Destroyed` 会话清理。不要在 busy 尚未清除时调用无参 `close()`——守卫会 `preventDefault`，调用方又 `await`，窗口将永久卡死（历史 bug：Create new repository「创建并打开」与 Clone）。同理主窗口 `App.closeWindow` 在确认后先置 `allowCloseRef` 再 `close()`。
 - Open repository / Settings 由主窗口串行消费；Repository settings 是轻量窗口内的只读仓库配置面板。Open 复用 `openRepo` 去重 / 激活页签；Settings 直接打开设置弹窗。轻量动作窗口是单任务界面，不启动提交日志洪流或主工作区轮询。
 
 ## 4. IPC 契约
@@ -62,12 +66,14 @@
 | `get_window_bootstrap` / `take_pending_launches` | 当前窗口 `{ kind: main \| explorer, requests }`；bootstrap 可重复调用并始终返回创建时的初始请求（页面刷新后仍能恢复），pending 仅由 `take_pending_launches` 排空 |
 | `show_current_window` / `focus_main_window` / `open_repository_in_main` | 显示当前轻量窗口；确保并聚焦主窗口；把仓库路径排入主窗口 Open 请求 |
 | `get_explorer_integration_info` / `set_explorer_context_menu_enabled` | `{ supported }` / `{ enabled, items, alwaysShowAllCommands }`；items 为强类型 action + placement（top / cascade / others / hidden），重复 action 拒绝、缺项按 hidden；任一上下文（目录 / 文件）整棵级联树超过 16 项返回错误 |
+| `get_explorer_action_icon` | `{ action } -> data:image/png;base64,... \| null`；从 `ICON_FILES` 内嵌菜单 ICO 的第一帧取 16×16 PNG，供轻量窗口标题栏复用；失败时返回 `null` |
 | `resolve_explorer_target` | `{ repo, scope: repository \| directory \| file, relativePath }`；文件从父目录 open，拒绝仓库外与 `.git` 内部路径 |
 | `scoped_history` | 从 `HEAD` 取历史；目录按 pathspec 过滤，文件启用 `--follow`；最多 5000 条 |
 | `list_head_files` / `get_file_content` | `list_head_files` 递归列出 HEAD tree 的 blob（不含暂存区未提交新文件）；`get_file_content` 读取指定 revision（默认 HEAD）内容，2 MiB 截断、binary 标记 |
 | `rename_path` | `{ path, relative, newName } -> 新相对路径`；只允许同目录改名，`git mv` 失败时保留原错误；未跟踪内容拒绝 |
+| `ignore_file` / `ignore_file_at` | `{ path, pattern }` / `{ path, directory, pattern }`；追加到仓库根或指定相对目录的 `.gitignore`，目录不存在时拒绝，重复规则不追加；路径防逃逸与符号链接 |
 | `pull_with_output` / `pull` | `pull` 支持 `mode`、`autostash`、`remote` / `branch`、`fetchOnly`、`prune`、`tagsMode`；`pull_with_output` 保留 stdout/stderr 双通道 |
-| `clone_repository` / `clone_repository_with_progress` / `create_repository` | 绝对目标 path；成功返回可打开的规范化路径。Clone 目标须不存在或为空；Create 支持 `bare=true`（`--bare --shared=all`），拒绝嵌套。带进度版本按 `operationId` 推送 `clone-progress` 事件 `{ operationId, line }`（git stderr 逐行） |
+| `clone_repository` / `clone_repository_with_progress` / `create_repository` / `list_remote_branches` | 绝对目标 path；成功返回可打开的规范化路径。Clone 目标须不存在或为空；options 含 `branch`（空 = 远端 HEAD）、`initSubmodules`（`--recurse-submodules`）、`depthOne`（`--depth 1`）、`singleBranch`（`--single-branch`），branch 名经引用名校验；`list_remote_branches({ url })` 只读返回 `refs/heads/` 分支名（禁用交互凭证提示），不申请写锁。Create 支持 `bare=true`（`--bare --shared=all`），拒绝嵌套；普通仓库界面提供「创建并打开」和「创建」（只创建不打开）两个按钮，中心仓库只有「创建」。带进度版本按 `operationId` 推送 `clone-progress` 事件 `{ operationId, line }`（git stderr 逐行） |
 | `resolve_revision` / `checkout_revision` | revision peel 为完整 commit OID；checkout 只接受完整 OID，以 CLI detached switch 执行；`force` 对应 `--force` |
 | `open_difftool` / `list_tracked_files` | difftool 传仓库内 file + staged，等待已配置工具退出；tracked 清单排除 gitlink 与冲突 stage |
 | `preview_add_files` / `add_files` | Filter 按 Git pathspec 解释；preview 执行 `git add --dry-run`，add 执行 `git add`（可选 `-f`），返回原始终端输出与退出码 |

@@ -7,7 +7,7 @@ const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind
 const { workspaceAction, workspaceLaunch } = await import(`data:text/javascript;base64,${Buffer.from(js).toString("base64")}`);
 
 test("App 动作不会误投递到工作区", () => {
-  for (const action of ["clone", "create-repository", "open-repository", "settings"]) assert.equal(workspaceAction(action), null);
+  for (const action of ["clone", "create-repository", "open-repository", "settings", "repository-settings", "view-files", "rename", "ignore"]) assert.equal(workspaceAction(action), null);
 });
 
 test("全部资源管理器仓库动作保持名称并只绑定实际仓库根目录", () => {

@@ -116,6 +116,7 @@ fn clone_and_create_validate_targets_and_release_failed_target_leases() {
     let opened = tauri::async_runtime::block_on(git::commands::clone_repository(
         clone_path.clone(),
         source.path(),
+        None,
     ))
     .unwrap();
     assert_eq!(opened, clone_path);
@@ -512,6 +513,19 @@ diff --git a/file.txt b/file.txt
     git::cli::ignore_file(repo.path(), "*.log".into()).unwrap();
     let gitignore = fs::read_to_string(repo.root.join(".gitignore")).unwrap();
     assert_eq!(gitignore.lines().filter(|l| *l == "*.log").count(), 1);
+    // 目录级 .gitignore：只写到指定目录，重复写入不会累加。
+    fs::create_dir_all(repo.root.join("nested")).unwrap();
+    git::cli::ignore_file_at(repo.path(), Some("nested".into()), "local.log".into()).unwrap();
+    git::cli::ignore_file_at(repo.path(), Some("nested".into()), "local.log".into()).unwrap();
+    let nested_gitignore = fs::read_to_string(repo.root.join("nested/.gitignore")).unwrap();
+    assert_eq!(
+        nested_gitignore
+            .lines()
+            .filter(|l| *l == "local.log")
+            .count(),
+        1
+    );
+    assert_eq!(gitignore.lines().filter(|l| *l == "local.log").count(), 0);
 
     // 6. Remotes CRUD
     git::cli::remote_add(
@@ -977,4 +991,47 @@ fn submodule_sync_and_git_maintenance_accept_only_whitelisted_actions() {
     let error =
         git_extensions_lib::system::edit_repo_file(repo.path(), "random".into()).unwrap_err();
     assert!(error.to_string().contains("unsupported repository file"));
+}
+
+#[test]
+fn clone_options_and_remote_branch_query_are_validated_and_applied() {
+    let workspace = Workspace::new();
+    let source = workspace.repo("branch-source");
+    source.commit("tracked.txt", "main\n");
+    let source_repo = source.repo();
+    let head = source_repo.head().unwrap().peel_to_commit().unwrap();
+    source_repo.branch("release", &head, false).unwrap();
+
+    let branches = git::cli::list_remote_branches(source.path()).unwrap();
+    assert!(branches.contains(&"main".to_string()));
+    assert!(branches.contains(&"release".to_string()));
+    assert!(git::cli::list_remote_branches("--upload-pack=unexpected".into()).is_err());
+
+    let options = git::cli::CloneOptions {
+        branch: "release".into(),
+        init_submodules: true,
+        depth_one: true,
+        single_branch: true,
+    };
+    let target = workspace.path("clone-with-options");
+    git::cli::clone_repository_with_options(target.clone(), source.path(), options, |_| {})
+        .unwrap();
+    let cloned = git2::Repository::open(&target).unwrap();
+    assert_eq!(
+        cloned.head().unwrap().shorthand(),
+        Some("release"),
+        "clone must check out the selected branch"
+    );
+
+    let invalid = git::cli::CloneOptions {
+        branch: "--upload-pack=unexpected".into(),
+        ..Default::default()
+    };
+    assert!(git::cli::clone_repository_with_options(
+        workspace.path("clone-invalid-branch"),
+        source.path(),
+        invalid,
+        |_| {},
+    )
+    .is_err());
 }

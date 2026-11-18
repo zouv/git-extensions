@@ -36,6 +36,13 @@ function inferredName(url: string) {
   return name && !name.startsWith("-") ? name : "repository";
 }
 
+/** 空分支表示使用远端 HEAD；勾选项默认值与 CloneDialog 的初始状态一致。 */
+const DEFAULT_OPTIONS = { branch: "", initSubmodules: true, depthOne: false, singleBranch: false };
+
+function branchMenuLabel(branch: string) {
+  return branch.trim() ? branch : "(default: remote HEAD)";
+}
+
 /** 解析 `Receiving objects: 45% (...)` 一类的 git --progress 输出。 */
 function parseCloneProgress(line: string): CloneStatus | null {
   const cleaned = line.replace(/^remote:\s*/i, "").trim();
@@ -57,11 +64,19 @@ export default function CloneDialog({ initialParent, onOpen, onClose, onBusyChan
   const [elapsed, setElapsed] = useState(0);
   const [localBusy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [options, setOptions] = useState({ ...DEFAULT_OPTIONS });
+  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
+  const [remoteBranches, setRemoteBranches] = useState<string[] | null>(null);
+  const [branchQueryBusy, setBranchQueryBusy] = useState(false);
+  const [branchQueryError, setBranchQueryError] = useState<string | null>(null);
   const logRef = useRef<HTMLPreElement>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
   const repoBusy = useRepoBusy(destination.trim());
   const busy = localBusy || repoBusy;
-  const dirty = phase !== "done" && (url.trim().length > 0 || destination !== initialParent);
+  const dirty = phase !== "done" && (
+    url.trim().length > 0 || destination !== initialParent ||
+    options.branch.trim().length > 0 || options.depthOne || options.singleBranch || !options.initSubmodules
+  );
   const close = useDirtyClose(dirty, busy, onClose);
 
   useEffect(() => {
@@ -104,6 +119,26 @@ export default function CloneDialog({ initialParent, onOpen, onClose, onBusyChan
     } catch (e) { setError(String(e)); }
   };
 
+  const queryRemoteBranches = async () => {
+    if (!url.trim() || branchQueryBusy) return;
+    setBranchQueryBusy(true);
+    setBranchQueryError(null);
+    try {
+      setRemoteBranches(await api.listRemoteBranches(url.trim()));
+    } catch (e) {
+      setBranchQueryError(String(e));
+    } finally {
+      setBranchQueryBusy(false);
+    }
+  };
+
+  const cloneOptions = () => ({
+    branch: options.branch.trim(),
+    initSubmodules: options.initSubmodules,
+    depthOne: options.depthOne,
+    singleBranch: options.singleBranch,
+  });
+
   const clone = async () => {
     if (busy || !url.trim() || !destination.trim()) return;
     setBusy(true);
@@ -121,7 +156,7 @@ export default function CloneDialog({ initialParent, onOpen, onClose, onBusyChan
         const parsed = parseCloneProgress(progress.line);
         if (parsed) setStatus(parsed);
       });
-      const target = await api.cloneRepositoryWithProgress(destination.trim(), url.trim(), operationId);
+      const target = await api.cloneRepositoryWithProgress(destination.trim(), url.trim(), cloneOptions(), operationId);
       setClonedPath(target || destination.trim());
       setPhase("done");
     } catch (e) {
@@ -140,7 +175,7 @@ export default function CloneDialog({ initialParent, onOpen, onClose, onBusyChan
     setBusy(true);
     setError(null);
     try {
-      const target = await api.cloneRepository(destination.trim(), url.trim());
+      const target = await api.cloneRepository(destination.trim(), url.trim(), cloneOptions());
       const cloned = target || destination.trim();
       try {
         await onOpen(cloned);
@@ -215,9 +250,30 @@ export default function CloneDialog({ initialParent, onOpen, onClose, onBusyChan
   return <Dialog title={phase === "done" ? "克隆完成" : "克隆仓库"} onClose={close} busy={busy} footer={footer}>
     {phase === "form"
       ? <div className="dialog-form">
-        <label><span>远程仓库 URL</span><input data-autofocus disabled={busy} value={url} onChange={(e) => updateUrl(e.target.value)} placeholder="https://example.com/owner/repository.git" /></label>
+        <label><span>远程仓库 URL</span><input data-autofocus disabled={busy} value={url} onChange={(e) => { updateUrl(e.target.value); setRemoteBranches(null); }} placeholder="https://example.com/owner/repository.git" /></label>
         <label><span>目标目录（将克隆到这里）</span><div className="path-input-row"><input disabled={busy} value={destination} onChange={(e) => { setDestination(e.target.value); setDestinationEdited(true); }} /><button type="button" disabled={busy} onClick={() => void browse()}>浏览…</button></div></label>
-        <div className="settings-note">资源管理器所选目录仅作为默认父目录；未指定时请手动选择目标目录。凭证由本机 Git credential helper 处理，应用不会保存凭证。</div>
+        <label><span>Branch（可选，默认使用远端 HEAD）</span>
+          <div className="branch-combo">
+            <input disabled={busy} value={options.branch} onChange={(e) => setOptions((prev) => ({ ...prev, branch: e.target.value }))} placeholder={branchMenuLabel("")} aria-label="分支名称" />
+            <button type="button" disabled={busy} aria-expanded={branchMenuOpen} aria-label="分支列表" onClick={() => setBranchMenuOpen((open) => !open)}>▾</button>
+            {branchMenuOpen && <div className="branch-combo-menu" role="listbox">
+              {remoteBranches === null
+                ? <button type="button" role="option" disabled={branchQueryBusy || !url.trim()} onClick={() => void queryRemoteBranches()}>
+                  {branchQueryBusy ? "查询中…" : "查询远程分支"}
+                </button>
+                : <>
+                  {remoteBranches.length === 0 && <span className="muted branch-combo-empty">没有找到远程分支</span>}
+                  {remoteBranches.map((name) => <button key={name} type="button" role="option" aria-selected={options.branch === name} onClick={() => { setOptions((prev) => ({ ...prev, branch: name })); setBranchMenuOpen(false); }}>{name}</button>)}
+                  <button type="button" role="option" disabled={branchQueryBusy || !url.trim()} onClick={() => void queryRemoteBranches()}>{branchQueryBusy ? "查询中…" : "重新查询远程分支"}</button>
+                </>}
+              {branchQueryError && <span className="inline-error" role="alert">{branchQueryError}</span>}
+            </div>}
+          </div>
+        </label>
+        <label className="checkbox-row" title="同时递归克隆并初始化所有子模块（git clone --recurse-submodules）"><input type="checkbox" disabled={busy} checked={options.initSubmodules} onChange={(e) => setOptions((prev) => ({ ...prev, initSubmodules: e.target.checked }))} />Initialize all submodules</label>
+        <label className="checkbox-row" title="只下载最近一次提交，创建浅克隆（git clone --depth 1）；不能与需要完整历史的场景同时使用"><input type="checkbox" disabled={busy} checked={options.depthOne} onChange={(e) => setOptions((prev) => ({ ...prev, depthOne: e.target.checked }))} />depth 1</label>
+        <label className="checkbox-row" title="只跟踪选中分支的历史，减小克隆体积（git clone --single-branch）"><input type="checkbox" disabled={busy} checked={options.singleBranch} onChange={(e) => setOptions((prev) => ({ ...prev, singleBranch: e.target.checked }))} />single-branch</label>
+        <div className="settings-note">资源管理器所选目录仅作为默认父目录；未指定时请手动选择目标目录。凭证由本机 Git credential helper 处理，应用不会保存凭证；分支列表仅在点击「查询远程分支」后读取。</div>
         {error && <div className="inline-error" role="alert">{error}</div>}
       </div>
       : <div className="clone-result">
