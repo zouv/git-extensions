@@ -2,6 +2,7 @@
 chcp 65001 >nul
 setlocal
 rem Git Extensions - dev: run the desktop app with frontend HMR.
+rem A running app instance from this repository is force-closed before the build.
 pushd "%~dp0"
 if errorlevel 1 exit /b 1
 where pnpm >nul 2>&1
@@ -13,6 +14,9 @@ if not exist node_modules (
     echo [INFO] node_modules missing, running pnpm install first...
     pnpm install || (popd & exit /b 1)
 )
+echo [INFO] Closing any running instance from this repository...
+node "%~dp0scripts\dev-guard.mjs"
+if errorlevel 1 (popd & exit /b 1)
 echo [INFO] Starting Git Extensions in dev mode (separate from installed release)...
 pnpm tauri:dev
 set "CODE=%ERRORLEVEL%"
