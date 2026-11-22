@@ -1121,6 +1121,108 @@ pub fn get_push_info(path: String) -> GitResult<PushInfo> {
     })
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnpushedCommit {
+    pub oid: String,
+    pub short_id: String,
+    pub subject: String,
+    pub author_name: String,
+    pub author_time: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnpushedCommits {
+    pub commits: Vec<UnpushedCommit>,
+    pub truncated: bool,
+    /// 实际比较的远程跟踪引用；None = 目标分支尚未抓取到本地，无法列出。
+    pub base_ref: Option<String>,
+}
+
+const MAX_UNPUSHED_COMMITS: usize = 500;
+
+/// 只读列出 HEAD 领先 upstream（或显式 remote/branch）的提交，供 Push 界面预览。
+/// 不访问网络：远程跟踪引用不存在时返回 baseRef=None，由 UI 提示先 Fetch。
+pub fn get_unpushed_commits(
+    path: String,
+    remote: Option<String>,
+    branch: Option<String>,
+) -> GitResult<UnpushedCommits> {
+    let empty = UnpushedCommits {
+        commits: Vec::new(),
+        truncated: false,
+        base_ref: None,
+    };
+    let repo = open(&path)?;
+    let head = match repo.head() {
+        Ok(head) => head,
+        Err(_) => return Ok(empty),
+    };
+    let Some(head_oid) = head.target() else {
+        return Ok(empty);
+    };
+    let base_ref_name = match (remote, branch) {
+        (Some(remote), Some(branch)) => {
+            let remote = remote.trim();
+            let branch = branch.trim();
+            validate_new_remote_name(remote)?;
+            validate_ref_name(branch, "heads")?;
+            format!("refs/remotes/{remote}/{branch}")
+        }
+        _ => {
+            let Some(name) = head.shorthand() else {
+                return Ok(empty);
+            };
+            let Ok(branch) = repo.find_branch(name, git2::BranchType::Local) else {
+                return Ok(empty);
+            };
+            let Ok(upstream) = branch.upstream() else {
+                return Ok(empty);
+            };
+            match upstream.get().name() {
+                Some(name) => name.to_string(),
+                None => return Ok(empty),
+            }
+        }
+    };
+    let base_oid = match repo
+        .find_reference(&base_ref_name)
+        .ok()
+        .and_then(|reference| reference.target())
+    {
+        Some(oid) => oid,
+        None => return Ok(empty),
+    };
+    let mut walk = repo.revwalk()?;
+    walk.set_sorting(git2::Sort::TIME)?;
+    walk.push(head_oid)?;
+    walk.hide(base_oid)?;
+    let mut commits = Vec::new();
+    let mut truncated = false;
+    for oid in walk {
+        let oid = oid?;
+        if commits.len() >= MAX_UNPUSHED_COMMITS {
+            truncated = true;
+            break;
+        }
+        let commit = repo.find_commit(oid)?;
+        let oid_text = oid.to_string();
+        commits.push(UnpushedCommit {
+            short_id: oid_text[..7].to_string(),
+            oid: oid_text,
+            subject: commit.summary().unwrap_or_default().to_string(),
+            author_name: commit.author().name().unwrap_or_default().to_string(),
+            author_time: commit.author().when().seconds(),
+        });
+    }
+    Ok(UnpushedCommits {
+        commits,
+        truncated,
+        base_ref: Some(base_ref_name),
+    })
+}
+
 fn paths_args(paths: &[String]) -> GitResult<Vec<String>> {
     if paths.is_empty() {
         return Err(GitError::InvalidInput("no paths given".into()));

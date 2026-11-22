@@ -177,9 +177,8 @@ kbd { font: 11px Consolas, monospace; }
 .inspector { flex: 0 0 auto; min-width: 280px; min-height: 160px; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
 .content-area.vertical > .inspector { min-width: 0; }
 .inspector.maximized { flex: 1; width: auto !important; height: auto !important; }
-/* 窄窗保护：检查器 / 变更列表让出空间，提交图始终保留可读宽度。 */
+/* 窄窗保护：检查器让出空间，提交图始终保留可读宽度；变更列表宽度由用户拖拽决定，不设上限。 */
 .content-area.horizontal > .inspector:not(.maximized) { max-width: calc(100% - 380px); }
-.changes-panel > .changes-left { max-width: calc(100% - 340px); }
 .inspector-header { min-height: 35px; display: flex; align-items: center; padding: 3px 6px; background: var(--surface); border-bottom: 1px solid var(--border); }
 .inspector-header .tabs { flex: 1; }
 .inspector-content { flex: 1; min-height: 0; overflow: hidden; }
@@ -313,9 +312,10 @@ kbd { font: 11px Consolas, monospace; }
 
 /* 变更工作区 */
 .changes-panel { display: flex; flex: 1; height: 100%; min-width: 0; min-height: 0; }
-.changes-left { min-width: 300px; flex: 0 0 auto; display: flex; flex-direction: column; background: var(--surface); }
+.changes-left { min-width: 0; flex: 0 0 auto; display: flex; flex-direction: column; background: var(--surface); }
 .changes-filter { display: flex; align-items: center; gap: 5px; margin: 6px; padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); }
 .changes-filter input { min-width: 0; flex: 1; border: 0; background: transparent; }
+.changes-tree-toggle { flex: 0 0 auto; padding: 2px 4px; font-size: 11px; white-space: nowrap; }
 .changes-list { flex: 1; min-height: 80px; display: flex; flex-direction: column; border-top: 1px solid var(--border); }
 .changes-list-header { min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 5px; padding: 4px 8px; background: var(--elevated); }
 .changes-list-header strong { display: flex; align-items: center; gap: 6px; font-weight: 500; }
@@ -327,6 +327,8 @@ kbd { font: 11px Consolas, monospace; }
 .changes-item:hover { background: var(--hover); }
 .changes-item.selected { background: var(--selected); }
 .changes-item.conflicted { color: #ffc078; }
+.changes-directory { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 24px; border: 0; background: transparent; color: var(--muted); padding-top: 3px; padding-bottom: 3px; padding-right: 8px; font-size: 11px; white-space: nowrap; cursor: pointer; text-align: left; }
+.changes-directory:hover { background: var(--hover); }
 .changes-preview { flex: 1; min-width: 0; overflow: hidden; }
 .commit-box { position: relative; display: flex; flex-direction: column; gap: 5px; padding: 7px; border-top: 1px solid var(--border); }
 .commit-box textarea { resize: none; }
@@ -636,6 +638,19 @@ body.dialog-resizing { user-select: none; }
 .push-options label { display: flex; flex-direction: column; gap: 6px; }
 .push-options select, .push-options input { width: 100%; min-width: 0; }
 .push-error { margin-top: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
+/* 待推送提交列表与提交内容查看 */
+.push-commits { display: flex; flex-direction: column; gap: 6px; }
+.push-commits > strong { font-weight: 500; }
+.push-commit-list { display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); }
+.push-commit-row { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border: 0; border-radius: 0; background: transparent; text-align: left; cursor: pointer; white-space: nowrap; }
+.push-commit-row:hover { background: var(--hover); }
+.push-commit-row code { flex: 0 0 auto; color: var(--accent); }
+.push-commit-subject { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.push-commit-meta { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+.commit-content-meta { color: var(--muted); overflow-wrap: anywhere; }
+.commit-content-message { margin: 0; padding: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 20vh; overflow: auto; }
+.commit-content-diff { display: flex; height: 48vh; min-height: 240px; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+.commit-content-diff > .diff-view { flex: 1; min-width: 0; min-height: 0; }
 
 /* Reset / 恢复与批量计划：窄窗口可换行，长路径不挤出对话框。 */
 .reset-modes, .rebase-batch { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px; }

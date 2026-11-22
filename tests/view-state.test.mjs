@@ -12,6 +12,7 @@ const {
   hasSessionDrafts,
   extractHunkPatch,
   buildBranchTree,
+  buildFileTreeRows,
   applyAutosquashOrder,
 } = await import(url);
 
@@ -115,3 +116,37 @@ test("applyAutosquashOrder 自动将 fixup! 与 squash! 移到目标提交后并
   ]);
 });
 
+
+test("buildFileTreeRows 按路径排序生成目录行并保留原清单下标", () => {
+  const entries = [
+    { path: "src/b.ts", index: 0, value: "b" },
+    { path: "README.md", index: 1, value: "readme" },
+    { path: "src/a.ts", index: 2, value: "a" },
+    { path: "src/deep/c.ts", index: 3, value: "c" },
+  ];
+  const rows = buildFileTreeRows(entries, new Set());
+  assert.deepEqual(rows.map((row) => row.kind === "dir" ? `dir:${row.path}@${row.depth}` : `file:${row.value}@${row.depth}#${row.index}`), [
+    "file:readme@0#1",
+    "dir:src@0",
+    "file:a@1#2",
+    "file:b@1#0",
+    "dir:src/deep@1",
+    "file:c@2#3",
+  ]);
+});
+
+test("buildFileTreeRows 折叠目录隐藏其下文件与子目录，嵌套折叠只影响子树", () => {
+  const entries = [
+    { path: "src/a.ts", index: 0, value: "a" },
+    { path: "src/deep/c.ts", index: 1, value: "c" },
+    { path: "docs/d.md", index: 2, value: "d" },
+  ];
+  const collapsedSrc = buildFileTreeRows(entries, new Set(["src"]));
+  assert.deepEqual(collapsedSrc.map((row) => row.kind === "dir" ? `dir:${row.path}` : `file:${row.value}`), [
+    "dir:docs", "file:d", "dir:src",
+  ]);
+  const collapsedDeep = buildFileTreeRows(entries, new Set(["src/deep"]));
+  assert.deepEqual(collapsedDeep.map((row) => row.kind === "dir" ? `dir:${row.path}` : `file:${row.value}`), [
+    "dir:docs", "file:d", "dir:src", "file:a", "dir:src/deep",
+  ]);
+});

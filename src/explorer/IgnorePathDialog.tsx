@@ -10,6 +10,10 @@ interface Props {
   onClose: () => void;
   onDirtyChange?: (dirty: boolean) => void;
   setMessage: (message: string) => void;
+  /** 写入成功后的回调（主窗口用于刷新工作区；轻量窗口关闭后不需要）。 */
+  onChanged?: () => void;
+  /** 覆盖默认规则（如「忽略同类后缀」传入 *.ext）；两个写入位置都用它。 */
+  initialPattern?: string;
 }
 
 function baseName(path: string): string {
@@ -18,15 +22,15 @@ function baseName(path: string): string {
 }
 
 /**
- * 资源管理器 Add to ignore 动作：把选中的文件 / 目录写入仓库根目录或
- * 其所属目录的 .gitignore。规则默认选中完整路径（根目录）或末段名称
- * （所属目录），两者都可编辑。
+ * Add to ignore 弹窗（资源管理器动作与主窗口变更面板共用）：把选中的
+ * 文件 / 目录写入仓库根目录或其所属目录的 .gitignore。规则默认选中完整
+ * 路径（根目录）或末段名称（所属目录），两者都可编辑。
  */
-export default function IgnorePathDialog({ repoPath, relativePath, scope, onClose, onDirtyChange, setMessage }: Props) {
+export default function IgnorePathDialog({ repoPath, relativePath, scope, onClose, onDirtyChange, setMessage, onChanged, initialPattern }: Props) {
   const cleanPath = relativePath.replace(/\/+$/, "");
   const parentDir = cleanPath.includes("/") ? cleanPath.slice(0, cleanPath.lastIndexOf("/")) : "";
-  const rootRule = scope === "directory" ? `${cleanPath}/` : cleanPath;
-  const localRule = `${baseName(cleanPath)}${scope === "directory" ? "/" : ""}`;
+  const rootRule = initialPattern ?? (scope === "directory" ? `${cleanPath}/` : cleanPath);
+  const localRule = initialPattern ?? `${baseName(cleanPath)}${scope === "directory" ? "/" : ""}`;
   const [location, setLocation] = useState<"root" | "parent">("root");
   const [pattern, setPattern] = useState(rootRule);
   const [busy, setBusy] = useState(false);
@@ -59,6 +63,7 @@ export default function IgnorePathDialog({ repoPath, relativePath, scope, onClos
         rule,
       );
       setMessage(message);
+      onChanged?.();
       onClose();
     } catch (reason) {
       setError(String(reason));

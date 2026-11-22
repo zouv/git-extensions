@@ -110,7 +110,8 @@ export function loadLayout(repoPath: string, settings: AppSettings): UILayout {
       inspectorPosition: raw.inspectorPosition === "bottom" ? "bottom" : "right",
       showLeft: typeof raw.showLeft === "boolean" ? raw.showLeft : settings.showLeftPanel,
       showInspector: typeof raw.showInspector === "boolean" ? raw.showInspector : true,
-      changesWidth: bounded(raw.changesWidth, 300, 720, DEFAULT_LAYOUT.changesWidth),
+      // 变更文件列表宽度不设上限（用户可自由拖拽）；仅挡住手工改坏的非法值。
+      changesWidth: bounded(raw.changesWidth, 0, 100_000, DEFAULT_LAYOUT.changesWidth),
       showRemoteBranches: booleanOption(raw.showRemoteBranches, true),
       showTags: booleanOption(raw.showTags, true),
       showGraphColumn: booleanOption(raw.showGraphColumn, true),

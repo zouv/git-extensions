@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { api } from "../api";
-import { extractHunkPatch } from "../viewState";
+import { buildFileTreeRows, extractHunkPatch } from "../viewState";
+import type { FileTreeRow } from "../viewState";
 import { useRepoBusy } from "../useRepoBusy";
 import type { FileDiff, StatusEntry, StatusSnapshot } from "../types";
 import DiffView from "./DiffView";
 import type { FileAction } from "./DiffView";
+import IgnorePathDialog from "../explorer/IgnorePathDialog";
 import ContextMenu from "../ui/ContextMenu";
 import SplitHandle from "../ui/SplitHandle";
 import Icon from "../ui/Icon";
@@ -37,7 +39,9 @@ interface Props {
 }
 
 type Side = "staged" | "unstaged";
-type MenuTarget = { x: number; y: number; side: Side; entry: StatusEntry };
+type MenuTarget = { x: number; y: number; side: Side }
+  & ({ kind: "file"; entry: StatusEntry } | { kind: "dir"; dir: string });
+type IgnoreTarget = { relativePath: string; scope: "file" | "directory"; initialPattern?: string };
 
 function sameDiff(a: FileDiff, b: FileDiff): boolean {
   return a.path === b.path && a.oldPath === b.oldPath && a.status === b.status
@@ -55,6 +59,9 @@ export default function ChangesPanel(props: Props) {
   const busy = localBusy || repoBusy;
   const confirm = useConfirm();
   const [filter, setFilter] = useState("");
+  const [listMode, setListMode] = useState<"list" | "tree">("list");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [ignoreTarget, setIgnoreTarget] = useState<IgnoreTarget | null>(null);
   const [preview, setPreview] = useState<{ side: Side; path: string; file: FileDiff | null } | null>(null);
   const [menu, setMenu] = useState<MenuTarget | null>(null);
   const [previewError, setPreviewError] = useState("");
@@ -208,12 +215,36 @@ export default function ChangesPanel(props: Props) {
     );
   };
 
-  const ignorePattern = (pattern: string) => {
-    void run(
-      () => api.ignoreFile(repoPath, pattern),
-      `已将 ${pattern} 写入 .gitignore`,
-    );
+  /** 还原更改：已暂存 + 未暂存一并恢复到 HEAD；新增文件按 deleteNew 删除。 */
+  const restorePaths = (paths: string[], deleteNew: boolean, label: string) => {
+    if (paths.length === 0) return props.setMessage("没有可还原的变更");
+    void confirm({
+      title: `还原 ${label} 的更改？`,
+      body: deleteNew
+        ? "已暂存与未暂存的修改都将恢复到 HEAD，新增文件 / 目录将被删除。此操作无法通过 Git 恢复。"
+        : "已暂存与未暂存的修改都将恢复到 HEAD。此操作无法通过 Git 恢复。",
+      confirmLabel: "还原更改",
+      danger: true,
+    }).then((ok) => {
+      if (!ok) return;
+      previewRequest.current += 1;
+      setPreview(null);
+      void run(() => api.resetChanges(repoPath, paths, deleteNew), `已还原 ${label} 的更改`);
+    });
   };
+
+  /** 目录下（两侧合并去重）的全部变更路径，供目录右键批量操作；冲突文件除外。 */
+  const pathsUnder = (dir: string) => {
+    const prefix = `${dir}/`;
+    const paths = new Set<string>();
+    for (const entry of [...status.staged, ...status.unstaged]) {
+      if (entry.status !== "conflicted" && entry.path.startsWith(prefix)) paths.add(entry.path);
+    }
+    return [...paths];
+  };
+  const sidePathsUnder = (side: Side, dir: string) => scoped(side === "staged" ? status.staged : status.unstaged)
+    .filter((entry) => entry.path.startsWith(`${dir}/`))
+    .map((entry) => entry.path);
 
   const doCommit = () => {
     if (busy) return;
@@ -233,7 +264,7 @@ export default function ChangesPanel(props: Props) {
     const index = preview?.side === side ? visible.findIndex((entry) => entry.path === preview.path) : -1;
     const openMenuAt = (target: StatusEntry, element: HTMLElement | null) => {
       const rect = element?.getBoundingClientRect();
-      setMenu({ x: rect?.left ?? 40, y: rect?.bottom ?? 80, side, entry: target });
+      setMenu({ x: rect?.left ?? 40, y: rect?.bottom ?? 80, side, kind: "file", entry: target });
     };
     if ((event.key === "F10" && event.shiftKey) || event.key === "ContextMenu") {
       event.preventDefault();
@@ -265,7 +296,11 @@ export default function ChangesPanel(props: Props) {
 
   const renderList = (side: Side, entries: StatusEntry[]) => {
     const scopedEntries = scoped(entries);
-    const visible = scopedEntries.filter((entry) => entry.path.toLowerCase().includes(filter.trim().toLowerCase()));
+    const filtered = scopedEntries.filter((entry) => entry.path.toLowerCase().includes(filter.trim().toLowerCase()));
+    const visible = listMode === "tree" ? [...filtered].sort((a, b) => a.path.localeCompare(b.path)) : filtered;
+    const rows: FileTreeRow<StatusEntry>[] = listMode === "tree"
+      ? buildFileTreeRows(visible.map((entry, index) => ({ path: entry.path, index, value: entry })), collapsed)
+      : visible.map((entry, index) => ({ kind: "file", value: entry, index, depth: 0 }));
     const activeIndex = preview?.side === side ? visible.findIndex((entry) => entry.path === preview.path) : -1;
     return <section className="changes-list">
       <div className="changes-list-header">
@@ -283,23 +318,39 @@ export default function ChangesPanel(props: Props) {
         tabIndex={0}
         onKeyDown={(event) => listKeyDown(event, side, visible)}
       >
-        {visible.map((entry, index) => <div
-          key={`${side}-${entry.path}`}
-          id={`changes-${side}-${index}`}
-          className={`changes-item${preview?.path === entry.path && preview.side === side ? " selected" : ""}${entry.status === "conflicted" ? " conflicted" : ""}`}
-          data-path={entry.path}
-          role="option"
-          aria-selected={preview?.path === entry.path && preview.side === side}
-          onClick={(e) => { e.currentTarget.parentElement?.focus({ preventScroll: true }); entry.status === "conflicted" ? props.onOpenConflict() : void showPreview(side, entry.path); }}
-          onDoubleClick={() => { if (entry.status !== "conflicted") stagePaths(side, [entry.path]); }}
-          onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, side, entry }); }}
-          title={entry.path}
-        >
-          <input type="checkbox" aria-label={`选择 ${entry.path}`} checked={checked[side].has(entry.path)} onChange={() => toggle(side, entry.path)} onClick={(e) => e.stopPropagation()} />
-          <span className={`file-status status-${entry.status}`}>{entry.status === "conflicted" ? "!" : entry.status[0].toUpperCase()}</span>
-          <span className="file-path">{entry.path}</span>
-          {entry.status === "conflicted" && <Icon name="conflict" size={14} />}
-        </div>)}
+        {rows.map((row) => row.kind === "dir" ? (
+          <button
+            key={`${side}-dir-${row.path}`}
+            className="changes-directory"
+            style={{ paddingLeft: 8 + row.depth * 14 }}
+            tabIndex={-1}
+            title={row.path}
+            onClick={() => setCollapsed((prev) => { const next = new Set(prev); if (next.has(row.path)) next.delete(row.path); else next.add(row.path); return next; })}
+            onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, side, kind: "dir", dir: row.path }); }}
+          >
+            <Icon name={collapsed.has(row.path) ? "folder" : "chevron-down"} size={13} />
+            <span>{row.path.split("/").pop()}</span>
+          </button>
+        ) : (
+          <div
+            key={`${side}-${row.value.path}`}
+            id={`changes-${side}-${row.index}`}
+            className={`changes-item${preview?.path === row.value.path && preview.side === side ? " selected" : ""}${row.value.status === "conflicted" ? " conflicted" : ""}`}
+            style={{ paddingLeft: 8 + row.depth * 14 }}
+            data-path={row.value.path}
+            role="option"
+            aria-selected={preview?.path === row.value.path && preview.side === side}
+            onClick={(e) => { e.currentTarget.parentElement?.focus({ preventScroll: true }); row.value.status === "conflicted" ? props.onOpenConflict() : void showPreview(side, row.value.path); }}
+            onDoubleClick={() => { if (row.value.status !== "conflicted") stagePaths(side, [row.value.path]); }}
+            onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, side, kind: "file", entry: row.value }); }}
+            title={row.value.path}
+          >
+            <input type="checkbox" aria-label={`选择 ${row.value.path}`} checked={checked[side].has(row.value.path)} onChange={() => toggle(side, row.value.path)} onClick={(e) => e.stopPropagation()} />
+            <span className={`file-status status-${row.value.status}`}>{row.value.status === "conflicted" ? "!" : row.value.status[0].toUpperCase()}</span>
+            <span className="file-path">{listMode === "tree" ? row.value.path.split("/").pop() : row.value.path}</span>
+            {row.value.status === "conflicted" && <Icon name="conflict" size={14} />}
+          </div>
+        ))}
         {visible.length === 0 && <div className="panel-hint">{scopedEntries.length === 0 ? "（空）" : "无匹配文件"}</div>}
       </div>
     </section>;
@@ -309,7 +360,7 @@ export default function ChangesPanel(props: Props) {
     <div className="changes-panel">
       <div className="changes-left" style={{ width: props.width }}>
         {props.error && <InlineError message={props.error} />}
-        <div className="changes-filter"><Icon name="search" size={14} /><input aria-label="过滤变更文件" placeholder="过滤文件…" value={filter} onChange={(e) => setFilter(e.target.value)} />{filter && <button type="button" className="filter-clear" aria-label="清除文件过滤" title="清除文件过滤" onClick={() => setFilter("")}><Icon name="close" size={12} /></button>}</div>
+        <div className="changes-filter"><Icon name="search" size={14} /><input aria-label="过滤变更文件" placeholder="过滤文件…" value={filter} onChange={(e) => setFilter(e.target.value)} />{filter && <button type="button" className="filter-clear" aria-label="清除文件过滤" title="清除文件过滤" onClick={() => setFilter("")}><Icon name="close" size={12} /></button>}<button type="button" className={`text-toggle changes-tree-toggle${listMode === "tree" ? " active" : ""}`} title="切换文件列表 / 目录树" onClick={() => setListMode(listMode === "list" ? "tree" : "list")}>{listMode === "list" ? "目录树" : "列表"}</button></div>
         {props.conflictCount > 0 && <button className="conflict-banner" onClick={props.onOpenConflict}><Icon name="conflict" /><span>{props.conflictCount} 个冲突待解决</span><strong>进入解决 →</strong></button>}
         {renderList("unstaged", status.unstaged)}
         {renderList("staged", status.staged)}
@@ -331,7 +382,7 @@ export default function ChangesPanel(props: Props) {
           <button className="primary commit-button" disabled={busy || (!amend && scopedStaged.length === 0)} onClick={doCommit}>{busy ? <span className="spinner" /> : <Icon name="check" />}{amend ? `修正提交 (${scopedStaged.length})` : `提交 (${scopedStaged.length})`}</button>
         </div>
       </div>
-      <SplitHandle direction="vertical" label="调整变更文件列表宽度" onResize={(delta) => props.onWidth(Math.min(720, Math.max(300, props.width + delta)))} onReset={() => props.onWidth(420)} />
+      <SplitHandle direction="vertical" label="调整变更文件列表宽度" onResize={(delta) => props.onWidth(Math.max(0, props.width + delta))} onReset={() => props.onWidth(420)} />
       <div className="changes-preview">
         {preview?.file ? <DiffView
           files={[preview.file]}
@@ -348,18 +399,34 @@ export default function ChangesPanel(props: Props) {
           } : undefined}
         /> : preview ? previewError ? <div className="empty-state" role="alert">{previewError}</div> : <div className="empty-state"><span className="spinner" /><span>diff 加载中…</span></div> : <div className="empty-state"><Icon name="file" size={28} /><strong>选择一个文件</strong><span>查看工作区或暂存区差异</span></div>}
       </div>
-      {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} ariaLabel={`${menu.entry.path} 操作`} items={[
+      {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} ariaLabel={menu.kind === "dir" ? `目录 ${menu.dir} 操作` : `${menu.entry.path} 操作`} items={menu.kind === "dir" ? [
+        { id: "stage-dir", label: menu.side === "staged" ? "取消暂存目录下全部文件" : "暂存目录下全部文件", onSelect: () => stagePaths(menu.side, sidePathsUnder(menu.side, menu.dir)) },
+        { id: "sep-restore", separator: true },
+        { id: "restore-dir", label: "还原更改…", danger: true, onSelect: () => {
+          const paths = pathsUnder(menu.dir);
+          const hasNew = [...status.staged, ...status.unstaged].some((entry) => entry.path.startsWith(`${menu.dir}/`) && entry.status === "new");
+          restorePaths(paths, hasNew, `目录 ${menu.dir}`);
+        } },
+        ...(menu.side === "unstaged" ? [
+          { id: "sep-ignore", separator: true },
+          { id: "ignore-dir", label: "添加到 ignore…", onSelect: () => setIgnoreTarget({ relativePath: menu.dir, scope: "directory" }) },
+        ] : []),
+      ] : [
         ...(menu.entry.status !== "conflicted" ? [{ id: "stage", label: menu.side === "staged" ? "取消暂存" : "暂存", onSelect: () => stagePaths(menu.side, [menu.entry.path]) }] : [{ id: "resolve", label: "解决冲突", icon: "conflict" as const, onSelect: props.onOpenConflict }]),
         { id: "open", label: "打开文件", icon: "external", onSelect: () => props.onPathAction("open", menu.entry.path) },
         { id: "reveal", label: "在文件管理器中显示", icon: "folder", onSelect: () => props.onPathAction("reveal", menu.entry.path) },
         { id: "copy", label: "复制相对路径", icon: "copy", onSelect: () => props.onPathAction("copy-path", menu.entry.path) },
+        ...(menu.entry.status !== "conflicted" ? [
+          { id: "sep-restore", separator: true },
+          { id: "restore", label: "还原更改…", danger: true, onSelect: () => restorePaths([menu.entry.path], menu.entry.status === "new", menu.entry.path) },
+        ] : []),
         ...(menu.side === "unstaged" ? [
           { id: "sep-ignore", separator: true },
-          { id: "ignore-file", label: "添加到 .gitignore", onSelect: () => ignorePattern(menu.entry.path) },
+          { id: "ignore-file", label: "添加到 ignore…", onSelect: () => setIgnoreTarget({ relativePath: menu.entry.path, scope: "file" }) },
           ...(menu.entry.path.includes(".") && !menu.entry.path.endsWith(".") ? [{
             id: "ignore-ext",
-            label: `忽略同类后缀 (*.${menu.entry.path.split(".").pop()})`,
-            onSelect: () => ignorePattern(`*.${menu.entry.path.split(".").pop()}`),
+            label: `忽略同类后缀 (*.${menu.entry.path.split(".").pop()})…`,
+            onSelect: () => setIgnoreTarget({ relativePath: menu.entry.path, scope: "file", initialPattern: `*.${menu.entry.path.split(".").pop()}` }),
           }] : []),
           { id: "sep", separator: true },
           menu.entry.status === "new"
@@ -367,6 +434,15 @@ export default function ChangesPanel(props: Props) {
             : { id: "discard", label: "丢弃未暂存变更…", danger: true, onSelect: () => props.onDiscard([menu.entry.path], false) },
         ] : []),
       ]} />}
+      {ignoreTarget && <IgnorePathDialog
+        repoPath={repoPath}
+        relativePath={ignoreTarget.relativePath}
+        scope={ignoreTarget.scope}
+        initialPattern={ignoreTarget.initialPattern}
+        onClose={() => setIgnoreTarget(null)}
+        onChanged={() => props.onRefresh()}
+        setMessage={props.setMessage}
+      />}
     </div>
   );
 }

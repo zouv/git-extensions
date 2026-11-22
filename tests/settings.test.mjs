@@ -181,3 +181,18 @@ test("View 显示选项只接受布尔值，非法类型回退默认值", () => 
     assert.equal(loaded.showGraphColumn, DEFAULT_LAYOUT.showGraphColumn);
   });
 });
+
+test("变更文件列表宽度不设上限，仅挡住非法值", () => {
+  withStorage((storage) => {
+    storage.setItem("git-extensions.layout.v2:/wide", JSON.stringify({ changesWidth: 1600 }));
+    assert.equal(loadLayout("/wide", DEFAULT_SETTINGS).changesWidth, 1600);
+    storage.setItem("git-extensions.layout.v2:/narrow", JSON.stringify({ changesWidth: 120 }));
+    assert.equal(loadLayout("/narrow", DEFAULT_SETTINGS).changesWidth, 120);
+    storage.setItem("git-extensions.layout.v2:/zero", JSON.stringify({ changesWidth: 0 }));
+    assert.equal(loadLayout("/zero", DEFAULT_SETTINGS).changesWidth, 0);
+    storage.setItem("git-extensions.layout.v2:/bad", JSON.stringify({ changesWidth: "wide" }));
+    assert.equal(loadLayout("/bad", DEFAULT_SETTINGS).changesWidth, DEFAULT_LAYOUT.changesWidth);
+    storage.setItem("git-extensions.layout.v2:/neg", JSON.stringify({ changesWidth: -5 }));
+    assert.equal(loadLayout("/neg", DEFAULT_SETTINGS).changesWidth, 0);
+  });
+});

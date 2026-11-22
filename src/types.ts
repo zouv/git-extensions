@@ -242,6 +242,21 @@ export interface PushInfo {
   remotes: string[];
 }
 
+export interface UnpushedCommit {
+  oid: string;
+  shortId: string;
+  subject: string;
+  authorName: string;
+  authorTime: number;
+}
+
+export interface UnpushedCommits {
+  commits: UnpushedCommit[];
+  truncated: boolean;
+  /** 实际比较的远程跟踪引用；null = 目标分支尚未抓取到本地，无法列出。 */
+  baseRef: string | null;
+}
+
 export type ResetMode = "soft" | "mixed" | "hard";
 export interface ResetPreview {
   branch: string; headOid: string; targetOid: string; targetSubject: string; mode: ResetMode;

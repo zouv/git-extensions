@@ -21,6 +21,7 @@ import type {
   ConflictFile,
   RebasePlan,
   PushInfo,
+  UnpushedCommits,
   ResetMode, ResetPreview, ResetResult, RecoveryEntry,
   ExplorerIntegrationInfo, LaunchRequest, PatchPreview, ExplorerMenuItem, ExplorerAction,
   WindowBootstrap, ExplorerTarget, ScopedHistoryEntry, CommandOutput,
@@ -118,6 +119,8 @@ export const api = {
     writeInvoke<string>("pull", { path, mode, autostash, remote, branch, fetchOnly, prune, tagsMode }),
   pullWithOutput: (path: string) => writeInvoke<CommandOutput>("pull_with_output", { path }),
   getPushInfo: (path: string) => invoke<PushInfo>("get_push_info", { path }),
+  getUnpushedCommits: (path: string, remote?: string | null, branch?: string | null) =>
+    invoke<UnpushedCommits>("get_unpushed_commits", { path, remote: remote ?? null, branch: branch ?? null }),
   push: (
     path: string,
     remote?: string,

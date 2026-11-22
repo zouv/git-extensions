@@ -106,9 +106,9 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | 写互斥 / 后台执行 | `operations.rs` 的 `acquire_write`、`run_blocking`；`commands.rs` | 同仓库及 linked worktree 拒绝并发写；不同仓库可并行 |
 | 有界后台读取 | `operations.rs` 的 `run_read`、`ReadPermit`；`commands.rs` 读适配、`log.rs::start_log` | 四令牌 FIFO 异步等待；令牌由 blocking 工作持有 |
 | Reset / 恢复备份 | `reset.rs` 的 `get_reset_preview`、`reset`、`get_recovery_entries`、`create_backup` | 原 HEAD 与 branch / index / dirty 内容指纹；Hard clean 保护 |
-| Push 目标与预览 / 远程管理 | `cli.rs` 的 `get_push_info`、`push_ex`、`fetch_ex`、`pull_ex`、`remote_*`；`repo.rs::remote_list` | 不 fallback；支持 `--force-with-lease`、`--tags`、fetch `--prune`、pull 策略与 `--autostash` |
+| Push 目标与预览 / 远程管理 | `cli.rs` 的 `get_push_info`、`get_unpushed_commits`、`push_ex`、`fetch_ex`、`pull_ex`、`remote_*`；`repo.rs::remote_list` | 不 fallback；支持 `--force-with-lease`、`--tags`、fetch `--prune`、pull 策略与 `--autostash`；unpushed 只读 git2 revwalk，不访问网络 |
 | 分支扩展 / Merge / Worktree / Bisect | `cli.rs` 的 `checkout_remote_branch`、`rename_branch`、`delete_branches`、`delete_remote_branch`、`merge_branch`、`worktree_*`、`bisect_*`；`repo.rs::get_merged_branches`、`repo.rs::get_branch_delete_status` | 均经 `acquire_write` 与参数验证；`get_merged_branches` 自动排除当前 HEAD 与常见主干分支；删除预检按 `git branch -d` 的 upstream / HEAD 语义返回 `{name, exists, merged}` |
-| Hunk 暂存 / Fixup / 忽略 / 导出 / 命令日志 | `cli.rs` 的 `apply_diff_patch`、`commit_ex`、`commit_fixup`、`ignore_file`、`format_patch`、`archive_commit`、`get_command_log` | `apply_diff_patch` 通过 stdin 传给 `git apply`；命令日志保留最近 200 条 CLI 记录 |
+| Hunk 暂存 / Fixup / 忽略 / 导出 / 命令日志 | `cli.rs` 的 `apply_diff_patch`、`commit_ex`、`commit_fixup`、`ignore_file`、`ignore_file_at`、`format_patch`、`archive_commit`、`get_command_log` | `apply_diff_patch` 通过 stdin 传给 `git apply`；`ignore_file_at` 可选根 / 所属目录；命令日志保留最近 200 条 CLI 记录 |
 | 重命名工作区文件 / 目录 | `cli.rs` 的 `rename_path`、`validate_rename_name` | 只允许同目录改名；`git mv` 仅处理已跟踪内容；拒绝路径分隔符、`.git`、Windows 保留名与已存在目标 |
 | blame / 文件历史 / 提交与代码搜索 | `history.rs` 的 `blame_file`、`file_log`、`search_commits`、`git_grep` | blame 上限 2 MiB / 20000 行；搜索经受控 CLI NUL 协议解析 |
 | 仓库配置文件 / 子模块同步 / Git 维护 | `cli.rs` 的 `submodule_sync`、`git_maintenance`；`system.rs` 的 `edit_repo_file` | 配置文件与维护动作均固定白名单；gc / 删除 index.lock 走写互斥，删除锁仍不排除外部 Git 进程竞态 |
@@ -182,6 +182,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | 前端 → 后端 | `submodule_sync` / `git_maintenance` / `edit_repo_file` | `git_maintenance` 仅接受 `gc` / `delete-index-lock`；`edit_repo_file` 仅接受 `.gitignore` / `.git/info/exclude` / `.gitattributes` / `.mailmap` / `.git/config`，文件不存在时先创建再交给系统默认编辑器 |
 | 前端 → 后端 | `stash_*` / `cherry_pick` / `revert` / `rebase` / `create_tag` / `delete_tag` / `submodule_update` | 写操作经后台 IPC 与仓库写互斥，仍走 CLI；Push 契约见下一行 |
 | 前端 → 后端 | `get_push_info` / `push` | 信息含 branch、branchRef、headOid、hasUpstream、upstream、remotes；push 可传 remote / branch 和 expectedHead / expectedBranch。明确目标必须携带预览，未指定则须有 upstream 并保留 Git 配置 |
+| 前端 → 后端 | `get_unpushed_commits` | 只读；可选 remote / branch（显式目标）否则用当前分支 upstream；返回 commits（oid / shortId / subject / authorName / authorTime，最多 500 条 + truncated）与 baseRef；远程跟踪引用不存在时 baseRef=null，不访问网络 |
 | 前端 → 后端 | `get_reset_preview` / `reset` / `get_recovery_entries` | target + mode 返回 ResetPreview（branch / headOid / targetOid / fingerprint / 影响）；reset 必须传完整预览，返回 backupRef / previousHead / newHead / output；RecoveryEntry 含 oid / label / time / backupRef |
 | 前端 → 后端 | `stash_apply` / `stash_drop` | 合法 stash@{n} + expectedOid，索引移动或对象变化时拒绝过期选择 |
 | 前端 → 后端 | `get_contained_in` / `tag_list` / `submodule_list` / `worktree_list` / `get_ahead_behind` | 只读；contained-in 的分支 / 标签各限 100 条 |
@@ -232,7 +233,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 - **图标资源必须跨平台齐全**：即使 bundle 未显式引用，`generate_context!` 在非 Windows 构建也需要 PNG；`icons/` 同时保留 ICO / PNG / ICNS，并在 bundle 配置中引用。
 - **窗口启动请求必须可重复读取**：`get_window_bootstrap` 不能 `mem::take` 初始请求，否则 WebView 刷新（F5 / Ctrl+R / 前端重载）后拿不到动作，窗口停在「无法启动窗口」；`WindowSession` 分离 `initial` 与 `pending`，前端同时在捕获阶段拦截 F5 / Ctrl+R。轻量窗口隐藏创建，若前端页面加载失败会永远不显示，`show_after_timeout` 3 秒兜底 show，至少让用户看到错误页并可关闭。
 - **前端交互取舍见分册**：顶部栏 / 页签拖拽 / 分组 / 启动恢复 / 草稿隔离 / 设置白名单 / 高亮限量 / 读取去重等 UI 规则见 [`arch/ui.md §5`](./arch/ui.md)；窗口生命周期与 capabilities 仍以本节和后端代码为准。
-- **窄窗布局用容器查询与宽度上限**：提交图列、检查器 / changes 宽度与工具栏溢出规则见 [`arch/ui.md §5`](./arch/ui.md)；不要恢复固定 `min-width:500` 或让固定 400 / 420 面板挤占核心视图。
+- **窄窗布局用容器查询与宽度上限**：提交图列、检查器宽度与工具栏溢出规则见 [`arch/ui.md §5`](./arch/ui.md)；不要恢复固定 `min-width:500` 或让固定 400 / 420 面板挤占核心视图。变更文件面板宽度例外：用户要求自由拖拽，已移除 300–720 夹取与 CSS 上限，不要恢复。
 - **Explorer 文件/目录动作不同**：Commit/Pull/Push/Stash/View changes/Checkout 只在目录上下文，Difftool/Apply patch 只在文件上下文，View history 在文件、目录与目录背景中都显示（文件 `--follow`、目录按 pathspec），Rename 只在具体文件 / 目录（不进目录背景）；注册表菜单无法判断目录是否为有效 Git 仓库。**Windows 的 16 项上限作用于整棵级联菜单（Git Extensions 子菜单 + Others 及其子项合计），不是每层 16 项**；超出部分被系统静默丢弃。`validate_levels` 按目录 / 文件上下文分别统计并阻止保存，不自动迁移命令；一级项用 `GitExt.Top.*` 键紧跟 Git Extensions；二级分组为 Repository & sync / Branches & Repos / Files & history / Settings，Create new repository 与 Open repository 归在 Branches & Repos。成功同步后会清理 `GitExt.*` 命名空间里带所有权标记但不在 known 计划中的遗留键（旧开发版分组顺序会留下 `30.03.reset-file-changes` 之类重复项，既重复显示又占用 16 项容量）。Add files 的 Filter 是唯一按 Git pathspec 展开的写入口；`git stash push -u` 不能带 `--literal-pathspecs`，否则未跟踪文件不会被 stash。
 - **Explorer 目录作用域提交**：Commit 从资源管理器目录打开时只展示并提交该目录已暂存内容；`cli.rs::commit_ex_scoped` 用临时 index（HEAD + 目录 `--cached` 补丁）提交，真实 index 中其它目录的暂存改动不受影响，amend 也只替换目录内部分。临时 index 绕过 Git 对 merge / 冲突的拒绝，所以后端在非 Clean 状态显式报错。View changes / View history 把目录作为 pathspec。
 - **Repository 菜单的配置文件 / 维护动作只接受白名单**：`edit_repo_file` 只能打开 `.gitignore`、`.git/info/exclude`、`.gitattributes`、`.mailmap`、`.git/config`，不接受前端任意路径；`git_maintenance` 只接受 `gc` 与 `delete-index-lock`。删除 `index.lock` 前必须由 UI 二次确认，但仍无法排除外部 Git 进程竞态；不要把这里扩成通用命令执行入口。

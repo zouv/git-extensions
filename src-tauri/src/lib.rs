@@ -134,6 +134,7 @@ pub fn run(launch_request: Option<launch::LaunchRequest>) {
             git::commands::abort_operation,
             git::commands::skip_operation,
             git::commands::get_push_info,
+            git::commands::get_unpushed_commits,
             git::commands::get_reset_preview,
             git::commands::reset,
             git::commands::get_recovery_entries,

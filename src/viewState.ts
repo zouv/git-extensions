@@ -220,6 +220,35 @@ export function extractHunkPatch(file: FileDiff, hunkIndex: number): string | nu
   return `${[...headers, ...hunkLines.map((line) => line.text)].join("\n")}\n`;
 }
 
+export type FileTreeRow<T> =
+  | { kind: "dir"; path: string; depth: number }
+  | { kind: "file"; value: T; index: number; depth: number };
+
+/**
+ * 将文件清单按 `/` 分层排成可折叠目录树的显示行（DiffView 与变更面板共用）。
+ * index 保留传入值（通常为原清单下标），折叠目录下的文件不输出；
+ * 目录行按首次出现顺序去重，文件按路径排序。
+ */
+export function buildFileTreeRows<T>(
+  entries: readonly { path: string; index: number; value: T }[],
+  collapsed: ReadonlySet<string>,
+): FileTreeRow<T>[] {
+  const result: FileTreeRow<T>[] = [];
+  const seen = new Set<string>();
+  [...entries].sort((a, b) => a.path.localeCompare(b.path)).forEach((entry) => {
+    const parts = entry.path.split("/");
+    let hidden = false;
+    for (let i = 1; i < parts.length; i += 1) {
+      const dir = parts.slice(0, i).join("/");
+      if ([...collapsed].some((c) => dir.startsWith(`${c}/`))) { hidden = true; break; }
+      if (!seen.has(dir)) { result.push({ kind: "dir", path: dir, depth: i - 1 }); seen.add(dir); }
+      if (collapsed.has(dir)) { hidden = true; break; }
+    }
+    if (!hidden) result.push({ kind: "file", value: entry.value, index: entry.index, depth: Math.max(0, parts.length - 1) });
+  });
+  return result;
+}
+
 export interface BranchTreeFolder {
   kind: "folder";
   name: string;

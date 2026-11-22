@@ -805,3 +805,70 @@ fn ordinary_rebase_backs_up_original_head_and_skip_completes_conflicting_step() 
         "backup-only commits must not reappear in normal history"
     );
 }
+
+#[test]
+fn unpushed_commits_list_ahead_of_upstream_or_explicit_target() {
+    let empty = Fixture::new(false);
+    let result = git::cli::get_unpushed_commits(empty.path(), None, None).unwrap();
+    assert!(result.commits.is_empty());
+    assert!(result.base_ref.is_none());
+
+    let t = Fixture::new(false);
+    let origin = Fixture::new(true);
+    t.commit("base.txt", "base\n");
+    t.remote("origin", &origin);
+    // 尚无 upstream：不虚构比较基准。
+    let result = git::cli::get_unpushed_commits(t.path(), None, None).unwrap();
+    assert!(result.base_ref.is_none());
+    assert!(result.commits.is_empty());
+
+    t.push_to("origin", "main");
+    let result = git::cli::get_unpushed_commits(t.path(), None, None).unwrap();
+    assert_eq!(result.base_ref.as_deref(), Some("refs/remotes/origin/main"));
+    assert!(result.commits.is_empty());
+    assert!(!result.truncated);
+
+    let first = t.commit("one.txt", "one\n");
+    let second = t.commit("two.txt", "two\n");
+    let result = git::cli::get_unpushed_commits(t.path(), None, None).unwrap();
+    assert_eq!(result.commits.len(), 2);
+    assert_eq!(result.commits[0].oid, second);
+    assert_eq!(result.commits[0].short_id, second[..7]);
+    assert_eq!(result.commits[0].subject, "change two.txt");
+    assert!(!result.commits[0].author_name.is_empty());
+    assert!(result.commits[0].author_time > 0);
+    assert_eq!(result.commits[1].oid, first);
+
+    let explicit =
+        git::cli::get_unpushed_commits(t.path(), Some("origin".into()), Some("main".into()))
+            .unwrap();
+    assert_eq!(
+        explicit.base_ref.as_deref(),
+        Some("refs/remotes/origin/main")
+    );
+    assert_eq!(explicit.commits.len(), 2);
+    assert_eq!(explicit.commits[0].oid, second);
+
+    // 目标分支尚未抓取到本地：baseRef=None，交给 UI 提示先 Fetch。
+    let unknown =
+        git::cli::get_unpushed_commits(t.path(), Some("origin".into()), Some("published".into()))
+            .unwrap();
+    assert!(unknown.base_ref.is_none());
+    assert!(unknown.commits.is_empty());
+
+    assert!(
+        git::cli::get_unpushed_commits(t.path(), Some("origin".into()), Some("--bad".into()))
+            .is_err()
+    );
+    assert!(git::cli::get_unpushed_commits(
+        t.path(),
+        Some("bad remote".into()),
+        Some("main".into())
+    )
+    .is_err());
+
+    t.push_to("origin", "main");
+    let after = git::cli::get_unpushed_commits(t.path(), None, None).unwrap();
+    assert!(after.commits.is_empty());
+    assert_eq!(after.base_ref.as_deref(), Some("refs/remotes/origin/main"));
+}

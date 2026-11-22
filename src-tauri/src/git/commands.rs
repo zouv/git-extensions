@@ -586,6 +586,15 @@ pub async fn get_push_info(path: String) -> GitResult<cli::PushInfo> {
 }
 
 #[tauri::command]
+pub async fn get_unpushed_commits(
+    path: String,
+    remote: Option<String>,
+    branch: Option<String>,
+) -> GitResult<cli::UnpushedCommits> {
+    super::operations::run_read(move || cli::get_unpushed_commits(path, remote, branch)).await
+}
+
+#[tauri::command]
 pub async fn prepare_interactive_rebase(
     path: String,
     oid: String,

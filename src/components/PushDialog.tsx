@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, formatDate } from "../api";
 import { useRepoBusy } from "../useRepoBusy";
-import type { PushInfo } from "../types";
+import type { PushInfo, UnpushedCommits } from "../types";
 import Dialog from "../ui/Dialog";
+import InlineError from "../ui/InlineError";
+import CommitContentDialog from "./CommitContentDialog";
 import { useDirtyClose } from "../ui/useDirtyClose";
 import { useConfirm } from "../ui/Confirm";
 
@@ -26,6 +28,10 @@ export default function PushDialog(props: Props) {
   const [pushTags, setPushTags] = useState(false);
   const [recurseSubmodules, setRecurseSubmodules] = useState(false);
   const [error, setError] = useState("");
+  const [unpushed, setUnpushed] = useState<UnpushedCommits | null>(null);
+  const [commitsLoading, setCommitsLoading] = useState(false);
+  const [commitsError, setCommitsError] = useState("");
+  const [viewOid, setViewOid] = useState<string | null>(null);
   const confirm = useConfirm();
   const dirty = !!info && (!info.hasUpstream && (remote !== "" || target !== info.branch) || forceWithLease || forcePush || pushTags || recurseSubmodules);
   const close = useDirtyClose(dirty, busy, props.onClose);
@@ -39,6 +45,20 @@ export default function PushDialog(props: Props) {
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [props.repoPath]);
+
+  // 待推送提交：有 upstream 时比较 upstream；无 upstream 时按显式选择的远程 / 目标分支。
+  useEffect(() => {
+    if (!info) return;
+    const explicit = !info.hasUpstream;
+    if (explicit && (!remote || !target.trim())) { setUnpushed(null); setCommitsError(""); return; }
+    let alive = true;
+    setCommitsLoading(true); setCommitsError("");
+    api.getUnpushedCommits(props.repoPath, explicit ? remote : null, explicit ? target.trim() : null)
+      .then((next) => { if (alive) setUnpushed(next); })
+      .catch((reason) => { if (alive) { setUnpushed(null); setCommitsError(String(reason)); } })
+      .finally(() => { if (alive) setCommitsLoading(false); });
+    return () => { alive = false; };
+  }, [info, remote, target, props.repoPath]);
 
   const push = async () => {
     if (!info || busy || (!info.hasUpstream && (!remote || !target.trim()))) return;
@@ -83,7 +103,7 @@ export default function PushDialog(props: Props) {
     } finally { setBusy(false); }
   };
 
-  return <Dialog title="推送提交" busy={busy} onClose={close} footer={<>
+  return <Dialog title="推送提交" wide busy={busy} onClose={close} footer={<>
     <button disabled={busy} onClick={close}>取消</button>
     <button className={forcePush || forceWithLease ? "danger-button" : "primary"} disabled={busy || loading || !info || (!info.hasUpstream && (!remote || !target.trim()))} onClick={() => void push()}>{busy ? "推送中…" : info?.hasUpstream ? (forcePush ? "Force Push" : forceWithLease ? "Force Push (with lease)" : "Push") : "推送并建立 upstream"}</button>
   </>}>
@@ -103,6 +123,35 @@ export default function PushDialog(props: Props) {
         {info.remotes.length === 0 && <p className="panel-hint">仓库没有已配置远程，请先配置远程后重新打开。</p>}
         <p>推送：<code>{info.branchRef}</code> → <strong>{remote || "未选择远程"}/{target || "未填写分支"}</strong></p>
       </>}
+      <div className="push-commits">
+        <strong>待推送提交{unpushed && unpushed.baseRef ? ` (${unpushed.commits.length}${unpushed.truncated ? "+" : ""})` : ""}</strong>
+        {commitsLoading && <p className="panel-hint"><span className="spinner" /> 正在读取待推送提交…</p>}
+        {commitsError && <InlineError message={commitsError} />}
+        {!commitsLoading && !commitsError && !info.hasUpstream && (!remote || !target.trim()) && (
+          <p className="panel-hint">选择远程与目标分支后列出待推送提交。</p>
+        )}
+        {!commitsLoading && !commitsError && unpushed && !unpushed.baseRef && (
+          <p className="panel-hint">{info.hasUpstream
+            ? "无法确定 upstream 的本地状态，请先 Fetch。"
+            : `远程分支 ${remote}/${target.trim()} 尚未抓取到本地，无法列出待推送提交；可先 Fetch。`}</p>
+        )}
+        {!commitsLoading && unpushed?.baseRef && unpushed.commits.length === 0 && (
+          <p className="panel-hint">没有待推送提交（与 {unpushed.baseRef.replace("refs/remotes/", "")} 一致）。</p>
+        )}
+        {unpushed && unpushed.commits.length > 0 && <>
+          <div className="push-commit-list">
+            {unpushed.commits.map((commit) => (
+              <button key={commit.oid} type="button" className="push-commit-row" title={`查看提交 ${commit.shortId} 的内容`} onClick={() => setViewOid(commit.oid)}>
+                <code>{commit.shortId}</code>
+                <span className="push-commit-subject">{commit.subject || "（无说明）"}</span>
+                <span className="push-commit-meta">{commit.authorName} · {formatDate(commit.authorTime)}</span>
+              </button>
+            ))}
+          </div>
+          {unpushed.truncated && <p className="panel-hint">仅显示前 500 条待推送提交。</p>}
+          <p className="panel-hint">点击提交可查看提交信息与文件差异。</p>
+        </>}
+      </div>
       <div className="push-flags">
         <label className="checkbox-row">
           <input type="checkbox" disabled={busy} checked={pushTags} onChange={(e) => setPushTags(e.target.checked)} />
@@ -123,5 +172,6 @@ export default function PushDialog(props: Props) {
       </div>
     </div>}
     {error && <pre className="push-error" role="alert">{error}</pre>}
+    {viewOid && <CommitContentDialog repoPath={props.repoPath} oid={viewOid} onClose={() => setViewOid(null)} />}
   </Dialog>;
 }
