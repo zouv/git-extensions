@@ -32,6 +32,8 @@ export interface UILayout extends GridDisplayOptions {
   showLeft: boolean;
   showInspector: boolean;
   changesWidth: number;
+  /** 提交界面未暂存 / 已暂存列表的分割比例（0.15–0.85）。 */
+  changesListSplit: number;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -52,6 +54,7 @@ export const DEFAULT_LAYOUT: UILayout = {
   showLeft: true,
   showInspector: true,
   changesWidth: 420,
+  changesListSplit: 0.5,
   showRemoteBranches: true,
   showTags: true,
   showGraphColumn: true,
@@ -112,6 +115,7 @@ export function loadLayout(repoPath: string, settings: AppSettings): UILayout {
       showInspector: typeof raw.showInspector === "boolean" ? raw.showInspector : true,
       // 变更文件列表宽度不设上限（用户可自由拖拽）；仅挡住手工改坏的非法值。
       changesWidth: bounded(raw.changesWidth, 0, 100_000, DEFAULT_LAYOUT.changesWidth),
+      changesListSplit: bounded(raw.changesListSplit, 0.15, 0.85, DEFAULT_LAYOUT.changesListSplit),
       showRemoteBranches: booleanOption(raw.showRemoteBranches, true),
       showTags: booleanOption(raw.showTags, true),
       showGraphColumn: booleanOption(raw.showGraphColumn, true),

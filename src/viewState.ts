@@ -225,6 +225,19 @@ export type FileTreeRow<T> =
   | { kind: "file"; value: T; index: number; depth: number };
 
 /**
+ * Shift 多选：返回 anchor 与 target 之间（含两端、按传入显示顺序）的路径集合。
+ * anchor 缺失或已不在列表中时只选中 target，避免刷新 / 过滤后误选一大片。
+ */
+export function rangeSelection(paths: readonly string[], anchor: string | null, target: string): Set<string> {
+  const end = paths.indexOf(target);
+  if (end < 0) return new Set();
+  const start = anchor === null ? -1 : paths.indexOf(anchor);
+  if (start < 0) return new Set([target]);
+  const [from, to] = start <= end ? [start, end] : [end, start];
+  return new Set(paths.slice(from, to + 1));
+}
+
+/**
  * 将文件清单按 `/` 分层排成可折叠目录树的显示行（DiffView 与变更面板共用）。
  * index 保留传入值（通常为原清单下标），折叠目录下的文件不输出；
  * 目录行按首次出现顺序去重，文件按路径排序。

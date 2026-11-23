@@ -1086,6 +1086,7 @@ export default function RepoWorkspace(props: Props) {
             {!task && workspace === "history" && <RevisionGrid revisions={filteredRevisions} selectedOids={selectedOids} onSelect={selectCommit} onContextAction={(action, rev) => void onRevisionAction(action, rev)} loading={logLoading} compareBase={compareBase} layoutKey={deferredFilter} display={layout} />}
             <div className="changes-workspace" style={{ display: workspace === "changes" && !task ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
               <ChangesPanel repoPath={repo.path} status={status} width={layout.changesWidth} conflictCount={operation?.conflicts.length ?? 0} error={auxError} onWidth={(changesWidth) => setLayout((prev) => ({ ...prev, changesWidth }))}
+                listSplit={layout.changesListSplit} onListSplit={(changesListSplit) => setLayout((prev) => ({ ...prev, changesListSplit }))}
                 onRefresh={(historyChanged) => historyChanged ? refreshAll() : refreshWorktree()} refreshVersion={worktreeVersion} setMessage={setMessage} highlightEnabled={settings.highlightEnabled} onFileAction={onFileAction} onPathAction={onPathAction} onDiscard={discard} onOpenConflict={showConflict} onDirtyChange={updateCommitDirty} focusCommitSignal={focusCommitSignal} />
             </div>
           </main>

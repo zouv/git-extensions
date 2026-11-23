@@ -22,6 +22,7 @@ export default function CommitWindow({ action, target, onDirtyChange, onBusyChan
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
   const [width, setWidth] = useState(360);
+  const [listSplit, setListSplit] = useState(0.5);
   const [highlightEnabled, setHighlightEnabled] = useState(true);
   const [confirming, setConfirming] = useState(false);
   const request = useRef(0);
@@ -109,6 +110,8 @@ export default function CommitWindow({ action, target, onDirtyChange, onBusyChan
       width={width}
       conflictCount={conflictCount}
       onWidth={setWidth}
+      listSplit={listSplit}
+      onListSplit={setListSplit}
       onRefresh={() => void reload()}
       refreshVersion={version}
       setMessage={setMessage}

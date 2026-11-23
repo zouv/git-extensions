@@ -13,11 +13,11 @@
 | `src/main.tsx` / `window_host` 命令 | 启动时先取 `get_window_bootstrap`，分流到完整 App 或单任务窗口；轻量窗口渲染后显示 |
 | `src/App.tsx` | 完整主窗口恢复页签；订阅 `main-launch-available`，串行消费 Open repository / Settings 请求 |
 | `src/explorer/ExplorerWindow.tsx` | 轻量窗口总入口、动作分发、错误 / 关闭保护；不挂载页签、主工作区和持久化 effect |
-| `src/explorer/{CommitWindow,HistoryWindow,StashWindow,RepositorySettingsWindow,ViewFilesWindow}.tsx` | 提交 / 变更、只读 View changes / 文件历史（含文件内容 View / Blame 页签）、工作区 + stash 管理窗口、当前仓库只读设置、HEAD 文件树 / 内容浏览 |
+| `src/explorer/{CommitWindow,HistoryWindow,StashWindow,RepositorySettingsWindow,ViewFilesWindow}.tsx` | 提交 / 变更、只读 View changes / 文件历史（含文件内容 View / Blame 页签；提交页为上下布局：提交列表 + 详情（信息 / 文件列表）在上、对比面板在下，列宽与分栏尺寸经 `historyLayout.ts` 持久化）、工作区 + stash 管理窗口、当前仓库只读设置、HEAD 文件树 / 内容浏览 |
 | `src/explorer/ResetChangesDialog.tsx` / `RenamePathDialog.tsx` / `IgnorePathDialog.tsx` | Reset file changes 确认与真正重置；Rename 输入新名称并执行 `git mv`；Add to ignore 选择写入根目录 / 所属目录 `.gitignore`，主窗口 ChangesPanel 右键也复用（可选 `onChanged` 刷新与 `initialPattern` 覆盖默认规则） |
 | `src/explorer/PortableTitleBar.tsx` / `src/explorer/portableWindow.ts` / `src/explorerWindowState.ts` | 所有轻量窗口共用的自绘标题栏（复用右键菜单图标 + 标题 + 仓库/操作信息 + 最小化 / 最大化 / 关闭，空白区可拖动）；原生标题栏关闭保护与关闭当前窗口；轻量窗口按动作保存 / 恢复尺寸 |
 | `src/explorerMenu.ts` / `settings.ts` / `components/SettingsDialog.tsx` | 固定动作表、三态 placement 白名单与迁移、命令列表及实时预览 |
-| `src/components/{Clone,CreateRepository,CheckoutRevision,DiffTool,ApplyPatch,Push,Stash,Branch}Dialog.tsx` | 轻量窗口复用的显式输入、预览、确认与忙碌状态；Clone 含窗口内进度页 |
+| `src/components/{Clone,CreateRepository,CheckoutRevision,DiffTool,ApplyPatch,Push,Stash,Branch}Dialog.tsx` | 轻量窗口复用的显式输入、预览、确认与忙碌状态；Clone 含窗口内进度页与输出归并（`cloneProgress.ts`） |
 | `src/components/{AddFilesDialog,BlameView,BlameDialog,PullDialog}.tsx` | Add files（pathspec + dry-run/force）、Blame 列表、可复用的 Pull 选项弹窗 |
 | `src-tauri/src/git/{cli,commands,operations,repo,history,status}.rs` | Clone / init（含 bare）/ revision / difftool / pull / push / stash / patch 管理；文件目标解析、范围历史与 patch/am 操作状态 |
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { api } from "../api";
-import { buildFileTreeRows, extractHunkPatch } from "../viewState";
+import { buildFileTreeRows, extractHunkPatch, rangeSelection } from "../viewState";
 import type { FileTreeRow } from "../viewState";
 import { useRepoBusy } from "../useRepoBusy";
 import type { FileDiff, StatusEntry, StatusSnapshot } from "../types";
@@ -20,6 +20,9 @@ interface Props {
   width: number;
   conflictCount: number;
   onWidth: (width: number) => void;
+  /** 未暂存 / 已暂存列表的分割比例（0.15–0.85）；不传时固定 50/50。 */
+  listSplit?: number;
+  onListSplit?: (split: number) => void;
   onRefresh: (historyChanged?: boolean) => void;
   refreshVersion: number;
   setMessage: (msg: string) => void;
@@ -51,6 +54,8 @@ function sameDiff(a: FileDiff, b: FileDiff): boolean {
 export default function ChangesPanel(props: Props) {
   const { repoPath, status } = props;
   const [checked, setChecked] = useState<Record<Side, Set<string>>>({ staged: new Set(), unstaged: new Set() });
+  /** 行选中（高亮）：Ctrl+A / Ctrl+点击 / Shift+点击维护；与勾选框共同决定批量操作范围。 */
+  const [selected, setSelected] = useState<Record<Side, Set<string>>>({ staged: new Set(), unstaged: new Set() });
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [amend, setAmend] = useState(false);
@@ -67,10 +72,14 @@ export default function ChangesPanel(props: Props) {
   const [previewError, setPreviewError] = useState("");
   const [commitError, setCommitError] = useState("");
   const previewRequest = useRef(0);
+  const listsRef = useRef<HTMLDivElement>(null);
+  /** 每侧列表的多选锚点：Shift+点击从这里扩展范围。 */
+  const selectionAnchor = useRef<Record<Side, string | null>>({ staged: null, unstaged: null });
   const commitTitleRef = useRef<HTMLInputElement>(null);
   const initialPathApplied = useRef(false);
   const scopePath = props.scopePath ?? null;
   const inScope = (path: string) => !scopePath || path === scopePath || path.startsWith(`${scopePath}/`);
+  const listSplit = props.listSplit ?? 0.5;
   const scoped = (entries: StatusEntry[]) => entries.filter((entry) => inScope(entry.path));
   const scopedStaged = scoped(status.staged);
 
@@ -106,6 +115,10 @@ export default function ChangesPanel(props: Props) {
   useEffect(() => {
     previewRequest.current += 1;
     setChecked((prev) => ({
+      staged: new Set([...prev.staged].filter((path) => status.staged.some((entry) => entry.path === path))),
+      unstaged: new Set([...prev.unstaged].filter((path) => status.unstaged.some((entry) => entry.path === path))),
+    }));
+    setSelected((prev) => ({
       staged: new Set([...prev.staged].filter((path) => status.staged.some((entry) => entry.path === path))),
       unstaged: new Set([...prev.unstaged].filter((path) => status.unstaged.some((entry) => entry.path === path))),
     }));
@@ -155,6 +168,32 @@ export default function ChangesPanel(props: Props) {
     if (next.has(path)) next.delete(path); else next.add(path);
     return { ...prev, [side]: next };
   });
+  const toggleSelected = (side: Side, path: string) => setSelected((prev) => {
+    const next = new Set(prev[side]);
+    if (next.has(path)) next.delete(path); else next.add(path);
+    return { ...prev, [side]: next };
+  });
+  /** 批量操作范围 = 行选中 ∪ 勾选框，两种标记都不会被静默丢弃。 */
+  const targetPaths = (side: Side) => new Set([...checked[side], ...selected[side]]);
+  /** 常规列表多选：Ctrl / Meta 切换行选中，Shift 从锚点扩展范围，普通点击只预览并单选。 */
+  const onRowClick = (event: ReactMouseEvent<HTMLDivElement>, side: Side, entry: StatusEntry, visible: StatusEntry[]) => {
+    event.currentTarget.parentElement?.focus({ preventScroll: true });
+    if (entry.status === "conflicted") { props.onOpenConflict(); return; }
+    if (event.shiftKey) {
+      const anchor = selectionAnchor.current[side];
+      setSelected((prev) => ({ ...prev, [side]: rangeSelection(visible.map((item) => item.path), anchor, entry.path) }));
+      if (!anchor) selectionAnchor.current[side] = entry.path;
+      return;
+    }
+    if (event.ctrlKey || event.metaKey) {
+      selectionAnchor.current[side] = entry.path;
+      toggleSelected(side, entry.path);
+      return;
+    }
+    selectionAnchor.current[side] = entry.path;
+    setSelected((prev) => ({ ...prev, [side]: new Set([entry.path]) }));
+    void showPreview(side, entry.path);
+  };
   const stagePaths = (side: Side, paths: string[]) => {
     const entries = side === "staged" ? status.staged : status.unstaged;
     const conflicted = paths.filter((path) => entries.some((entry) => entry.path === path && entry.status === "conflicted"));
@@ -260,6 +299,12 @@ export default function ChangesPanel(props: Props) {
 
   const listKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>, side: Side, visible: StatusEntry[]) => {
     if ((event.target as HTMLElement).closest("input, button, textarea, select")) return;
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+      // 常规列表交互：Ctrl+A 选中当前（过滤后）列表的全部文件，不改变勾选框。
+      event.preventDefault();
+      setSelected((prev) => ({ ...prev, [side]: new Set(visible.map((entry) => entry.path)) }));
+      return;
+    }
     if (visible.length === 0) return;
     const index = preview?.side === side ? visible.findIndex((entry) => entry.path === preview.path) : -1;
     const openMenuAt = (target: StatusEntry, element: HTMLElement | null) => {
@@ -294,6 +339,12 @@ export default function ChangesPanel(props: Props) {
     row?.scrollIntoView({ block: "nearest" });
   };
 
+  const resizeLists = (delta: number) => {
+    if (!props.onListSplit) return;
+    const height = listsRef.current?.clientHeight ?? 1;
+    props.onListSplit(Math.min(0.85, Math.max(0.15, listSplit + delta / Math.max(1, height))));
+  };
+
   const renderList = (side: Side, entries: StatusEntry[]) => {
     const scopedEntries = scoped(entries);
     const filtered = scopedEntries.filter((entry) => entry.path.toLowerCase().includes(filter.trim().toLowerCase()));
@@ -307,7 +358,7 @@ export default function ChangesPanel(props: Props) {
         <strong>{side === "staged" ? "已暂存" : "未暂存"}<span className="count-badge">{scopedEntries.length}</span></strong>
         <div>
           <button disabled={busy || scopedEntries.length === 0} onClick={() => stagePaths(side, scopedEntries.map((e) => e.path))}>{side === "staged" ? "全部取消" : "全部暂存"}</button>
-          <button disabled={busy || checked[side].size === 0} onClick={() => stagePaths(side, [...checked[side]])}>{side === "staged" ? "取消选中" : "暂存选中"}</button>
+          <button disabled={busy || targetPaths(side).size === 0} onClick={() => stagePaths(side, [...targetPaths(side)])}>{side === "staged" ? "取消选中" : "暂存选中"}</button>
         </div>
       </div>
       <div
@@ -329,23 +380,24 @@ export default function ChangesPanel(props: Props) {
             onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, side, kind: "dir", dir: row.path }); }}
           >
             <Icon name={collapsed.has(row.path) ? "folder" : "chevron-down"} size={13} />
+            <span className="changes-dir-spacer" aria-hidden="true" />
             <span>{row.path.split("/").pop()}</span>
           </button>
         ) : (
           <div
             key={`${side}-${row.value.path}`}
             id={`changes-${side}-${row.index}`}
-            className={`changes-item${preview?.path === row.value.path && preview.side === side ? " selected" : ""}${row.value.status === "conflicted" ? " conflicted" : ""}`}
+            className={`changes-item${selected[side].has(row.value.path) ? " selected" : ""}${preview?.path === row.value.path && preview.side === side ? " preview" : ""}${row.value.status === "conflicted" ? " conflicted" : ""}`}
             style={{ paddingLeft: 8 + row.depth * 14 }}
             data-path={row.value.path}
             role="option"
-            aria-selected={preview?.path === row.value.path && preview.side === side}
-            onClick={(e) => { e.currentTarget.parentElement?.focus({ preventScroll: true }); row.value.status === "conflicted" ? props.onOpenConflict() : void showPreview(side, row.value.path); }}
+            aria-selected={selected[side].has(row.value.path)}
+            onClick={(event) => onRowClick(event, side, row.value, visible)}
             onDoubleClick={() => { if (row.value.status !== "conflicted") stagePaths(side, [row.value.path]); }}
             onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, side, kind: "file", entry: row.value }); }}
             title={row.value.path}
           >
-            <input type="checkbox" aria-label={`选择 ${row.value.path}`} checked={checked[side].has(row.value.path)} onChange={() => toggle(side, row.value.path)} onClick={(e) => e.stopPropagation()} />
+            <input type="checkbox" aria-label={`选择 ${row.value.path}`} checked={checked[side].has(row.value.path)} onChange={() => { selectionAnchor.current[side] = row.value.path; toggle(side, row.value.path); }} onClick={(e) => e.stopPropagation()} />
             <span className={`file-status status-${row.value.status}`}>{row.value.status === "conflicted" ? "!" : row.value.status[0].toUpperCase()}</span>
             <span className="file-path">{listMode === "tree" ? row.value.path.split("/").pop() : row.value.path}</span>
             {row.value.status === "conflicted" && <Icon name="conflict" size={14} />}
@@ -362,24 +414,33 @@ export default function ChangesPanel(props: Props) {
         {props.error && <InlineError message={props.error} />}
         <div className="changes-filter"><Icon name="search" size={14} /><input aria-label="过滤变更文件" placeholder="过滤文件…" value={filter} onChange={(e) => setFilter(e.target.value)} />{filter && <button type="button" className="filter-clear" aria-label="清除文件过滤" title="清除文件过滤" onClick={() => setFilter("")}><Icon name="close" size={12} /></button>}<button type="button" className={`text-toggle changes-tree-toggle${listMode === "tree" ? " active" : ""}`} title="切换文件列表 / 目录树" onClick={() => setListMode(listMode === "list" ? "tree" : "list")}>{listMode === "list" ? "目录树" : "列表"}</button></div>
         {props.conflictCount > 0 && <button className="conflict-banner" onClick={props.onOpenConflict}><Icon name="conflict" /><span>{props.conflictCount} 个冲突待解决</span><strong>进入解决 →</strong></button>}
-        {renderList("unstaged", status.unstaged)}
-        {renderList("staged", status.staged)}
+        <div className="changes-lists" ref={listsRef}>
+          <div className="changes-list-slot" style={{ flex: `0 0 ${listSplit * 100}%` }}>
+            {renderList("unstaged", status.unstaged)}
+          </div>
+          <SplitHandle direction="horizontal" label="调整未暂存 / 已暂存列表高度" onResize={resizeLists} onReset={() => props.onListSplit?.(0.5)} />
+          <div className="changes-list-slot" style={{ flex: 1 }}>
+            {renderList("staged", status.staged)}
+          </div>
+        </div>
         <div className="commit-box">
           {commitError && <InlineError message={commitError} />}
-          <input ref={commitTitleRef} aria-label="提交标题" placeholder="提交标题（必填）" disabled={busy} value={title} onChange={(e) => { setTitle(e.target.value); setCommitError(""); }} onKeyDown={(e) => {
+          <input ref={commitTitleRef} aria-label="提交标题" title="提交标题：提交信息首行，显示在提交图与日志列表中；建议 50 字符以内，用一句话概括本次改动" placeholder="提交标题（必填）" disabled={busy} value={title} onChange={(e) => { setTitle(e.target.value); setCommitError(""); }} onKeyDown={(e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doCommit(); }
           }} />
           <div className="commit-title-count">
+            <span>{title.length > 50 ? "标题建议不超过 50 字符 · " : ""}{title.length}/50</span>
+          </div>
+          <textarea aria-label="提交正文" title="提交正文：可选详细说明，位于标题后的空行；写清原因、影响与验证方式，不会显示在日志列表首行" placeholder="提交正文（可选）" disabled={busy} value={body} onChange={(e) => { setBody(e.target.value); setCommitError(""); }} rows={3} onKeyDown={(e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doCommit(); }
+          }} />
+          <div className="commit-actions">
             <label className="amend-checkbox" title="修正上一次提交（git commit --amend）">
               <input type="checkbox" disabled={busy} checked={amend} onChange={(e) => void toggleAmend(e.target.checked)} />
               <span>修正上次提交 (Amend)</span>
             </label>
-            <span>{title.length > 50 ? "标题建议不超过 50 字符 · " : ""}{title.length}/50</span>
+            <button className="primary commit-button" disabled={busy || (!amend && scopedStaged.length === 0)} onClick={doCommit}>{busy ? <span className="spinner" /> : <Icon name="check" />}{amend ? `修正提交 (${scopedStaged.length})` : `提交 (${scopedStaged.length})`}</button>
           </div>
-          <textarea aria-label="提交正文" placeholder="提交正文（可选）" disabled={busy} value={body} onChange={(e) => { setBody(e.target.value); setCommitError(""); }} rows={3} onKeyDown={(e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doCommit(); }
-          }} />
-          <button className="primary commit-button" disabled={busy || (!amend && scopedStaged.length === 0)} onClick={doCommit}>{busy ? <span className="spinner" /> : <Icon name="check" />}{amend ? `修正提交 (${scopedStaged.length})` : `提交 (${scopedStaged.length})`}</button>
         </div>
       </div>
       <SplitHandle direction="vertical" label="调整变更文件列表宽度" onResize={(delta) => props.onWidth(Math.max(0, props.width + delta))} onReset={() => props.onWidth(420)} />

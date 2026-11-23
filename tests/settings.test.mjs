@@ -196,3 +196,18 @@ test("变更文件列表宽度不设上限，仅挡住非法值", () => {
     assert.equal(loadLayout("/neg", DEFAULT_SETTINGS).changesWidth, 0);
   });
 });
+
+test("未暂存 / 已暂存列表分割比例持久化并夹取到 0.15–0.85", () => {
+  withStorage((storage) => {
+    storage.setItem("git-extensions.layout.v2:/split", JSON.stringify({ changesListSplit: 0.7 }));
+    assert.equal(loadLayout("/split", DEFAULT_SETTINGS).changesListSplit, 0.7);
+    storage.setItem("git-extensions.layout.v2:/split-max", JSON.stringify({ changesListSplit: 9 }));
+    assert.equal(loadLayout("/split-max", DEFAULT_SETTINGS).changesListSplit, 0.85);
+    storage.setItem("git-extensions.layout.v2:/split-min", JSON.stringify({ changesListSplit: 0 }));
+    assert.equal(loadLayout("/split-min", DEFAULT_SETTINGS).changesListSplit, 0.15);
+    storage.setItem("git-extensions.layout.v2:/split-bad", JSON.stringify({ changesListSplit: "half" }));
+    assert.equal(loadLayout("/split-bad", DEFAULT_SETTINGS).changesListSplit, DEFAULT_LAYOUT.changesListSplit);
+    saveLayout("/split", { ...loadLayout("/split", DEFAULT_SETTINGS), changesListSplit: 0.62 });
+    assert.equal(loadLayout("/split", DEFAULT_SETTINGS).changesListSplit, 0.62);
+  });
+});

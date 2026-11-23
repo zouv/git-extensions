@@ -62,3 +62,41 @@ test("get_unpushed_commits 是只读命令并完整注册", () => {
   assert.match(commands, /run_read\(move \|\| cli::get_unpushed_commits\(path, remote, branch\)\)/);
   assert.match(lib, /git::commands::get_unpushed_commits,/);
 });
+
+test("目录树目录与文件列对齐，文件列表支持常规多选", () => {
+  assert.match(styles, /\.changes-directory \{ display: flex; align-items: center; justify-content: flex-start;/);
+  assert.match(styles, /\.changes-dir-spacer \{ width: 14px;/);
+  assert.match(styles, /\.changes-item input\[type="checkbox"\] \{ width: 13px;/);
+  assert.match(changesPanel, /rangeSelection\(visible\.map/);
+  assert.match(changesPanel, /event\.key\.toLowerCase\(\) === "a"/);
+  assert.match(changesPanel, /setSelected\(\(prev\) => \(\{ \.\.\.prev, \[side\]: new Set\(visible\.map/);
+  assert.match(changesPanel, /event\.ctrlKey \|\| event\.metaKey/);
+  assert.match(changesPanel, /if \(event\.shiftKey\)/);
+  assert.match(changesPanel, /onClick=\{\(event\) => onRowClick\(event, side, row\.value, visible\)\}/);
+  // Ctrl+A / Shift+点击只改变行选中，勾选框由复选框单独维护。
+  assert.match(changesPanel, /targetPaths\(side\)/);
+  assert.match(styles, /\.changes-items \{[^}]*user-select: none/);
+  assert.match(styles, /\.changes-item\.preview \{ box-shadow: inset 2px 0 var\(--accent\)/);
+});
+
+test("未暂存 / 已暂存列表支持拖拽调整高度", async () => {
+  assert.match(changesPanel, /className="changes-lists"/);
+  assert.match(changesPanel, /label="调整未暂存 \/ 已暂存列表高度"/);
+  assert.match(changesPanel, /props\.onListSplit\(Math\.min\(0\.85, Math\.max\(0\.15/);
+  assert.match(styles, /\.changes-list-slot \{ display: flex;/);
+  const repoWorkspace = await readFile(new URL("../src/RepoWorkspace.tsx", import.meta.url), "utf8");
+  const commitWindow = await readFile(new URL("../src/explorer/CommitWindow.tsx", import.meta.url), "utf8");
+  assert.match(repoWorkspace, /listSplit=\{layout\.changesListSplit\}/);
+  assert.match(repoWorkspace, /onListSplit=\{\(changesListSplit\) => setLayout\(\(prev\) => \(\{ \.\.\.prev, changesListSplit \}\)\)\}/);
+  assert.match(commitWindow, /listSplit=\{listSplit\}/);
+  assert.match(commitWindow, /onListSplit=\{setListSplit\}/);
+});
+
+test("Amend 复选框位于底部提交按钮行左侧", () => {
+  assert.match(changesPanel, /className="commit-actions"[\s\S]{0,600}amend-checkbox[\s\S]{0,900}commit-button/);
+  const titleCountBlock = changesPanel.slice(changesPanel.indexOf('className="commit-title-count"'), changesPanel.indexOf('className="commit-actions"'));
+  assert.ok(titleCountBlock.length > 0);
+  assert.ok(!titleCountBlock.includes("amend-checkbox"));
+  assert.match(styles, /\.commit-actions \{ display: flex; align-items: center; justify-content: space-between;/);
+  assert.match(styles, /\.commit-title-count \{ display: flex; align-items: center; justify-content: flex-end;/);
+});

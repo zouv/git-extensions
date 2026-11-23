@@ -34,14 +34,16 @@
 | `src/components/LeftPanel.tsx` | 本地变更 / 全部提交 / 分支 / 标签 / Submodules / Worktrees；分支标签过滤、200 条分页、树键盘移动、worktree 打开、分支目录右键批量删除 | 改引用导航 |
 | `src/branchDelete.ts` | 分支目录收集与删除计划纯函数：`prefix/` 匹配、嵌套、远程 HEAD 排除、合并状态 → 是否强制 | 改目录删除规则 |
 | `src/branchDeleteDialog.tsx` | 单分支 / 本地目录 / 远程目录删除确认框：动态确认按钮与警告文案 | 改删除确认文案或样式 |
-| `src/components/RevisionGrid.tsx` | 虚拟化提交列表 + Canvas 分支图；`aria-activedescendant`、容器级方向键、增量图宽；View 菜单控制图列 / 作者 / 日期 / SHA / 远程标签 / 标签 / 相对时间 | 改列表 / 图渲染 |
+| `src/components/RevisionGrid.tsx` | 虚拟化提交列表 + Canvas 分支图；`aria-activedescendant`、容器级方向键、增量图宽；View 菜单控制图列 / 作者 / 日期 / SHA / 远程标签 / 标签 / 相对时间；可选 `showColumnHeader` + 受控 `columnWidths`（列头分隔线拖拽 / 键盘微调 / 双击复位，仅 View history 启用） | 改列表 / 图渲染 / 列宽规则 |
 | `src/components/DiffView.tsx` | 文件列表 / 目录树、过滤与 500 条封顶、按需 patch、Inline / Split、hunk 导航与内联 Hunk 暂存 / 取消暂存 / 丢弃、行右键、增删统计、偏好经 diffPrefs 按仓库保存并跨实例同步 | 改 diff 展示 |
 | `src/diffPrefs.ts` | Diff 行内 / 并排与换行偏好：按仓库键 localStorage 持久化 + 同窗口订阅通知 + 跨窗口 storage 事件同步 | 改 diff 偏好存储 / 同步 |
 | `src/viewState.ts` | Diff 解析 / 分类 / 分栏 / 折叠 / 虚拟窗口、`extractHunkPatch`、`buildFileTreeRows`、`buildBranchTree`、`applyAutosquashOrder`、草稿恢复、dirty 规则 | 改可测试的视图状态规则 |
 | `src/highlight.worker.ts` / `src/languages.ts` | highlight.js 后台高亮、扩展名到语言映射 | 改高亮语言 / 请求协议 |
-| `src/components/ChangesPanel.tsx` | 暂存区 / 工作区列表（列表 / 目录树切换）、过滤、键盘预览、diff 预览（stale-while-revalidate）与 Hunk 级操作、右键还原更改 / ignore 弹窗（复用 explorer IgnorePathDialog）、提交（含 Amend 修正）与内联错误；左侧宽度自由拖拽无上限 | 改 stage/commit 交互 |
+| `src/components/ChangesPanel.tsx` | 暂存区 / 工作区列表（列表 / 目录树切换、可拖拽高度）、过滤、行选中（Ctrl+A / Ctrl+点击 / Shift+点击）与独立勾选框、键盘预览、diff 预览（stale-while-revalidate）与 Hunk 级操作、右键还原更改 / ignore 弹窗（复用 explorer IgnorePathDialog）、提交（Amend 位于底部按钮行）与内联错误；批量操作按「行选中 ∪ 勾选」；左侧宽度自由拖拽无上限 | 改 stage/commit 交互 |
 | `src/components/CommitInfo.tsx` | 提交详情；SHA / 邮箱复制、包含分支 / 标签可点击过滤 | 改详情字段展示 |
 | `src/components/CommitContentDialog.tsx` | Push 待推送提交的内容查看：提交信息 + 文件清单与按需单文件 diff（getCommitFiles / getCommitFileDiff） | 改提交内容预览 |
+| `src/cloneProgress.ts` | 克隆进度输出解析与归并：`parseCloneProgress`、`appendCloneLogLine`（连续同阶段进度只保留最新一行、400 行上限） | 改克隆进度展示 |
+| `src/historyLayout.ts` | View history 分栏 / 列宽持久化：`loadHistoryLayout` / `saveHistoryLayout`（localStorage、范围夹取、首次按窗口宽度给列表宽度） | 改历史窗口布局规则 |
 | `src/components/CompareView.tsx` | 双端提交 / 分支 / 标签对比；保留上一次结果、Enter 触发、内联错误 | 改对比交互 |
 | `src/components/ConflictCenter.tsx` | 冲突草稿、来源快照校验、冲突标记提示、合并两侧、继续 / 跳过 / 中止 | 改冲突工作流 |
 | `src/components/RebasePlanner.tsx` | 会话内线性 Rebase 计划、批量动作 / 重排 / Autosquash 自动重排 / 拖放指示、执行 | 改 Rebase 交互 |
@@ -72,7 +74,7 @@
 | 右键菜单 / 多选菜单 | `ui/ContextMenu.tsx`；`RepositoryGroupNav.tsx` 的 `menuItems` / `groupItems` | 组勾选保持打开；子项读取最新配置，Esc 只关闭栈顶 |
 | 通知 / 错误反馈 | `NotificationCenter.tsx` 的 `ToastItem`、`clearAll`；`App.tsx` 的 `notify`；`ui/InlineError.tsx` | 成功 toast 4 秒自动消失，hover / focus 暂停；错误保留在通知中心 |
 | 变更预览 / 轮询 | `RepoWorkspace.tsx` 的 `refreshAux`、`pollOnce`；`ChangesPanel.tsx` 的 `showPreview` 与 status effect | 后台重取保留旧 patch；status 无实质变化不重绘 DiffView |
-| 提交 / 暂存 / Amend / Hunk / 还原 / ignore | `ChangesPanel.tsx` 的 `run`、`doCommit`、`toggleAmend`、`applyHunk`、`restorePaths`、`pathsUnder`、`renderList`、`commitError`；`viewState.ts::extractHunkPatch` / `buildFileTreeRows` | Amend 自动回填 HEAD 提交信息；Hunk 丢弃与还原更改需危险确认；ignore 经 `IgnorePathDialog` 选根 / 所属目录 |
+| 提交 / 暂存 / Amend / Hunk / 还原 / ignore | `ChangesPanel.tsx` 的 `run`、`doCommit`、`toggleAmend`、`applyHunk`、`restorePaths`、`pathsUnder`、`renderList`、`onRowClick`、`targetPaths`、`resizeLists`、`listKeyDown`、`commitError`；`viewState.ts::extractHunkPatch` / `buildFileTreeRows` / `rangeSelection` | 行选中与勾选框分开维护，批量按钮取并集；Ctrl+A 只改行选中；列表分割比例存 `UILayout.changesListSplit`；Amend 自动回填 HEAD 提交信息；Hunk 丢弃与还原更改需危险确认；ignore 经 `IgnorePathDialog` 选根 / 所属目录 |
 | Push 待推送提交 / 提交内容查看 | `PushDialog.tsx` 的 unpushed effect 与 `push-commits` 列表；`CommitContentDialog.tsx`；后端 `cli.rs::get_unpushed_commits` | 有 upstream 比 upstream，无 upstream 按显式 remote/target；baseRef=null 提示先 Fetch；点击行打开内容弹窗 |
 | 提交图选择 / 图宽 / 右键扩展动作 | `RevisionGrid.tsx` 的容器 keydown、`aria-activedescendant`、`graphScan`、`RevisionAction` | 支持合并到当前分支、Fixup/Squash、导出补丁/归档、Bisect Good/Bad |
 | Diff 模式 / 文件过滤 / Hunk 按钮 | `DiffView.tsx` 的 `changeDiffMode` / `changeWrap`、`filteredEntries`、`renderHunkBar`、`openLineMenu`、`goDiff`；`diffPrefs.ts` | 偏好经 `saveDiffPrefs` 写入并广播；文件列表 500 条封顶 |
@@ -198,3 +200,6 @@
 - **工具栏响应式不能只隐藏不补位**：四菜单文字标签在 1280px 以下收起；1100px 以下 `.toolbar-overflow` 必须换成真实 `.toolbar-more` 菜单，否则恢复历史 / Stash / 标签 / 子模块入口会静默消失。
 - **查找弹窗单击只聚焦**：`RepositoryRecordList` 用 Enter / 双击打开，不要再传 `openOnClick`；否则鼠标用户无法先选中再重新定位 / 从列表移除。
 - **术语与快捷键帮助**：Git 命令保留英文，应用概念统一中文；快捷键说明集中在 `commands.ts::SHORTCUT_HELP` 的分组数组，新增快捷键时同步。
+- **克隆输出是逐条进度事件**：后端把 Git 的 `\r` 进度更新逐行发出，前端必须经 `appendCloneLogLine` 归并连续同阶段进度（否则每个百分比各占一行）；结果页输出面板用 flex 填满弹窗，弹窗高度由 `.clone-dialog` 提供（轻量窗口 100% 覆盖）。
+- **View history 列头是网格内 sticky 行**：列头在行虚拟化容器内占 26px 正常流高度，滚动定位要加 `headerH` 偏移；受控列宽时行宽取 `max(列总宽, 可视宽 - 图宽)`，列总宽超出时横向滚动。列头单元格必须 `overflow: visible`，否则会裁掉右侧的拖拽热区。分栏与列宽统一存 `git-extensions.history-layout.v1`，改保存字段时保持范围校验。
+- **变更列表目录行是按钮**：全局 `button` 规则会 `justify-content: center`，目录行必须显式 `flex-start`，并用 14px 占位对齐文件行的状态字母列；复选框宽度也固定为 13px，否则目录 / 文件与各层级缩进会错位。行选中（高亮）与勾选框是两套状态：Ctrl+A / Ctrl+点击 / Shift+点击只改行选中，批量按钮取两者并集；列表行必须 `user-select: none`，否则 Shift+点击会触发浏览器文本选择。`rangeSelection` 只按当前显示顺序取范围。

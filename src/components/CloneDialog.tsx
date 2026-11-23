@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { api, onCloneProgress } from "../api";
+import { appendCloneLogLine, parseCloneProgress } from "../cloneProgress";
+import type { CloneStatus } from "../cloneProgress";
 import { useRepoBusy } from "../useRepoBusy";
 import Dialog from "../ui/Dialog";
 import { useDirtyClose } from "../ui/useDirtyClose";
@@ -14,11 +16,6 @@ interface Props {
 }
 
 type ClonePhase = "form" | "cloning" | "done" | "error";
-
-interface CloneStatus {
-  phase: string | null;
-  percent: number | null;
-}
 
 const PHASE_LABELS: Record<string, string> = {
   "Enumerating objects": "枚举对象",
@@ -41,16 +38,6 @@ const DEFAULT_OPTIONS = { branch: "", initSubmodules: true, depthOne: false, sin
 
 function branchMenuLabel(branch: string) {
   return branch.trim() ? branch : "(default: remote HEAD)";
-}
-
-/** 解析 `Receiving objects: 45% (...)` 一类的 git --progress 输出。 */
-function parseCloneProgress(line: string): CloneStatus | null {
-  const cleaned = line.replace(/^remote:\s*/i, "").trim();
-  const match = cleaned.match(/^([^:]{1,40}):\s*(\d{1,3})%/);
-  if (!match) return null;
-  const percent = Number(match[2]);
-  if (!Number.isFinite(percent)) return null;
-  return { phase: match[1], percent: Math.max(0, Math.min(100, percent)) };
 }
 
 export default function CloneDialog({ initialParent, onOpen, onClose, onBusyChange }: Props) {
@@ -152,7 +139,7 @@ export default function CloneDialog({ initialParent, onOpen, onClose, onBusyChan
       unlistenRef.current?.();
       unlistenRef.current = await onCloneProgress((progress) => {
         if (progress.operationId !== operationId) return;
-        setLines((prev) => [...prev.slice(-399), progress.line]);
+        setLines((prev) => appendCloneLogLine(prev, progress.line));
         const parsed = parseCloneProgress(progress.line);
         if (parsed) setStatus(parsed);
       });
@@ -247,7 +234,7 @@ export default function CloneDialog({ initialParent, onOpen, onClose, onBusyChan
     </>;
   }
 
-  return <Dialog title={phase === "done" ? "克隆完成" : "克隆仓库"} onClose={close} busy={busy} footer={footer}>
+  return <Dialog title={phase === "done" ? "克隆完成" : "克隆仓库"} className={phase === "form" ? "" : "clone-dialog"} onClose={close} busy={busy} footer={footer}>
     {phase === "form"
       ? <div className="dialog-form">
         <label><span>远程仓库 URL</span><input data-autofocus disabled={busy} value={url} onChange={(e) => { updateUrl(e.target.value); setRemoteBranches(null); }} placeholder="https://example.com/owner/repository.git" /></label>

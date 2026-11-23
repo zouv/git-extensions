@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { api } from "../api";
 import { useRepoBusy } from "../useRepoBusy";
 import type { CommitDetail, ContainedInfo, ExplorerTarget, FileContent, FileDiff, Revision, ScopedHistoryEntry } from "../types";
@@ -8,6 +9,9 @@ import BlameView from "../components/BlameView";
 import RevisionGrid from "../components/RevisionGrid";
 import type { RevisionAction } from "../components/RevisionGrid";
 import ResetDialog from "../components/ResetDialog";
+import { DEFAULT_HISTORY_COLUMNS, DEFAULT_HISTORY_LAYOUT, loadHistoryLayout, saveHistoryLayout } from "../historyLayout";
+import type { HistoryLayout } from "../historyLayout";
+import SplitHandle from "../ui/SplitHandle";
 import { useConfirm } from "../ui/Confirm";
 import { loadSettings } from "../settings";
 
@@ -35,6 +39,8 @@ export default function HistoryWindow({ target, onBusyChange, mode = "file-histo
   const [resetTarget, setResetTarget] = useState<string | null>(null);
   const [localBusy, setBusy] = useState(false);
   const [highlightEnabled, setHighlightEnabled] = useState(true);
+  const [layout, setLayout] = useState<HistoryLayout>(() => loadHistoryLayout());
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const repoBusy = useRepoBusy(target.repo.path);
   const busy = localBusy || repoBusy;
   const confirm = useConfirm();
@@ -45,6 +51,10 @@ export default function HistoryWindow({ target, onBusyChange, mode = "file-histo
   useEffect(() => { onBusyChange(busy); }, [busy, onBusyChange]);
   useEffect(() => () => onBusyChange(false), [onBusyChange]);
   useEffect(() => { setHighlightEnabled(loadSettings().highlightEnabled); }, []);
+  // 列宽与分栏尺寸都持久化，下次打开沿用；写入值在 saveHistoryLayout 内做范围校验。
+  useEffect(() => { saveHistoryLayout(layout); }, [layout]);
+  // 切换提交后默认选中第一个变更文件，保持对比面板有内容。
+  useEffect(() => { setSelectedFile(files[0]?.path ?? null); }, [files]);
 
   const reload = useCallback(async () => {
     const sequence = ++reloadSequence.current;
@@ -149,6 +159,22 @@ export default function HistoryWindow({ target, onBusyChange, mode = "file-histo
     try { await api.openRepositoryInMain(repoPath); }
     catch (reason) { setError(`无法转到主窗口：${String(reason)}`); }
   };
+  const commitView = tab === "commit";
+  const selectedFileDiff = files.find((file) => file.path === selectedFile) ?? null;
+  const fileListKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (files.length === 0) return;
+    const index = files.findIndex((file) => file.path === selectedFile);
+    let next = index;
+    if (event.key === "ArrowDown") next = Math.min(files.length - 1, index + 1);
+    else if (event.key === "ArrowUp") next = Math.max(0, index - 1);
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = files.length - 1;
+    else return;
+    event.preventDefault();
+    setSelectedFile(files[next].path);
+    const rows = [...event.currentTarget.querySelectorAll<HTMLElement>(".history-file-item")];
+    rows[next]?.focus();
+  };
   return <div className="history-window">
     <div className="history-toolbar">
       <div>
@@ -168,50 +194,99 @@ export default function HistoryWindow({ target, onBusyChange, mode = "file-histo
       <button onClick={() => void openMain()}>转到主窗口</button>
     </div>}
     <div className="history-window-body">
-      <section className="history-revisions">
-        <RevisionGrid
-          revisions={revisions}
-          selectedOids={selected ? [selected] : []}
-          onSelect={(oid) => setSelected(oid)}
-          onContextAction={(kind, revision) => void action(kind, revision.oid)}
-          loading={loading}
-          allowedActions={allowedActions}
+      <div className={`history-top${commitView ? "" : " full"}`} style={commitView ? { height: layout.topHeight } : undefined}>
+        <section className="history-revisions" style={{ width: layout.listWidth }}>
+          <RevisionGrid
+            revisions={revisions}
+            selectedOids={selected ? [selected] : []}
+            onSelect={(oid) => setSelected(oid)}
+            onContextAction={(kind, revision) => void action(kind, revision.oid)}
+            loading={loading}
+            allowedActions={allowedActions}
+            showColumnHeader
+            columnWidths={layout.columns}
+            defaultColumnWidths={DEFAULT_HISTORY_COLUMNS}
+            onColumnWidthsChange={(columns) => setLayout((prev) => ({ ...prev, columns }))}
+          />
+        </section>
+        <SplitHandle
+          direction="vertical"
+          label="调整提交列表宽度"
+          onResize={(delta) => setLayout((prev) => ({ ...prev, listWidth: Math.max(280, prev.listWidth + delta) }))}
+          onReset={() => setLayout((prev) => ({ ...prev, listWidth: DEFAULT_HISTORY_LAYOUT.listWidth }))}
         />
-      </section>
-      <section className="history-detail">
-        {tab === "file" && canBlame
-          ? <div className="history-file-content">
-            {fileContentLoading && <div className="panel-hint">加载中…</div>}
-            {fileContentError && <div className="inline-error" role="alert">{fileContentError}</div>}
-            {fileContent && (fileContent.binary
-              ? <div className="empty-state">二进制文件（{fileContent.size.toLocaleString()} 字节）</div>
-              : <>
-                {fileContent.truncated && <div className="settings-note">文件超过 2 MiB，仅显示前 2 MiB。</div>}
-                <pre>{fileContent.content}</pre>
-              </>)}
-          </div>
-          : tab === "blame" && canBlame
-            ? <div className="history-blame">
-              <BlameView
-                repoPath={repoPath}
-                file={target.relativePath!}
-                onOpenCommit={(oid) => { setTab("commit"); setSelected(oid); }}
-              />
-            </div>
-            : <>
-              <CommitInfo commit={commit} contained={contained} loading={detailLoading} />
-              <div className="history-diff">
-                <DiffView
-                  files={files}
-                  loading={detailLoading}
-                  highlightEnabled={highlightEnabled}
-                  prefKey={repoPath}
-                  loadFile={(file) => api.getCommitFileDiff(repoPath, selected!, file.path, file.oldPath)
-                    .then((diffs) => diffs.find((item) => item.path === file.path || item.oldPath === file.path) ?? null)}
-                />
+        <section className="history-detail">
+          <div className={`history-detail-pane${commitView ? "" : " full"}`} style={commitView ? { height: layout.infoHeight } : undefined}>
+            {tab === "file" && canBlame
+              ? <div className="history-file-content">
+                {fileContentLoading && <div className="panel-hint">加载中…</div>}
+                {fileContentError && <div className="inline-error" role="alert">{fileContentError}</div>}
+                {fileContent && (fileContent.binary
+                  ? <div className="empty-state">二进制文件（{fileContent.size.toLocaleString()} 字节）</div>
+                  : <>
+                    {fileContent.truncated && <div className="settings-note">文件超过 2 MiB，仅显示前 2 MiB。</div>}
+                    <pre>{fileContent.content}</pre>
+                  </>)}
               </div>
-            </>}
-      </section>
+              : tab === "blame" && canBlame
+                ? <div className="history-blame">
+                  <BlameView
+                    repoPath={repoPath}
+                    file={target.relativePath!}
+                    onOpenCommit={(oid) => { setTab("commit"); setSelected(oid); }}
+                  />
+                </div>
+                : <CommitInfo commit={commit} contained={contained} loading={detailLoading} />}
+          </div>
+          {commitView && <>
+            <SplitHandle
+              direction="horizontal"
+              label="调整提交信息高度"
+              onResize={(delta) => setLayout((prev) => ({ ...prev, infoHeight: Math.max(100, prev.infoHeight + delta) }))}
+              onReset={() => setLayout((prev) => ({ ...prev, infoHeight: DEFAULT_HISTORY_LAYOUT.infoHeight }))}
+            />
+            <div className="history-files" role="listbox" aria-label="变更文件" tabIndex={0} onKeyDown={fileListKeyDown}>
+              {detailLoading && files.length === 0 && <div className="panel-hint"><span className="spinner" /> 正在读取文件列表…</div>}
+              {files.length === 0 && !detailLoading && <div className="panel-hint">该提交没有文件变更</div>}
+              {files.map((file) => (
+                <div
+                  key={file.path}
+                  className={`history-file-item${file.path === selectedFile ? " selected" : ""}`}
+                  role="option"
+                  aria-selected={file.path === selectedFile}
+                  tabIndex={file.path === selectedFile ? 0 : -1}
+                  title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
+                  onClick={() => setSelectedFile(file.path)}
+                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedFile(file.path); } }}
+                >
+                  <span className={`file-status status-${file.status}`}>{file.status === "conflicted" ? "!" : file.status[0].toUpperCase()}</span>
+                  <span className="file-path">{file.path}</span>
+                </div>
+              ))}
+            </div>
+          </>}
+        </section>
+      </div>
+      {commitView && <>
+        <SplitHandle
+          direction="horizontal"
+          label="调整对比面板高度"
+          onResize={(delta) => setLayout((prev) => ({ ...prev, topHeight: Math.max(200, prev.topHeight + delta) }))}
+          onReset={() => setLayout((prev) => ({ ...prev, topHeight: DEFAULT_HISTORY_LAYOUT.topHeight }))}
+        />
+        <section className="history-diff">
+          <DiffView
+            files={selectedFileDiff ? [selectedFileDiff] : []}
+            loading={detailLoading}
+            highlightEnabled={highlightEnabled}
+            prefKey={repoPath}
+            loadFile={(file) => selected
+              ? api.getCommitFileDiff(repoPath, selected, file.path, file.oldPath)
+                .then((diffs) => diffs.find((item) => item.path === file.path || item.oldPath === file.path) ?? null)
+              : Promise.resolve(null)}
+          />
+        </section>
+      </>}
     </div>
     {resetTarget && <ResetDialog
       repoPath={repoPath}

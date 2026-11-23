@@ -13,6 +13,7 @@ const {
   extractHunkPatch,
   buildBranchTree,
   buildFileTreeRows,
+  rangeSelection,
   applyAutosquashOrder,
 } = await import(url);
 
@@ -149,4 +150,18 @@ test("buildFileTreeRows 折叠目录隐藏其下文件与子目录，嵌套折�
   assert.deepEqual(collapsedDeep.map((row) => row.kind === "dir" ? `dir:${row.path}` : `file:${row.value}`), [
     "dir:docs", "file:d", "dir:src", "file:a", "dir:src/deep",
   ]);
+});
+
+test("rangeSelection 按显示顺序选中 anchor..target，反向拖选同样生效", () => {
+  const paths = ["a.md", "b.md", "c.md", "d.md", "e.md"];
+  assert.deepEqual([...rangeSelection(paths, "b.md", "d.md")], ["b.md", "c.md", "d.md"]);
+  assert.deepEqual([...rangeSelection(paths, "d.md", "b.md")], ["b.md", "c.md", "d.md"]);
+  assert.deepEqual([...rangeSelection(paths, "c.md", "c.md")], ["c.md"]);
+});
+
+test("rangeSelection 在 anchor 缺失或失效时只选目标，目标不在列表时为空", () => {
+  const paths = ["a.md", "b.md"];
+  assert.deepEqual([...rangeSelection(paths, null, "b.md")], ["b.md"]);
+  assert.deepEqual([...rangeSelection(paths, "gone.md", "b.md")], ["b.md"]);
+  assert.equal(rangeSelection(paths, "a.md", "gone.md").size, 0);
 });

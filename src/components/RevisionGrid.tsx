@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import type { RefLabel, Revision } from "../types";
 import { formatDate, formatRelativeDate } from "../api";
 import { DEFAULT_LAYOUT } from "../settings";
@@ -12,6 +13,40 @@ const NODE_R = 4;
 const PALETTE = ["#e06c75", "#65a9f5", "#57bd8a", "#d19a66", "#c678dd", "#56b6c2", "#d5a84e", "#be5046", "#7ec8e3", "#b5cea8"];
 const MAX_GRAPH_W = 320;
 const optionId = (oid: string) => `revision-option-${oid}`;
+const HEADER_H = 26;
+const COLUMN_GAP = 10;
+/** 行内左右 padding 合计（左 6 + 右 10），列宽计算时需要。 */
+const ROW_PADDING = 16;
+
+/** View history 等轻量窗口启用的受控列宽；主窗口不传则沿用 CSS 自适应列。 */
+export interface RevisionColumnWidths {
+  refs: number;
+  subject: number;
+  author: number;
+  date: number;
+  sha: number;
+}
+
+export const DEFAULT_REVISION_COLUMN_WIDTHS: RevisionColumnWidths = {
+  refs: 64, subject: 190, author: 96, date: 116, sha: 58,
+};
+
+export const REVISION_COLUMN_LIMITS: Record<keyof RevisionColumnWidths, [number, number]> = {
+  refs: [48, 600],
+  subject: [64, 1200],
+  author: [56, 600],
+  date: [80, 600],
+  sha: [48, 200],
+};
+
+const COLUMN_LABELS: Record<keyof RevisionColumnWidths, string> = {
+  refs: "引用", subject: "主题", author: "作者", date: "日期", sha: "SHA",
+};
+
+function clampColumn(key: keyof RevisionColumnWidths, value: number): number {
+  const [min, max] = REVISION_COLUMN_LIMITS[key];
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
 
 /** 只过滤标签显示；提交图 lane 数据仍由后端完整生成。 */
 function refsForDisplay(refs: RefLabel[], display: GridDisplayOptions): RefLabel[] {
@@ -53,19 +88,33 @@ interface Props {
   allowedActions?: RevisionAction[];
   /** View 菜单控制的列 / 标签 / 日期显示。 */
   display?: GridDisplayOptions;
+  /** 轻量窗口：显示列头并启用列宽拖拽（主窗口不传，保持原布局）。 */
+  showColumnHeader?: boolean;
+  columnWidths?: RevisionColumnWidths;
+  /** 双击列头分隔线时恢复的列宽。 */
+  defaultColumnWidths?: RevisionColumnWidths;
+  onColumnWidthsChange?: (widths: RevisionColumnWidths) => void;
 }
 
-export default function RevisionGrid({ revisions, selectedOids, onSelect, onContextAction, loading, compareBase, layoutKey, allowedActions, display = DEFAULT_LAYOUT }: Props) {
+export default function RevisionGrid({ revisions, selectedOids, onSelect, onContextAction, loading, compareBase, layoutKey, allowedActions, display = DEFAULT_LAYOUT, showColumnHeader = false, columnWidths, defaultColumnWidths, onColumnWidthsChange }: Props) {
   const can = (action: RevisionAction) => !allowedActions || allowedActions.includes(action);
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(600);
+  const [viewportW, setViewportW] = useState(800);
   const [menu, setMenu] = useState<{ x: number; y: number; rev: Revision } | null>(null);
   const selectedOid = selectedOids[selectedOids.length - 1] ?? null;
   const [graphWidth, setGraphWidth] = useState(8 + LANE_W);
   const graphW = display.showGraphColumn ? graphWidth : 0;
   const graphScan = useRef({ key: "", length: 0, lanes: 1, firstOid: "" });
+  const resizeDrag = useRef<{ key: keyof RevisionColumnWidths; startX: number; startWidth: number; snapshot: RevisionColumnWidths } | null>(null);
+  const headerH = showColumnHeader ? HEADER_H : 0;
+  const columnsTotal = columnWidths
+    ? columnWidths.refs + columnWidths.subject + columnWidths.author + columnWidths.date + columnWidths.sha + COLUMN_GAP * 4 + ROW_PADDING
+    : 0;
+  /** 列宽模式下行宽：至少铺满可视宽度，列总宽超出时让网格横向滚动。 */
+  const rowWidth = columnWidths ? Math.max(columnsTotal, viewportW - graphW) : undefined;
 
   // 日志按 300 条分批到达；只扫描新增尾部，避免每批重扫全部记录。
   useEffect(() => {
@@ -86,9 +135,13 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const observer = new ResizeObserver(() => setViewportH(el.clientHeight));
+    const observer = new ResizeObserver(() => {
+      setViewportH(el.clientHeight);
+      setViewportW(el.clientWidth);
+    });
     observer.observe(el);
     setViewportH(el.clientHeight);
+    setViewportW(el.clientWidth);
     return () => observer.disconnect();
   }, []);
 
@@ -101,10 +154,11 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
     if (!el || !selectedOid) return;
     const index = revisions.findIndex((r) => r.oid === selectedOid);
     if (index < 0) return;
-    const top = index * ROW_H;
-    if (top < el.scrollTop) el.scrollTop = top;
+    // 列头占据内容顶部，滚动定位需要带上这段偏移，避免选中行藏到列头下。
+    const top = headerH + index * ROW_H;
+    if (top < el.scrollTop + headerH) el.scrollTop = top - headerH;
     else if (top + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_H - el.clientHeight;
-  }, [revisions, selectedOid]);
+  }, [revisions, selectedOid, headerH]);
 
   useEffect(() => {
     if (!display.showGraphColumn) return;
@@ -145,6 +199,66 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
       ctx.beginPath(); ctx.arc(x(rev.lane), y, hasVisibleRefs ? NODE_R + 1 : NODE_R, 0, Math.PI * 2); ctx.fill();
     }
   }, [revisions, startRow, endRow, graphWidth, display.showGraphColumn, display.showRemoteBranches, display.showTags]);
+
+  useEffect(() => () => document.body.classList.remove("column-resizing"), []);
+
+  const startColumnResize = (event: ReactPointerEvent<HTMLElement>, key: keyof RevisionColumnWidths) => {
+    if (!columnWidths || !onColumnWidthsChange || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    resizeDrag.current = { key, startX: event.clientX, startWidth: columnWidths[key], snapshot: { ...columnWidths } };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    document.body.classList.add("column-resizing");
+  };
+  const moveColumnResize = (event: ReactPointerEvent<HTMLElement>) => {
+    const drag = resizeDrag.current;
+    if (!drag || !onColumnWidthsChange) return;
+    const width = clampColumn(drag.key, drag.startWidth + event.clientX - drag.startX);
+    if (width !== drag.snapshot[drag.key]) onColumnWidthsChange({ ...drag.snapshot, [drag.key]: width });
+  };
+  const endColumnResize = (event: ReactPointerEvent<HTMLElement>) => {
+    resizeDrag.current = null;
+    document.body.classList.remove("column-resizing");
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+  const nudgeColumn = (key: keyof RevisionColumnWidths, delta: number) => {
+    if (!columnWidths || !onColumnWidthsChange) return;
+    const width = clampColumn(key, columnWidths[key] + delta);
+    if (width !== columnWidths[key]) onColumnWidthsChange({ ...columnWidths, [key]: width });
+  };
+  const columnStyle = (key: keyof RevisionColumnWidths) => columnWidths
+    ? { flex: `0 0 ${columnWidths[key]}px`, width: columnWidths[key], maxWidth: columnWidths[key] }
+    : undefined;
+  const renderColumnHeader = (key: keyof RevisionColumnWidths) => (
+    <span className={`rev-head-cell rev-${key}`} style={columnStyle(key)}>
+      <span className="rev-head-label">{COLUMN_LABELS[key]}</span>
+      {columnWidths && onColumnWidthsChange && <span
+        className="rev-col-resize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={`调整${COLUMN_LABELS[key]}列宽`}
+        title="拖拽调整列宽，双击恢复默认"
+        tabIndex={0}
+        onPointerDown={(event) => startColumnResize(event, key)}
+        onPointerMove={moveColumnResize}
+        onPointerUp={endColumnResize}
+        onPointerCancel={endColumnResize}
+        onKeyDown={(event) => {
+          // 分隔线是独立控件：按键不再触发网格的选中 / 差异导航。
+          event.stopPropagation();
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          nudgeColumn(key, (event.key === "ArrowRight" ? 1 : -1) * (event.shiftKey ? 32 : 8));
+        }}
+        onDoubleClick={(event) => {
+          if (!columnWidths || !defaultColumnWidths || !onColumnWidthsChange) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onColumnWidthsChange({ ...columnWidths, [key]: defaultColumnWidths[key] });
+        }}
+      />}
+    </span>
+  );
 
   return (
     <div
@@ -189,6 +303,19 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
         onSelect(revisions[next].oid, false);
       }}
     >
+      {showColumnHeader && columnWidths && (
+        <div
+          className="revision-header"
+          role="presentation"
+          style={{ height: HEADER_H, width: graphW + (rowWidth ?? 0), paddingLeft: graphW + 6, paddingRight: 10 }}
+        >
+          {renderColumnHeader("refs")}
+          {renderColumnHeader("subject")}
+          {renderColumnHeader("author")}
+          {renderColumnHeader("date")}
+          {renderColumnHeader("sha")}
+        </div>
+      )}
       <div className="revision-content" style={{ height: revisions.length * ROW_H }}>
         <canvas ref={canvasRef} className="graph-canvas" style={{ top: startRow * ROW_H, width: graphWidth, display: display.showGraphColumn ? undefined : "none" }} />
         {revisions.slice(startRow, endRow).map((rev, i) => {
@@ -199,7 +326,7 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
               key={rev.oid}
               id={optionId(rev.oid)}
               className={`revision-row${selected ? " selected" : ""}`}
-              style={{ top: row * ROW_H, left: graphW, height: ROW_H }}
+              style={{ top: row * ROW_H, left: graphW, height: ROW_H, width: rowWidth }}
               role="option"
               aria-selected={selected}
               aria-posinset={row + 1}
@@ -219,11 +346,11 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
                 setMenu({ x: rect.left + 24, y: rect.bottom, rev });
               }}
             >
-              <span className="rev-refs">{refsForDisplay(rev.refs, display).map((ref, j) => <span key={j} className={`ref-badge ref-${ref.kind}`}>{ref.name}</span>)}</span>
-              <span className="rev-subject" title={rev.subject}>{rev.subject}</span>
-              {display.showAuthorColumn && <span className="rev-author" title={rev.authorName}>{rev.authorName}</span>}
-              {display.showDateColumn && <span className="rev-date">{display.relativeDate ? formatRelativeDate(rev.authorTime) : formatDate(rev.authorTime)}</span>}
-              {display.showShaColumn && <span className="rev-sha">{rev.shortId}</span>}
+              <span className="rev-refs" style={columnStyle("refs")}>{refsForDisplay(rev.refs, display).map((ref, j) => <span key={j} className={`ref-badge ref-${ref.kind}`}>{ref.name}</span>)}</span>
+              <span className="rev-subject" style={columnStyle("subject")} title={rev.subject}>{rev.subject}</span>
+              {display.showAuthorColumn && <span className="rev-author" style={columnStyle("author")} title={rev.authorName}>{rev.authorName}</span>}
+              {display.showDateColumn && <span className="rev-date" style={columnStyle("date")}>{display.relativeDate ? formatRelativeDate(rev.authorTime) : formatDate(rev.authorTime)}</span>}
+              {display.showShaColumn && <span className="rev-sha" style={columnStyle("sha")}>{rev.shortId}</span>}
             </div>
           );
         })}
