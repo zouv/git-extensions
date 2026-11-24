@@ -11,8 +11,9 @@ const {
   rememberGroupActive, pickVisibleActive, relocateRepoConfig,
   groupForRepo, groupById, visibleRepos, reposInGroup, isGroupSelected,
   toggleActiveGroup, setActiveGroups, ensureGroupActive, primaryGroupId, setRepoGroup,
-  createGroup, renameGroup, deleteGroup, togglePin, pinnedGroups, reorderPinned,
-  groupForPinShortcut, displayRepoName, setRepoAlias, fallbackGroupColor, setGroupColor,
+  createGroup, renameGroup, deleteGroup, togglePin, pinnedGroups, reorderPinned, reorderGroups,
+  groupForPinShortcut, displayRepoName, setRepoAlias, fallbackGroupColor, setGroupColor, setGroupBadge,
+  MAX_GROUP_BADGE,
 } = await import(url);
 
 const repo = (name) => ({ path: `/repos/${name}`, name });
@@ -30,7 +31,7 @@ test("默认全部打开，未分配仓库归入未分组", () => {
   assert.deepEqual(visibleRepos(c, repos).map((r) => r.name), ["a", "b", "c", "d"]);
 });
 
-test("Pin 与组菜单多选：全部视图点击进入单选，取消最后一组回落全部打开", () => {
+test("Pin 与组菜单多选：全部视图点击进入单选，取消最后一组保持无选择", () => {
   let c = createGroup(createGroup(emptyConfig(), "Work"), "Home");
   const work = c.groups[1].id;
   const home = c.groups[2].id;
@@ -47,12 +48,14 @@ test("Pin 与组菜单多选：全部视图点击进入单选，取消最后一�
   c = toggleActiveGroup(c, work);
   assert.deepEqual(c.activeGroupIds, [home]);
   c = toggleActiveGroup(c, home);
-  assert.deepEqual(c.view, { kind: "all-open" });
+  assert.deepEqual(c.view, { kind: "none" }, "取消最后一组不再回落全部打开");
+  assert.deepEqual(c.activeGroupIds, []);
+  assert.deepEqual(visibleRepos(c, repos), []);
   assert.equal(isGroupSelected(c, home), false);
   c = toggleActiveGroup(c, DEFAULT_GROUP_ID);
   assert.deepEqual(c.view, { kind: "group", groupId: DEFAULT_GROUP_ID });
   c = toggleActiveGroup(c, DEFAULT_GROUP_ID);
-  assert.deepEqual(c.view, { kind: "all-open" }, "未分组可取消勾选");
+  assert.deepEqual(c.view, { kind: "none" }, "未分组可取消勾选，且保持无选择");
   assert.deepEqual(toggleActiveGroup(c, "ghost"), c);
   assert.deepEqual(selectAllOpen(c).view, { kind: "all-open" });
 });
@@ -119,7 +122,7 @@ test("显式组合多选与独占切组：打开目标已可见保持，否则�
   assert.deepEqual(c.view, { kind: "combined", groupIds: [id] });
   assert.deepEqual(visibleRepos(c, repos).map((r) => r.name), ["a"]);
   c = toggleActiveGroup(c, id);
-  assert.deepEqual(c.view, { kind: "all-open" }, "取消最后一组回落全部打开");
+  assert.deepEqual(c.view, { kind: "none" }, "取消最后一组保持无选择");
   assert.equal(primaryGroupId(c), DEFAULT_GROUP_ID);
   assert.equal(toggleActiveGroup(c, "ghost"), c);
   const ensured = ensureGroupActive(selectGroup(c, DEFAULT_GROUP_ID), id);
@@ -141,7 +144,7 @@ test("删除组：仓库页签回落 Default，活动组移除该组，不删除
   assert.equal(deleteGroup(c, DEFAULT_GROUP_ID), c, "Default 不可删除");
 });
 
-test("Pin 与拖拽重排：Default 可 Pin / 取消，pinned 顺序写回", () => {
+test("Pin 与拖拽重排：Pin 顺序随组顺序，顶部栏重排同步组顺序", () => {
   let c = emptyConfig();
   c = createGroup(c, "A");
   c = createGroup(c, "B");
@@ -152,19 +155,34 @@ test("Pin 与拖拽重排：Default 可 Pin / 取消，pinned 顺序写回", () 
   c = togglePin(c, d);
   assert.deepEqual(pinnedGroups(c).map((g) => g.id), [a, b, d]);
   c = togglePin(c, DEFAULT_GROUP_ID);
-  assert.deepEqual(pinnedGroups(c).map((g) => g.id), [a, b, d, DEFAULT_GROUP_ID]);
+  assert.deepEqual(pinnedGroups(c).map((g) => g.id), [DEFAULT_GROUP_ID, a, b, d], "Pin 顺序按组顺序");
   assert.equal(c.groups[0].pinned, true, "未分组可 Pin");
   c = togglePin(c, DEFAULT_GROUP_ID);
   assert.deepEqual(pinnedGroups(c).map((g) => g.id), [a, b, d]);
   assert.equal(c.groups[0].pinned, false, "未分组可取消 Pin");
-  const groupOrder = c.groups.map((g) => g.id);
   c = reorderPinned(c, [d, a, b]);
-  assert.deepEqual(c.groups.map((g) => g.id), groupOrder, "固定顺序不改管理器顺序");
+  assert.deepEqual(c.groups.map((g) => g.id), [DEFAULT_GROUP_ID, d, a, b], "顶部栏重排同步组顺序");
   assert.deepEqual(pinnedGroups(c).map((g) => g.id), [d, a, b]);
-  assert.equal(c.groups[0].id, DEFAULT_GROUP_ID, "Default 仍在首位");
+  assert.deepEqual(c.pinnedGroupIds, [d, a, b]);
   assert.equal(reorderPinned(c, [a, b]), c, "数量不匹配拒绝");
   assert.equal(reorderPinned(c, [d, a, a]), c, "重复 id 拒绝");
   assert.equal(reorderPinned(c, [d, a, "nope"]), c, "未知 id 拒绝");
+});
+
+test("管理器拖拽排序：完整重排组顺序，Pin 顺序与快捷键随之变化", () => {
+  let c = createGroup(createGroup(emptyConfig(), "A"), "B");
+  const [a, b] = [c.groups[1].id, c.groups[2].id];
+  c = togglePin(c, a);
+  c = togglePin(c, b);
+  const ordered = reorderGroups(c, [b, DEFAULT_GROUP_ID, a]);
+  assert.deepEqual(ordered.groups.map((g) => g.id), [b, DEFAULT_GROUP_ID, a]);
+  assert.deepEqual(pinnedGroups(ordered).map((g) => g.id), [b, a]);
+  assert.equal(groupForPinShortcut(ordered, 1), b);
+  assert.equal(groupForPinShortcut(ordered, 2), a);
+  assert.equal(reorderGroups(c, [b, a]), c, "数量不匹配拒绝");
+  assert.equal(reorderGroups(c, [b, b, a]), c, "重复 id 拒绝");
+  assert.equal(reorderGroups(c, [b, a, "nope"]), c, "未知 id 拒绝");
+  assert.deepEqual(reorderGroups(c, [DEFAULT_GROUP_ID, a, b]).groups.map((g) => g.id), [DEFAULT_GROUP_ID, a, b]);
 });
 
 test("仓库页签别名：设置 / 覆盖 / 清空恢复仓库名", () => {
@@ -177,6 +195,26 @@ test("仓库页签别名：设置 / 覆盖 / 清空恢复仓库名", () => {
   assert.equal(displayRepoName(c, repo("a")), "Client App");
   c = setRepoAlias(c, "/repos/a", "");
   assert.equal(displayRepoName(c, repo("a")), "a", "清空恢复仓库名");
+});
+
+test("分组图标文字：支持 Default、超长截断、清空恢复自动生成", () => {
+  let c = createGroup(emptyConfig(), "Work");
+  const id = c.groups[1].id;
+  c = setGroupBadge(c, id, " 前端 ");
+  assert.equal(groupById(c, id).badge, "前端");
+  c = setGroupBadge(c, id, "ABCD");
+  assert.equal(groupById(c, id).badge, "AB", "超长截断");
+  c = setGroupBadge(c, DEFAULT_GROUP_ID, "未");
+  assert.equal(groupById(c, DEFAULT_GROUP_ID).badge, "未", "Default 也可自定义");
+  c = setGroupBadge(c, id, "   ");
+  assert.equal(groupById(c, id).badge, undefined, "清空后按组名生成");
+  c = setGroupBadge(c, DEFAULT_GROUP_ID, "");
+  assert.equal(groupById(c, DEFAULT_GROUP_ID).badge, undefined);
+  assert.equal(setGroupBadge(c, "ghost", "X"), c, "未知组忽略");
+  c = renameGroup(c, id, "Client");
+  c = setGroupBadge(c, id, "CL");
+  assert.equal(groupById(c, id).badge, "CL", "重命名保留自定义图标");
+  assert.ok(MAX_GROUP_BADGE >= 2);
 });
 
 test("组颜色：新组优先使用未占预设色，修改与既有操作保持颜色", () => {
@@ -199,6 +237,20 @@ test("组颜色：新组优先使用未占预设色，修改与既有操作保�
   c = setGroupColor(c, DEFAULT_GROUP_ID, GROUP_COLOR_PRESETS[8].value);
   assert.equal(c.groups[0].color, GROUP_COLOR_PRESETS[8].value, "Default 也可自定义颜色");
   assert.equal(c.groups[0].pinned, false);
+});
+
+test("预设色库：保留旧色值、名称与色值唯一、全部为合法十六进制", () => {
+  assert.ok(GROUP_COLOR_PRESETS.length >= 48, "至少 48 种预设色");
+  const values = GROUP_COLOR_PRESETS.map((preset) => preset.value);
+  const labels = GROUP_COLOR_PRESETS.map((preset) => preset.label);
+  assert.equal(new Set(values).size, values.length, "色值不重复");
+  assert.equal(new Set(labels).size, labels.length, "名称不重复");
+  for (const legacy of ["#3370ff", "#34c759", "#ff8800", "#f54a45", "#7f3bf5", "#14c0ff", "#00d6b9", "#ffc60a", "#ff66a1", "#646a73"]) {
+    assert.ok(values.includes(legacy), `保留旧色 ${legacy}`);
+  }
+  assert.ok(values.includes(DEFAULT_GROUP_COLOR), "默认色仍在色库中");
+  assert.ok(values.every((value) => /^#[0-9a-f]{6}$/i.test(value)), "全部为 6 位十六进制");
+  assert.ok(labels.every((label) => label.trim().length > 0), "名称非空");
 });
 
 test("旧配置稳定补色，Default 只继承合法颜色且固定名称与可 Pin", () => {
@@ -297,12 +349,32 @@ test("旧单选/多选迁移，新 view 优先且校验固定列表/组内活动
   });
   assert.deepEqual(next.view, { kind: "combined", groupIds: ["home"] });
   assert.deepEqual(next.activeGroupIds, ["home"]);
-  assert.deepEqual(next.pinnedGroupIds, ["home", DEFAULT_GROUP_ID, "work"]);
+  assert.deepEqual(next.pinnedGroupIds, [DEFAULT_GROUP_ID, "work", "home"], "Pin 成员按组顺序归一");
   assert.deepEqual(next.lastActivePathByGroup, { work: "/repos/b", default: "/repos/d" });
   assert.deepEqual(sanitizeConfig({ ...c, pinnedGroupIds: [] }).groups.map((g) => g.pinned), [false, false, false]);
   for (const view of [null, { kind: "group", groupId: "ghost" }, { kind: "combined", groupIds: [] }, { kind: "bad" }]) {
     assert.deepEqual(sanitizeConfig({ ...c, view }).view, { kind: "all-open" });
   }
+  const none = sanitizeConfig({ ...c, view: { kind: "none" } });
+  assert.deepEqual(none.view, { kind: "none" });
+  assert.deepEqual(none.activeGroupIds, []);
+  const reordered = sanitizeConfig({
+    groups: [{ id: "home", name: "Home" }, { id: DEFAULT_GROUP_ID, name: "x" }, { id: "work", name: "Work" }],
+    assignments: c.assignments,
+  });
+  assert.deepEqual(reordered.groups.map((g) => g.id), ["home", DEFAULT_GROUP_ID, "work"], "组顺序保留，Default 不强制置顶");
+  const badged = sanitizeConfig({
+    groups: [
+      { id: DEFAULT_GROUP_ID, name: "x", badge: "AB" },
+      { id: "work", name: "Work", badge: " 工具 " },
+      { id: "home", name: "Home", badge: "ABCDEF" },
+      { id: "long", name: "Long", badge: 42 },
+    ],
+  });
+  assert.equal(groupById(badged, DEFAULT_GROUP_ID).badge, "AB");
+  assert.equal(groupById(badged, "work").badge, "工具");
+  assert.equal(groupById(badged, "home").badge, "AB", `最多 ${MAX_GROUP_BADGE} 个字符`);
+  assert.equal(groupById(badged, "long").badge, undefined, "非字符串图标忽略");
 });
 
 test("v2 分组键优先，保存只写新键，加载不预写且存储异常安全", () => {
@@ -330,6 +402,7 @@ test("选择 helper 的兼容镜像、全部打开与组合独立于归组", () 
   assert.deepEqual(visibleRepos({ ...selected, activeGroupIds: ["home"] }, repos).map((r) => r.name), ["a", "b"], "只读 view");
   assert.equal(selectGroup(c, "ghost"), c);
   assert.deepEqual(setActiveGroups(c, []).view, { kind: "all-open" });
+  assert.deepEqual(visibleRepos({ ...c, view: { kind: "none" } }, repos), [], "无选择视图不显示任何仓库");
   assert.deepEqual(setActiveGroups(c, ["work", "work"]).view, { kind: "group", groupId: "work" });
   assert.deepEqual(selectCombinedGroups(c, ["work"]).view, { kind: "combined", groupIds: ["work"] });
   assert.deepEqual(visibleRepos(selectCombinedGroups(c, ["work", "home"]), repos).map((r) => r.name), ["a", "b", "c"]);
@@ -345,6 +418,7 @@ test("单组优先组内记忆再首项，全部/组合优先当前可见，关�
   assert.equal(pickVisibleActive(selectGroup(c, "work"), repos, "/repos/a"), "/repos/b");
   assert.equal(pickVisibleActive(selectGroup(c, "work"), repos.filter((r) => r.name !== "b"), "/repos/c"), "/repos/a");
   assert.equal(pickVisibleActive(selectGroup(c, "home"), [], "/repos/c"), null);
+  assert.equal(pickVisibleActive({ ...c, view: { kind: "none" } }, repos, "/repos/a"), null, "无选择时不自动激活仓库");
   assert.equal(pickVisibleActive(selectAllOpen(c), repos, "/repos/d"), "/repos/d");
   assert.equal(pickVisibleActive(selectCombinedGroups(c, ["work", "home"]), repos, "/repos/c"), "/repos/c");
   assert.equal(pickVisibleActive(selectCombinedGroups(c, ["work", "home"]), repos, "/repos/d"), "/repos/a");
@@ -360,6 +434,7 @@ test("删组清理固定列表和记忆，但不影响别名；删单选组安�
   assert.deepEqual(c.pinnedGroupIds, ["home"]);
   assert.deepEqual(c.lastActivePathByGroup, {});
   assert.equal(c.aliases["/repos/a"], "Alias");
+  assert.deepEqual(deleteGroup({ ...c, view: { kind: "none" } }, "work").view, { kind: "none" }, "无选择视图删组后保持无选择");
 });
 
 test("重新定位迁移归组/别名/记忆，冲突目标优先并清理跨组记忆", () => {

@@ -1,4 +1,5 @@
 /** 仓库分组配置：归组与别名独立于打开页签、持久仓库记录。 */
+/** 分组预设色库：保留旧 10 色值以兼容已保存配置，再按色系补充常用色。 */
 export const GROUP_COLOR_PRESETS = [
   { label: "蓝色", value: "#3370ff" },
   { label: "绿色", value: "#34c759" },
@@ -10,6 +11,52 @@ export const GROUP_COLOR_PRESETS = [
   { label: "黄色", value: "#ffc60a" },
   { label: "粉色", value: "#ff66a1" },
   { label: "灰色", value: "#646a73" },
+  { label: "深蓝", value: "#1d4ed8" },
+  { label: "宝蓝", value: "#2563eb" },
+  { label: "浅蓝", value: "#60a5fa" },
+  { label: "湖蓝", value: "#0ea5e9" },
+  { label: "深海蓝", value: "#0369a1" },
+  { label: "藏蓝", value: "#1e3a8a" },
+  { label: "深绿", value: "#15803d" },
+  { label: "翠绿", value: "#16a34a" },
+  { label: "草绿", value: "#22c55e" },
+  { label: "浅绿", value: "#4ade80" },
+  { label: "黄绿", value: "#84cc16" },
+  { label: "橄榄绿", value: "#65a30d" },
+  { label: "翡翠绿", value: "#059669" },
+  { label: "薄荷绿", value: "#10b981" },
+  { label: "深青", value: "#0891b2" },
+  { label: "亮青", value: "#06b6d4" },
+  { label: "浅青", value: "#22d3ee" },
+  { label: "碧绿", value: "#2dd4bf" },
+  { label: "墨绿", value: "#0f766e" },
+  { label: "深橙", value: "#ea580c" },
+  { label: "明橙", value: "#f97316" },
+  { label: "浅橙", value: "#fb923c" },
+  { label: "琥珀", value: "#f59e0b" },
+  { label: "金黄", value: "#fbbf24" },
+  { label: "柠檬黄", value: "#eab308" },
+  { label: "棕黄", value: "#a16207" },
+  { label: "正红", value: "#dc2626" },
+  { label: "亮红", value: "#ef4444" },
+  { label: "浅红", value: "#f87171" },
+  { label: "玫红", value: "#e11d48" },
+  { label: "洋红", value: "#db2777" },
+  { label: "桃红", value: "#ec4899" },
+  { label: "浅粉", value: "#f472b6" },
+  { label: "深紫", value: "#6d28d9" },
+  { label: "亮紫", value: "#8b5cf6" },
+  { label: "紫罗兰", value: "#a855f7" },
+  { label: "浅紫", value: "#c084fc" },
+  { label: "棕色", value: "#b45309" },
+  { label: "深棕", value: "#92400e" },
+  { label: "米灰", value: "#a8a29e" },
+  { label: "暖灰", value: "#78716c" },
+  { label: "石板灰", value: "#475569" },
+  { label: "深灰", value: "#334155" },
+  { label: "炭黑", value: "#1f2937" },
+  { label: "墨黑", value: "#0b1220" },
+  { label: "浅灰", value: "#d4d4d8" },
 ] as const;
 export type RepoGroupColor = (typeof GROUP_COLOR_PRESETS)[number]["value"];
 export const DEFAULT_GROUP_COLOR: RepoGroupColor = "#646a73";
@@ -20,21 +67,25 @@ export interface RepoGroup {
   /** 兼容旧调用；固定导航的事实源为 pinnedGroupIds。 */
   pinned: boolean;
   color: RepoGroupColor;
+  /** 顶部栏 / 管理器的自定义图标文字；缺省时按组名生成缩写。 */
+  badge?: string;
 }
 
 export type RepoGroupView =
   | { kind: "group"; groupId: string }
   | { kind: "all-open" }
+  | { kind: "none" }
   | { kind: "combined"; groupIds: string[] };
 
 export interface RepoGroupConfig {
   groups: RepoGroup[];
   /** repoPath → groupId；未记录的仓库归入未分组。 */
   assignments: Record<string, string>;
-  /** view 的兼容镜像；all-open 为 []，不作为可见性的事实源。 */
+  /** view 的兼容镜像；all-open / none 为 []，不作为可见性的事实源。 */
   activeGroupIds: string[];
   aliases: Record<string, string>;
   view: RepoGroupView;
+  /** 固定组成员；显示顺序由 groups 数组决定。 */
   pinnedGroupIds: string[];
   lastActivePathByGroup: Record<string, string>;
 }
@@ -46,6 +97,7 @@ const LEGACY_STORAGE_KEY = "git-extensions.repoGroups.v1";
 const MAX_GROUPS = 64;
 const MAX_NAME = 40;
 const MAX_ALIAS = 40;
+export const MAX_GROUP_BADGE = 2;
 
 export function isRepoGroupColor(value: unknown): value is RepoGroupColor {
   return typeof value === "string" && GROUP_COLOR_PRESETS.some((preset) => preset.value === value);
@@ -72,14 +124,22 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** 图标文字按字符（而非 UTF-16 码元）截断，避免拆开表情或代理对。 */
+function validBadge(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return [...value.trim()].slice(0, MAX_GROUP_BADGE).join("");
+}
+
 function validGroup(value: unknown): RepoGroup | null {
   if (!isObject(value)) return null;
   if (typeof value.id !== "string" || !value.id.trim() || value.id.trim() === DEFAULT_GROUP_ID) return null;
   if (typeof value.name !== "string" || !value.name.trim()) return null;
   const id = value.id.trim();
+  const badge = validBadge(value.badge);
   return {
     id, name: value.name.trim().slice(0, MAX_NAME), pinned: value.pinned === true,
     color: isRepoGroupColor(value.color) ? value.color : fallbackGroupColor(id),
+    ...(badge ? { badge } : {}),
   };
 }
 
@@ -102,26 +162,39 @@ function withView(config: RepoGroupConfig, view: RepoGroupView): RepoGroupConfig
   return { ...config, view, activeGroupIds: [...viewIds(view)] };
 }
 
-/** 白名单校验；旧 Default 固定迁移为未分组，旧多选迁移为单组或显式组合。 */
+/** 白名单校验；组顺序即管理器与顶部栏 Pin 的显示顺序，Default 可参与排序。 */
 export function sanitizeConfig(value: unknown): RepoGroupConfig {
   if (!isObject(value)) return emptyConfig();
   const rawGroups = Array.isArray(value.groups) ? value.groups : [];
-  const rawDefault = rawGroups.find((g) => isObject(g) && g.id === DEFAULT_GROUP_ID);
-  const defaultEntry = defaultGroup(isObject(rawDefault) && isRepoGroupColor(rawDefault.color)
-    ? rawDefault.color : DEFAULT_GROUP_COLOR);
-  // 旧配置没有 pinnedGroupIds 时，Default 的 pinned 与其它组一样参与迁移。
-  if (isObject(rawDefault) && rawDefault.pinned === true) defaultEntry.pinned = true;
-  const groups = [defaultEntry];
-  const ids = new Set([DEFAULT_GROUP_ID]);
+  const groups: RepoGroup[] = [];
+  const ids = new Set<string>();
   const names = new Set([DEFAULT_GROUP_NAME.toLowerCase(), "default"]);
+  let defaultSeen = false;
   for (const item of rawGroups) {
     if (groups.length >= MAX_GROUPS) break;
+    if (isObject(item) && item.id === DEFAULT_GROUP_ID) {
+      if (defaultSeen) continue;
+      defaultSeen = true;
+      const entry = defaultGroup(isRepoGroupColor(item.color) ? item.color : DEFAULT_GROUP_COLOR);
+      // 旧配置没有 pinnedGroupIds 时，Default 的 pinned 与其它组一样参与迁移。
+      entry.pinned = item.pinned === true;
+      const badge = validBadge(item.badge);
+      if (badge) entry.badge = badge;
+      groups.push(entry);
+      ids.add(DEFAULT_GROUP_ID);
+      continue;
+    }
     const group = validGroup(item);
     if (!group || ids.has(group.id) || names.has(group.name.toLowerCase())) continue;
     ids.add(group.id);
     names.add(group.name.toLowerCase());
     groups.push(group);
   }
+  if (!defaultSeen) groups.unshift(defaultGroup());
+  if (groups.length > MAX_GROUPS) groups.length = MAX_GROUPS;
+  ids.clear();
+  for (const group of groups) ids.add(group.id);
+  ids.add(DEFAULT_GROUP_ID);
   const assignments: Record<string, string> = {};
   if (isObject(value.assignments)) {
     for (const [rawPath, groupId] of Object.entries(value.assignments)) {
@@ -143,15 +216,20 @@ export function sanitizeConfig(value: unknown): RepoGroupConfig {
     view = viewForIds(validIds(value.activeGroupIds, ids));
   } else if (isObject(value.view)) {
     const rawView = value.view;
-    if (rawView.kind === "group" && typeof rawView.groupId === "string" && ids.has(rawView.groupId.trim())) {
+    if (rawView.kind === "none") {
+      view = { kind: "none" };
+    } else if (rawView.kind === "group" && typeof rawView.groupId === "string" && ids.has(rawView.groupId.trim())) {
       view = { kind: "group", groupId: rawView.groupId.trim() };
     } else if (rawView.kind === "combined") {
       const groupIds = validIds(rawView.groupIds, ids);
       if (groupIds.length) view = { kind: "combined", groupIds };
     }
   }
-  const pinnedGroupIds = "pinnedGroupIds" in value
+  const pinnedSource = "pinnedGroupIds" in value
     ? validIds(value.pinnedGroupIds, ids) : groups.filter((g) => g.pinned).map((g) => g.id);
+  const pinnedSet = new Set(pinnedSource);
+  // Pin 顺序与组顺序统一：pinnedGroupIds 只记录成员关系。
+  const pinnedGroupIds = groups.filter((g) => pinnedSet.has(g.id)).map((g) => g.id);
   const config: RepoGroupConfig = {
     groups: groups.map((g) => ({ ...g, pinned: pinnedGroupIds.includes(g.id) })),
     assignments, aliases, view, activeGroupIds: [...viewIds(view)], pinnedGroupIds,
@@ -198,8 +276,10 @@ export function groupById(config: RepoGroupConfig, groupId: string): RepoGroup |
   return config.groups.find((g) => g.id === groupId);
 }
 
+/** 固定组按 groups 数组顺序返回；pinnedGroupIds 只表示成员关系。 */
 export function pinnedGroups(config: RepoGroupConfig): RepoGroup[] {
-  return config.pinnedGroupIds.map((id) => groupById(config, id)).filter((g): g is RepoGroup => !!g);
+  const pinned = new Set(config.pinnedGroupIds);
+  return config.groups.filter((group) => pinned.has(group.id));
 }
 
 export function isGroupActive(config: RepoGroupConfig, groupId: string): boolean {
@@ -234,13 +314,14 @@ export function ensureGroupActive(config: RepoGroupConfig, groupId: string): Rep
   return !groupById(config, groupId) || isGroupActive(config, groupId) ? config : selectGroup(config, groupId);
 }
 
-/** Pin / 菜单多选开关：全部视图点击组进入单选；取消最后一组回落全部打开。 */
+/** Pin / 菜单多选开关：全部视图点击组进入单选；取消最后一组保持无选择，不回落全部打开。 */
 export function toggleActiveGroup(config: RepoGroupConfig, groupId: string): RepoGroupConfig {
   if (!groupById(config, groupId)) return config;
   if (config.view.kind === "all-open") return selectGroup(config, groupId);
   const ids = viewIds(config.view);
+  if (ids.length === 0) return selectGroup(config, groupId);
   const next = ids.includes(groupId) ? ids.filter((id) => id !== groupId) : [...ids, groupId];
-  return next.length ? selectCombinedGroups(config, next) : selectAllOpen(config);
+  return next.length ? selectCombinedGroups(config, next) : withView(config, { kind: "none" });
 }
 
 export function setActiveGroups(config: RepoGroupConfig, groupIds: string[]): RepoGroupConfig {
@@ -307,6 +388,20 @@ export function setGroupColor(config: RepoGroupConfig, groupId: string, color: s
   return { ...config, groups: config.groups.map((g) => g.id === groupId ? { ...g, color } : g) };
 }
 
+/** 自定义图标文字；最多两个字符，清空后恢复按组名生成。 */
+export function setGroupBadge(config: RepoGroupConfig, groupId: string, badge: string): RepoGroupConfig {
+  if (!groupById(config, groupId)) return config;
+  const trimmed = validBadge(badge);
+  return {
+    ...config,
+    groups: config.groups.map((g) => {
+      if (g.id !== groupId) return g;
+      if (!trimmed) { const next = { ...g }; delete next.badge; return next; }
+      return { ...g, badge: trimmed };
+    }),
+  };
+}
+
 export function renameGroup(config: RepoGroupConfig, groupId: string, name: string): RepoGroupConfig {
   const trimmed = name.trim().slice(0, MAX_NAME);
   if (!trimmed || groupId === DEFAULT_GROUP_ID || nameTaken(config, trimmed, groupId)) return config;
@@ -323,7 +418,7 @@ export function deleteGroup(config: RepoGroupConfig, groupId: string): RepoGroup
     ...config, groups: config.groups.filter((g) => g.id !== groupId), assignments,
     pinnedGroupIds: config.pinnedGroupIds.filter((id) => id !== groupId), lastActivePathByGroup,
   };
-  if (config.view.kind === "all-open") return next;
+  if (config.view.kind === "all-open" || config.view.kind === "none") return next;
   const remaining = viewIds(config.view).filter((id) => id !== groupId);
   return config.view.kind === "combined" ? selectCombinedGroups(next, remaining)
     : remaining.length ? next : selectAllOpen(next);
@@ -342,14 +437,29 @@ export function togglePin(config: RepoGroupConfig, groupId: string): RepoGroupCo
 export function groupForPinShortcut(config: RepoGroupConfig, digit: number): string | null {
   if (!Number.isInteger(digit) || digit < 0 || digit > 9) return null;
   if (digit === 0) return groupById(config, DEFAULT_GROUP_ID) ? DEFAULT_GROUP_ID : null;
-  return config.pinnedGroupIds.filter((id) => id !== DEFAULT_GROUP_ID)[digit - 1] ?? null;
+  return pinnedGroups(config).filter((group) => group.id !== DEFAULT_GROUP_ID)[digit - 1]?.id ?? null;
 }
 
-/** 固定导航重排只改独立 ID 列表，不改管理器的 groups 顺序。 */
+/** 顶部栏拖动排序：只在固定项占用的槽位内重排，组顺序随之更新。 */
 export function reorderPinned(config: RepoGroupConfig, orderedPinnedIds: string[]): RepoGroupConfig {
   if (orderedPinnedIds.length !== config.pinnedGroupIds.length || new Set(orderedPinnedIds).size !== orderedPinnedIds.length
     || orderedPinnedIds.some((id) => !config.pinnedGroupIds.includes(id))) return config;
-  return { ...config, pinnedGroupIds: [...orderedPinnedIds] };
+  const pinned = new Set(config.pinnedGroupIds);
+  const byId = new Map(config.groups.map((group) => [group.id, group]));
+  const queue = [...orderedPinnedIds];
+  const groups = config.groups.map((group) => pinned.has(group.id) ? byId.get(queue.shift()!)! : group);
+  return { ...config, groups, pinnedGroupIds: groups.filter((group) => pinned.has(group.id)).map((group) => group.id) };
+}
+
+/** 管理器拖动排序：完整重排 groups，Pin 顺序随组顺序派生。 */
+export function reorderGroups(config: RepoGroupConfig, orderedGroupIds: string[]): RepoGroupConfig {
+  const current = config.groups.map((group) => group.id);
+  if (orderedGroupIds.length !== current.length || new Set(orderedGroupIds).size !== current.length
+    || orderedGroupIds.some((id) => !current.includes(id))) return config;
+  const byId = new Map(config.groups.map((group) => [group.id, group]));
+  const groups = orderedGroupIds.map((id) => byId.get(id)!);
+  const pinned = new Set(config.pinnedGroupIds);
+  return { ...config, groups, pinnedGroupIds: groups.filter((group) => pinned.has(group.id)).map((group) => group.id) };
 }
 
 /** 重新定位：已登记目标完整保留归组/别名（含隐式未分组/无别名）；否则缺项继承旧路径。 */

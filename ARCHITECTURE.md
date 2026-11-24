@@ -39,7 +39,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | 改 Reset / 恢复 | `src-tauri/src/git/reset.rs`、`commands.rs`；`src/components/ResetDialog.tsx`、`RecoveryDialog.tsx`、`RepoWorkspace.tsx` | 分支图与高亮 Worker | §2、§3、§4；`arch/ui.md §2` |
 | 改页面布局 / 状态流转 | `src/App.tsx`、`src/RepoWorkspace.tsx`、`src/ui/`、`src/styles.css` | 后端 git 模块 | `arch/ui.md §1–§3` |
 | 改顶部栏 / 窗口控制 / 页签与 Pin 拖拽 | `src/components/TitleBar.tsx`、`RepositoryTabs.tsx`、`src/App.tsx`、`src/tabOrder.ts`、`src-tauri/src/window_host.rs`、`capabilities/default.json` | 后端 git 模块 | `arch/ui.md §1–§3、§5`；§7 窗口生命周期 |
-| 改仓库页签分组 / 固定 / 别名 / 持久记录与查找 | `src/repoGroups.ts`、`repositoryRecords.ts` / `repositorySession.ts`、`src/components/{RepositoryGroupNav,GroupAvatar,RepoGroupsDialog,RepositoryRecordList,RepositorySearchDialog,TitleBar,RepositoryTabs}.tsx`、`src/App.tsx`、`repositoryNavigation.css` / `repositoryManager.css` | 后端 git 模块 | `arch/ui.md §1–§3、§5` |
+| 改仓库页签分组 / 固定 / 排序 / 图标文字 / 别名 / 持久记录与查找 | `src/repoGroups.ts`、`repositoryRecords.ts` / `repositorySession.ts`、`src/components/{RepositoryGroupNav,GroupAvatar,RepoGroupsDialog,RepositoryRecordList,RepositorySearchDialog,TitleBar,RepositoryTabs}.tsx`、`src/App.tsx`、`repositoryNavigation.css` / `repositoryManager.css` | 后端 git 模块 | `arch/ui.md §1–§3、§5` |
 | 改启动恢复 / 页签持久化 | `src/App.tsx`、`src/openRepos.ts`、`tests/open-repos.test.mjs` | 后端 git 模块、其它 UI 组件 | `arch/ui.md §2–§3、§5` |
 | 改命令面板 / 统一快捷键 | `src/commands.ts`、`src/components/CommandPalette.tsx`、`src/App.tsx`、`src/RepoWorkspace.tsx` | 后端 git 模块 | `arch/ui.md §2–§3` |
 | 改弹窗焦点 / 关闭保护 / 通知 | `src/ui/Dialog.tsx`、`src/ui/layerStack.ts`、`src/ui/useDirtyClose.ts`、`src/ui/Confirm.tsx`、`src/components/NotificationCenter.tsx`、`src/App.tsx`、`src/dialogState.ts` | Git 读写模块 | `arch/ui.md §2–§3、§5` |
@@ -206,6 +206,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 - 大仓库性能测量：`cd src-tauri && cargo run --release --example bench -- <仓库路径> 3`；测量沿用正式同步读实现；输出首批 / 全日志、全量 diff、文件清单 / 首文件 patch 与两类选中链路 P95（不含 IPC / WebView 绘制）。历史基线见 `docs/03-性能与平台验证.md`。
 - 文档机械体检：`sh check-docs.sh`。
 - 资源管理器菜单图标：`powershell -File scripts/generate-menu-icons.ps1` 重新生成 `src-tauri/icons/menu/*.ico`（由 `include_bytes!` 内嵌，运行时物化到 `%LOCALAPPDATA%`）。
+- 应用图标：唯一矢量源是 `docs/icons/git-extensions.svg`；执行 `python docs/icons/_build.py` 生成多尺寸 PNG / ICO / ICNS 并安装到 `src-tauri/icons/`。
 
 ---
 
@@ -230,7 +231,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 - **Reset / Rebase 备份只保存原 HEAD**：不是未提交文件备份。Hard 必须 clean，ignored 阻挡也检查；备份引用保留可达提交但不会进入默认日志。应用内部写锁与指纹校验不消除外部进程竞态；不要擅自执行 force push。
 - **Stash 选择不是稳定索引**：应用 / 弹出 / 删除必须校验 expectedOid，stash@{n} 变动后拒绝旧预览；不能只凭索引误操作另一条。
 - **文件历史路径属于对应提交**：--follow 的 rename 状态用 NUL 分隔解析，不用作者 / subject 可包含的文本哨兵；返回 filePath，查看历史 diff 使用该时期路径并从清单取得 oldPath。
-- **图标资源必须跨平台齐全**：即使 bundle 未显式引用，`generate_context!` 在非 Windows 构建也需要 PNG；`icons/` 同时保留 ICO / PNG / ICNS，并在 bundle 配置中引用。
+- **图标资源必须跨平台齐全**：即使 bundle 未显式引用，`generate_context!` 在非 Windows 构建也需要 PNG；`icons/` 同时保留 ICO / PNG / ICNS，并在 bundle 配置中引用。应用图标只改 `docs/icons/git-extensions.svg`，要重新生成并同步 `src-tauri/icons/`，不要只替换某一个尺寸。
 - **窗口启动请求必须可重复读取**：`get_window_bootstrap` 不能 `mem::take` 初始请求，否则 WebView 刷新（F5 / Ctrl+R / 前端重载）后拿不到动作，窗口停在「无法启动窗口」；`WindowSession` 分离 `initial` 与 `pending`，前端同时在捕获阶段拦截 F5 / Ctrl+R。轻量窗口隐藏创建，若前端页面加载失败会永远不显示，`show_after_timeout` 3 秒兜底 show，至少让用户看到错误页并可关闭。
 - **前端交互取舍见分册**：顶部栏 / 页签拖拽 / 分组 / 启动恢复 / 草稿隔离 / 设置白名单 / 高亮限量 / 读取去重等 UI 规则见 [`arch/ui.md §5`](./arch/ui.md)；窗口生命周期与 capabilities 仍以本节和后端代码为准。
 - **窄窗布局用容器查询与宽度上限**：提交图列、检查器宽度与工具栏溢出规则见 [`arch/ui.md §5`](./arch/ui.md)；不要恢复固定 `min-width:500` 或让固定 400 / 420 面板挤占核心视图。变更文件面板宽度例外：用户要求自由拖拽，已移除 300–720 夹取与 CSS 上限，不要恢复。

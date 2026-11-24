@@ -31,6 +31,7 @@ interface Props {
   onReorderRepo: (orderedPaths: string[]) => void;
   onRepoGroupsChange: (next: RepoGroupConfig) => void;
   onSetRepoAlias: (path: string, alias: string) => void;
+  onSetRepoGroup: (path: string, groupId: string) => void;
   onManageGroups?: () => void;
   onSearchRepositories: () => void;
   onManageRepoGroups: (groupId?: string) => void;
@@ -98,6 +99,7 @@ export default function TitleBar(props: Props) {
         meta={props.meta}
         repoGroups={config}
         onSetAlias={props.onSetRepoAlias}
+        onSetGroup={props.onSetRepoGroup}
         onActivate={props.onActivate}
         onClose={props.onClose}
         onCloseOthers={props.onCloseOthers}

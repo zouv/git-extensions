@@ -24,7 +24,7 @@ import { loadOpenRepos, restoreCandidates, sanitizeRecentRepos, saveOpenRepos } 
 import { canonicalActivePath, closeBlockedPaths, newRepositoryGroup } from "./repositorySession";
 import type { RepoGroupConfig } from "./repoGroups";
 import {
-  ensureGroupActive, groupForPinShortcut, groupForRepo, loadRepoGroups,
+  DEFAULT_GROUP_ID, ensureGroupActive, groupForPinShortcut, groupForRepo, loadRepoGroups,
   displayRepoName, saveRepoGroups, setRepoAlias, setRepoGroup, visibleRepos,
   rememberGroupActive, pickVisibleActive, selectGroup, relocateRepoConfig,
 } from "./repoGroups";
@@ -81,6 +81,8 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
   const [showOpen, setShowOpen] = useState(false);
   const [openPath, setOpenPath] = useState("");
   const [openInsertAfter, setOpenInsertAfter] = useState<string | null>(null);
+  const [openGroupId, setOpenGroupId] = useState("");
+  const [openAlias, setOpenAlias] = useState("");
   const [opening, setOpening] = useState(false);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [meta, setMeta] = useState<Record<string, SessionMeta>>({});
@@ -227,7 +229,7 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
   const dismissNotice = useCallback((id: number) => setNotices((prev) => prev.filter((notice) => notice.id !== id)), []);
   const clearNotices = useCallback(() => setNotices([]), []);
 
-  const openRepo = useCallback(async (path: string): Promise<RepoInfo | null> => {
+  const openRepo = useCallback(async (path: string, options?: { groupId?: string; alias?: string }): Promise<RepoInfo | null> => {
     const trimmed = path.trim();
     if (!trimmed || openingRef.current || recordActionRef.current || restoringRef.current) return null;
     const insertAfter = openInsertAfter;
@@ -243,6 +245,8 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
         const target = newRepositoryGroup(nextGroups, insertAfter ? groupForRepo(nextGroups, insertAfter) : undefined);
         nextGroups = setRepoGroup(nextGroups, info.path, target);
       }
+      if (options?.groupId) nextGroups = setRepoGroup(nextGroups, info.path, options.groupId);
+      if (options?.alias?.trim()) nextGroups = setRepoAlias(nextGroups, info.path, options.alias);
       nextGroups = rememberGroupActive(ensureGroupActive(nextGroups, groupForRepo(nextGroups, info.path)), info.path);
       groupsRef.current = nextGroups;
       setRepoGroups(nextGroups);
@@ -274,6 +278,8 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       setShowOpen(false);
       setOpenPath("");
       setOpenInsertAfter(null);
+      setOpenGroupId("");
+      setOpenAlias("");
       return info;
     } catch (e) {
       setRecordErrors((prev) => ({ ...prev, [trimmed]: String(e) }));
@@ -285,6 +291,8 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
   const beginOpen = useCallback((prefill = "") => {
     setOpenInsertAfter(null);
     setOpenPath(prefill);
+    setOpenGroupId("");
+    setOpenAlias("");
     setShowOpen(true);
   }, []);
 
@@ -300,8 +308,23 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
   const beginOpenRightOf = useCallback((path: string) => {
     setOpenInsertAfter(path);
     setOpenPath("");
+    setOpenGroupId("");
+    setOpenAlias("");
     setShowOpen(true);
   }, []);
+
+  const openFromDialog = useCallback((path = openPath) => {
+    void openRepo(path, { groupId: openGroupId || undefined, alias: openAlias });
+  }, [openRepo, openPath, openGroupId, openAlias]);
+
+  const closeOpenDialog = useCallback(() => {
+    if (opening) return;
+    setShowOpen(false);
+    setOpenInsertAfter(null);
+    setOpenPath("");
+    setOpenGroupId("");
+    setOpenAlias("");
+  }, [opening]);
 
   useEffect(() => {
     if (TEST_REPO) return;
@@ -916,6 +939,7 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
         onReorderRepo={reorderRepos}
         onRepoGroupsChange={updateRepoGroups}
         onSetRepoAlias={(path, alias) => updateRepoGroups(setRepoAlias(repoGroups, path, alias))}
+        onSetRepoGroup={(path, groupId) => updateRepoGroups(setRepoGroup(repoGroups, path, groupId))}
         onManageRepoGroups={manageGroups}
         onSearchRepositories={() => setShowRepositorySearch(true)}
         onCloseWindow={() => void closeWindow()}
@@ -945,10 +969,12 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       </div>}
       {!restoring && shownRepos.length === 0 && repoGroups.view.kind !== "all-open" && <div className="welcome-screen">
         <Icon name="group" size={42} />
-        <h1>当前分组里还没有打开的仓库</h1>
-        <p>从分组中选择仓库打开，或添加新的仓库。切换分组不会关闭其它仓库。</p>
+        <h1>{repoGroups.view.kind === "none" ? "未选择仓库分组" : "当前分组里还没有打开的仓库"}</h1>
+        <p>{repoGroups.view.kind === "none"
+          ? "在顶部栏选择一个分组，或打开组管理器挑选要显示的仓库。"
+          : "从分组中选择仓库打开，或添加新的仓库。切换分组不会关闭其它仓库。"}</p>
         <div className="welcome-actions">
-          <button className="primary" onClick={() => manageGroups(repoGroups.view.kind === "group" ? repoGroups.view.groupId : undefined)}><Icon name="group" />打开分组中的仓库…</button>
+          <button className="primary" onClick={() => manageGroups(repoGroups.view.kind === "group" ? repoGroups.view.groupId : undefined)}><Icon name="group" />{repoGroups.view.kind === "none" ? "打开组管理器…" : "打开分组中的仓库…"}</button>
           <button onClick={() => setShowRepositorySearch(true)}><Icon name="search" />查找仓库</button>
           <button onClick={() => beginOpen()}><Icon name="plus" />打开仓库</button>
         </div>
@@ -974,17 +1000,30 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       {showRepositorySearch && <RepositorySearchDialog config={repoGroups} records={records} repos={repos}
         activePath={activePath} errors={recordErrors} busy={opening || recordBusy || restoring}
         onClose={() => setShowRepositorySearch(false)} onOpen={openRecorded} onRemove={removeRecorded} onRelocate={relocateRecorded} />}
-      {showOpen && <Dialog title="打开 Git 仓库" onClose={() => { if (!opening) { setShowOpen(false); setOpenInsertAfter(null); } }} busy={opening} footer={<>
-        <button disabled={opening} onClick={() => { setShowOpen(false); setOpenInsertAfter(null); }}>取消</button>
-        <button className="primary" disabled={opening || !openPath.trim()} onClick={() => void openRepo(openPath)}>{opening ? "打开中…" : "打开"}</button>
+      {showOpen && <Dialog title="打开 Git 仓库" onClose={closeOpenDialog} busy={opening} footer={<>
+        <button disabled={opening} onClick={closeOpenDialog}>取消</button>
+        <button className="primary" disabled={opening || !openPath.trim()} onClick={() => openFromDialog()}>{opening ? "打开中…" : "打开"}</button>
       </>}>
         <label className="field-label">仓库路径
           <div className="path-input-row">
-            <input data-autofocus className="repo-path-input" placeholder="C:\path\to\project" value={openPath} onChange={(e) => setOpenPath(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void openRepo(openPath); }} />
+            <input data-autofocus className="repo-path-input" placeholder="C:\path\to\project" value={openPath} onChange={(e) => setOpenPath(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") openFromDialog(); }} />
             <button type="button" disabled={opening} onClick={() => void browseOpenPath()}>浏览…</button>
           </div>
         </label>
-        {recent.length > 0 && <div className="recent-repos"><div className="section-label">最近打开</div>{recent.map((path) => <button key={path} onClick={() => setOpenPath(path)} onDoubleClick={() => void openRepo(path)} title={`${path}（双击直接打开）`}><Icon name="history" /><span>{path}</span></button>)}</div>}
+        <div className="open-repo-options">
+          <label className="field-label">所属分组
+            <select value={openGroupId} disabled={opening} onChange={(e) => setOpenGroupId(e.target.value)}>
+              <option value="">自动（保留现有归属）</option>
+              {repoGroups.groups.map((group) => <option key={group.id} value={group.id}>{group.id === DEFAULT_GROUP_ID ? "未分组" : group.name}</option>)}
+            </select>
+          </label>
+          <label className="field-label">页签显示名
+            <input placeholder="留空沿用仓库名或现有别名" maxLength={40} value={openAlias} disabled={opening}
+              onChange={(e) => setOpenAlias(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") openFromDialog(); }} />
+          </label>
+        </div>
+        <p className="panel-hint">分组选「自动」时保留仓库现有归属；显示名留空不会改动已有别名。</p>
+        {recent.length > 0 && <div className="recent-repos"><div className="section-label">最近打开</div>{recent.map((path) => <button key={path} onClick={() => setOpenPath(path)} onDoubleClick={() => openFromDialog(path)} title={`${path}（双击直接打开）`}><Icon name="history" /><span>{path}</span></button>)}</div>}
       </Dialog>}
       {showSettings && <SettingsDialog settings={settings} explorerIntegrationSupported={!TEST_REPO && explorerIntegrationSupported} onSave={saveSettingsDialog} onApply={persistSettings} onClose={() => setShowSettings(false)} />}
       {showPalette && <CommandPalette onClose={() => setShowPalette(false)} />}

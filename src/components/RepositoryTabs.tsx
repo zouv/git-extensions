@@ -4,7 +4,7 @@ import type {
   PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent,
 } from "react";
 import type { RepoInfo } from "../types";
-import { displayRepoName, groupById, groupForRepo } from "../repoGroups";
+import { DEFAULT_GROUP_ID, displayRepoName, groupById, groupForRepo } from "../repoGroups";
 import type { RepoGroupConfig } from "../repoGroups";
 import { insertionIndex, movePath } from "../tabOrder";
 import type { IconName } from "../ui/Icon";
@@ -21,6 +21,7 @@ interface Props {
   meta: Record<string, SessionMeta>;
   repoGroups: RepoGroupConfig;
   onSetAlias: (path: string, alias: string) => void;
+  onSetGroup: (path: string, groupId: string) => void;
   onActivate: (path: string) => void;
   onClose: (path: string) => void;
   onCloseOthers: (path: string) => void;
@@ -355,6 +356,13 @@ export default function RepositoryTabs(props: Props) {
         { id: "sep-order", separator: true },
         { id: "open-right", label: "在右侧打开仓库…", icon: "plus" as IconName, onSelect: () => props.onOpenRightOf(menu.repo.path) },
         { id: "sep-edit", separator: true },
+        { id: "group", label: "移动到分组", icon: "group" as IconName, children: props.repoGroups.groups.map((group) => ({
+          id: `group-${group.id}`,
+          label: group.id === DEFAULT_GROUP_ID ? "未分组" : group.name,
+          color: group.color,
+          checked: groupForRepo(props.repoGroups, menu.repo.path) === group.id,
+          onSelect: () => props.onSetGroup(menu.repo.path, group.id),
+        })) },
         { id: "alias", label: "设置页签显示名…", icon: "edit" as IconName, onSelect: () => { setAliasValue(props.repoGroups.aliases[menu.repo.path] ?? ""); setAliasTarget(menu.repo); } },
         { id: "copy", label: "复制路径", icon: "copy" as IconName, onSelect: () => props.onCopyPath(menu.repo.path) },
         { id: "reveal", label: "在文件管理器中显示", icon: "external" as IconName, onSelect: () => props.onReveal(menu.repo.path) },

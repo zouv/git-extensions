@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="ge-title ge-desc">
+  <title id="ge-title">Git Extensions</title>
+  <desc id="ge-desc">Light ice-blue rounded icon with a dark commit graph, a blue feature branch and an amber extension node.</desc>
+  <!--
+    图标定位：Git 分支 + 扩展节点。
+    - 浅冰蓝圆角底：在浅色 / 深色任务栏上都清晰，延续桌面应用图标规范；
+    - 深色提交图：一条主干向上分叉为左右两条分支，直接表达 Git 历史与分支；
+    - 蓝色分支：强调 feature branch / 扩展出来的工作线；
+    - 橙色圆角菱形：作为分支末端的「扩展节点」，与圆形 commit 区分；
+    - 构图贴边、圆角外透明，512 viewBox，不含字体 / 脚本 / 外部依赖。
+  -->
+  <defs>
+    <linearGradient id="ge-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f7fcff"/>
+      <stop offset="0.55" stop-color="#dff2ff"/>
+      <stop offset="1" stop-color="#b6ddff"/>
+    </linearGradient>
+    <linearGradient id="ge-branch" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#1d4ed8"/>
+      <stop offset="0.55" stop-color="#3370ff"/>
+      <stop offset="1" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="ge-extension" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fbbf24"/>
+      <stop offset="1" stop-color="#f97316"/>
+    </linearGradient>
+    <filter id="ge-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <!-- 浅冰蓝圆角底与双层描边 -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#ge-bg)"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="none" stroke="#7dd3fc" stroke-width="8"/>
+  <rect x="34" y="34" width="444" height="444" rx="96" fill="none" stroke="#ffffff" stroke-width="5" opacity="0.8"/>
+
+  <!-- 提交图：主干在下方汇合，向上分叉；右分支末端为扩展节点 -->
+  <g filter="url(#ge-shadow)">
+    <path d="M256 378 V266" fill="none" stroke="#0f172a" stroke-width="44" stroke-linecap="round"/>
+    <path d="M256 266 C 230 228 202 194 184 158" fill="none" stroke="#0f172a" stroke-width="40" stroke-linecap="round"/>
+    <path d="M256 266 C 282 228 310 194 328 158" fill="none" stroke="url(#ge-branch)" stroke-width="40" stroke-linecap="round"/>
+    <circle cx="256" cy="378" r="38" fill="#0f172a"/>
+    <circle cx="256" cy="266" r="38" fill="#0f172a"/>
+    <circle cx="184" cy="146" r="38" fill="#0f172a"/>
+    <rect x="296" y="114" width="64" height="64" rx="12" transform="rotate(45 328 146)" fill="url(#ge-extension)"/>
+    <circle cx="328" cy="146" r="11" fill="#fff7e6"/>
+  </g>
+</svg>

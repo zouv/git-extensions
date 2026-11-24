@@ -8,8 +8,11 @@
 .repository-manager-layout { display: grid; grid-template-columns: 215px minmax(0, 1fr); flex: 1; min-height: 0; overflow: hidden; }
 .repository-manager-sidebar { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--border); background: var(--surface); }
 .repository-manager-sidebar-heading { flex: 0 0 auto; padding: 12px; font-weight: 600; color: var(--muted); }
-.repository-manager-groups { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 6px 6px; }
+.repository-manager-groups { position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 6px 6px; }
 .repository-manager-group { display: flex; width: 100%; gap: 7px; margin: 2px 0; text-align: left; justify-content: flex-start; border: 1px solid transparent; background: transparent; padding: 7px 6px; }
+.repository-manager-group[data-draggable="true"] { cursor: grab; touch-action: none; }
+.repository-manager-group.dragging { opacity: .45; }
+.repository-manager-group-insertion { position: absolute; left: 8px; right: 8px; height: 2px; border-radius: 2px; background: var(--accent); pointer-events: none; z-index: 2; }
 .repository-manager-group.selected { background: var(--selected); border-color: var(--accent); }
 .repository-manager-group-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .repository-manager-all-icon { width: 23px; height: 23px; display: inline-flex; align-items: center; justify-content: center; font-size: 22px; color: var(--accent); }

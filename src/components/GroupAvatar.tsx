@@ -23,15 +23,16 @@ function textColor(background: string): string {
   return (r * 299 + g * 587 + b * 114) / 1000 > 150 ? "#11151b" : "#fff";
 }
 
-export default function GroupAvatar({ id, name, color, size = 22, active = false }: { id: string; name: string; color?: RepoGroupColor; size?: number; active?: boolean }) {
+export default function GroupAvatar({ id, name, color, badge, size = 22, active = false }: { id: string; name: string; color?: RepoGroupColor; badge?: string; size?: number; active?: boolean }) {
   const background = color ?? fallbackGroupColor(id);
+  const text = badge?.trim() || groupAbbreviation(name);
   return (
     <span
       className={`group-avatar${active ? " active" : ""}`}
       style={{ width: size, height: size, background, color: textColor(background), fontSize: Math.max(9, Math.round(size * 0.42)) }}
       aria-hidden="true"
     >
-      {groupAbbreviation(name)}
+      {text}
     </span>
   );
 }

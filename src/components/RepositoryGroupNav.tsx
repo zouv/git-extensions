@@ -31,7 +31,7 @@ interface Insertion { index: number; left: number }
 
 const DRAG_THRESHOLD = 6;
 
-/** 保留组入口与 Pin 图标的多选切换；固定顺序不改变管理器中的组顺序。 */
+/** 组入口与 Pin 图标的多选切换；Pin 顺序由 groups 顺序决定，拖动会同步组顺序。 */
 export default function RepositoryGroupNav({ config, onChange, onManage }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -44,10 +44,11 @@ export default function RepositoryGroupNav({ config, onChange, onManage }: Props
   const latest = useRef({ config, onChange, onManage });
   latest.current = { config, onChange, onManage };
   const pinned = pinnedGroups(config);
-  const numberedPins = config.pinnedGroupIds.filter((id) => id !== DEFAULT_GROUP_ID);
+  const numberedPins = pinned.filter((group) => group.id !== DEFAULT_GROUP_ID).map((group) => group.id);
   const scopeLabel = (() => {
     const view = config.view;
     if (view.kind === "all-open") return "全部打开";
+    if (view.kind === "none") return "未选择分组";
     if (view.kind === "group") {
       const groupId = view.groupId;
       return config.groups.find((group) => group.id === groupId)?.name ?? "分组";
@@ -196,7 +197,7 @@ export default function RepositoryGroupNav({ config, onChange, onManage }: Props
     window.setTimeout(() => { suppressClickRef.current = false; }, 0);
     if (inside && at) {
       const state = latest.current;
-      const ordered = movePath(state.config.pinnedGroupIds, drag.id, at.index);
+      const ordered = movePath(pinnedGroups(state.config).map((group) => group.id), drag.id, at.index);
       state.onChange(reorderPinned(state.config, ordered));
       setStatus(`已将固定组移动到第 ${ordered.indexOf(drag.id) + 1} 个位置。`);
     } else {
@@ -236,14 +237,13 @@ export default function RepositoryGroupNav({ config, onChange, onManage }: Props
 
   return (
     <div className="title-group-cluster repository-group-nav" role="navigation" aria-label="仓库分组">
-      <button type="button" className={`icon-button title-group-button${config.view.kind !== "all-open" ? " has-group" : ""}`}
+      <button type="button" className={`icon-button title-group-button${config.view.kind !== "all-open" && config.view.kind !== "none" ? " has-group" : ""}`}
         title={`仓库页签分组（当前：${scopeLabel}；可多选）`} aria-label={`仓库页签分组，当前${scopeLabel}`} aria-haspopup="menu" aria-expanded={!!menu}
         onPointerDown={(event) => { if (menu) event.stopPropagation(); }}
         onClick={(event) => { if (menu) setMenu(null); else openAt(event.currentTarget); }}
         onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); openAt(event.currentTarget); } }}>
         <Icon name="group" size={17} />
       </button>
-      <span className="title-group-scope" title="当前页签范围">{scopeLabel}</span>
       {pinned.length > 0 && <div className="title-pinned" ref={stripRef} role="group" aria-label="已 Pin 的仓库页签分组（拖动或 Alt+方向键排序）">
         {pinned.map((group) => (
           <button key={group.id} type="button" data-group-id={group.id}
@@ -262,11 +262,11 @@ export default function RepositoryGroupNav({ config, onChange, onManage }: Props
                 event.preventDefault(); openAt(event.currentTarget);
               }
               if (!event.altKey || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
-              const at = config.pinnedGroupIds.indexOf(group.id);
-              const target = config.pinnedGroupIds[at + (event.key === "ArrowLeft" ? -1 : 1)];
+              const at = pinned.findIndex((item) => item.id === group.id);
+              const target = pinned[at + (event.key === "ArrowLeft" ? -1 : 1)]?.id;
               if (target) { event.preventDefault(); reorder(group.id, target); }
             }}>
-            <GroupAvatar id={group.id} name={group.name} color={group.color} size={22} active={isGroupSelected(config, group.id)} />
+            <GroupAvatar id={group.id} name={group.name} color={group.color} badge={group.badge} size={22} active={isGroupSelected(config, group.id)} />
           </button>
         ))}
         {insertion && <span className="title-pin-insertion" style={{ left: insertion.left }} aria-hidden="true" />}
