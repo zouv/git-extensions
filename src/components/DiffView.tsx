@@ -37,8 +37,6 @@ interface Props {
   showFileHeader?: boolean;
   /** 隐藏文件标题时仍显示增删统计。 */
   showStats?: boolean;
-  /** 检查器窄栏使用下拉文件选择器，不渲染固定宽度文件列。 */
-  compact?: boolean;
   /** 按仓库保存 Inline / Split 与换行偏好。 */
   prefKey?: string;
   /** 工作区 / 暂存区预览时的 Hunk 级暂存、取消暂存与丢弃操作。 */
@@ -47,7 +45,7 @@ interface Props {
 
 type DisplayRow = FileTreeRow<FileDiff>;
 
-export default function DiffView({ files, loading, highlightEnabled = true, onFileAction, loadFile, showFileHeader = true, showStats = true, compact = false, prefKey = "", hunkActions }: Props) {
+export default function DiffView({ files, loading, highlightEnabled = true, onFileAction, loadFile, showFileHeader = true, showStats = true, prefKey = "", hunkActions }: Props) {
   const [selected, setSelected] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(400);
@@ -98,10 +96,10 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
   const additions = useMemo(() => parsed.lines.filter((line) => line.kind === "add").length, [parsed]);
   const deletions = useMemo(() => parsed.lines.filter((line) => line.kind === "del").length, [parsed]);
   const contentLines = useMemo(() => parsed.lines.filter((line) => line.kind === "add" || line.kind === "del" || line.kind === "ctx"), [parsed]);
-  // 单文件预览 / 检查器 compact 不重复显示文件名：隐藏 diff/index/---/+++ 这些标准路径头。
-  const visibleLines = useMemo(() => showFileHeader && !compact
+  // 单文件预览不重复显示文件名：隐藏 diff/index/---/+++ 这些标准路径头。
+  const visibleLines = useMemo(() => showFileHeader
     ? parsed.lines
-    : parsed.lines.filter((line) => !(line.kind === "meta" && /^(diff --git|index |--- |\+\+\+ )/.test(line.text))), [parsed, showFileHeader, compact]);
+    : parsed.lines.filter((line) => !(line.kind === "meta" && /^(diff --git|index |--- |\+\+\+ )/.test(line.text))), [parsed, showFileHeader]);
   const displayRows = useMemo(
     () => diffMode === "inline"
       ? buildInlineRows(visibleLines, collapse, expandedFolds)
@@ -350,7 +348,7 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
   if (loading) return <div className="empty-state"><span className="spinner" /><span>正在加载差异…</span></div>;
   if (files.length === 0) return <div className="empty-state"><Icon name="changes" size={28} /><strong>无变更内容</strong><span>选择其它提交或文件查看差异。</span></div>;
 
-  const showFileList = showFileHeader && files.length > 1 && !compact;
+  const showFileList = showFileHeader && files.length > 1;
   const hasHunks = hunkRows.length > 0;
 
   return (
@@ -397,17 +395,7 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
         )}
         <div className="diff-main">
           <div className="diff-toolbar">
-            {showFileHeader && (compact && files.length > 1
-              ? <select
-                  className="diff-file-select"
-                  aria-label="选择差异文件"
-                  title={manifestFile?.path}
-                  value={manifestFile ? selected : 0}
-                  onChange={(e) => selectFile(Number(e.target.value))}
-                >
-                  {files.map((entry, index) => <option key={`${entry.path}-${index}`} value={index}>{entry.oldPath ? `${entry.oldPath} → ${entry.path}` : entry.path}</option>)}
-                </select>
-              : <span className="panel-title">{manifestFile?.path}</span>)}
+            {showFileHeader && <span className="panel-title">{manifestFile?.path}</span>}
             {showStats && <span className="diff-stat" aria-label={`新增 ${additions} 行，删除 ${deletions} 行`}><span className="diff-stat-add">+{additions}</span><span className="diff-stat-del">−{deletions}</span></span>}
             {showStats && <span className="diff-toolbar-separator" aria-hidden="true" />}
             <div className="diff-mode-group" role="group" aria-label="差异视图模式">

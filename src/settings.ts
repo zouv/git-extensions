@@ -12,8 +12,6 @@ export interface AppSettings {
   explorerAlwaysShowAllCommands: boolean;
 }
 
-export type InspectorPosition = "right" | "bottom";
-
 /** View 菜单里可持久化的提交图显示选项；按仓库保存。 */
 export interface GridDisplayOptions {
   showRemoteBranches: boolean;
@@ -28,7 +26,10 @@ export interface GridDisplayOptions {
 export interface UILayout extends GridDisplayOptions {
   leftWidth: number;
   inspectorSize: number;
-  inspectorPosition: InspectorPosition;
+  /** 检查器内提交信息区高度（px）；变更文件列表占余下高度。 */
+  inspectorInfoHeight: number;
+  /** 主窗口历史视图底部 Diff 面板高度（px）。 */
+  historyDiffHeight: number;
   showLeft: boolean;
   showInspector: boolean;
   changesWidth: number;
@@ -50,7 +51,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export const DEFAULT_LAYOUT: UILayout = {
   leftWidth: 224,
   inspectorSize: 400,
-  inspectorPosition: "right",
+  inspectorInfoHeight: 260,
+  historyDiffHeight: 320,
   showLeft: true,
   showInspector: true,
   changesWidth: 420,
@@ -108,9 +110,11 @@ export function loadLayout(repoPath: string, settings: AppSettings): UILayout {
   try {
     const raw: Partial<UILayout> = JSON.parse(localStorage.getItem(LAYOUT_PREFIX + repoPath) ?? "{}");
     return {
-      leftWidth: bounded(raw.leftWidth, 160, 360, DEFAULT_LAYOUT.leftWidth),
-      inspectorSize: bounded(raw.inspectorSize, 180, 720, DEFAULT_LAYOUT.inspectorSize),
-      inspectorPosition: raw.inspectorPosition === "bottom" ? "bottom" : "right",
+      // 左侧导航宽度不设上限（用户可自由拖拽）；仅挡住手工改坏的非法值。
+      leftWidth: bounded(raw.leftWidth, 0, 100_000, DEFAULT_LAYOUT.leftWidth),
+      inspectorSize: bounded(raw.inspectorSize, 0, 100_000, DEFAULT_LAYOUT.inspectorSize),
+      inspectorInfoHeight: bounded(raw.inspectorInfoHeight, 60, 100_000, DEFAULT_LAYOUT.inspectorInfoHeight),
+      historyDiffHeight: bounded(raw.historyDiffHeight, 0, 100_000, DEFAULT_LAYOUT.historyDiffHeight),
       showLeft: typeof raw.showLeft === "boolean" ? raw.showLeft : settings.showLeftPanel,
       showInspector: typeof raw.showInspector === "boolean" ? raw.showInspector : true,
       // 变更文件列表宽度不设上限（用户可自由拖拽）；仅挡住手工改坏的非法值。

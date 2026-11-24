@@ -321,12 +321,17 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
         {revisions.slice(startRow, endRow).map((rev, i) => {
           const row = startRow + i;
           const selected = selectedOids.includes(rev.oid);
+          const refs = refsForDisplay(rev.refs, display);
           return (
             <div
               key={rev.oid}
               id={optionId(rev.oid)}
               className={`revision-row${selected ? " selected" : ""}`}
-              style={{ top: row * ROW_H, left: graphW, height: ROW_H, width: rowWidth }}
+              style={{
+                top: row * ROW_H, height: ROW_H,
+                // 主窗口整行铺满并让高亮覆盖分支图节点；View history 的受控列宽保持图列后的固定网格。
+                ...(columnWidths ? { left: graphW, width: rowWidth, paddingLeft: 6 } : { left: 0, right: 0, paddingLeft: graphW + 6 }),
+              }}
               role="option"
               aria-selected={selected}
               aria-posinset={row + 1}
@@ -346,7 +351,7 @@ export default function RevisionGrid({ revisions, selectedOids, onSelect, onCont
                 setMenu({ x: rect.left + 24, y: rect.bottom, rev });
               }}
             >
-              <span className="rev-refs" style={columnStyle("refs")}>{refsForDisplay(rev.refs, display).map((ref, j) => <span key={j} className={`ref-badge ref-${ref.kind}`}>{ref.name}</span>)}</span>
+              {(refs.length > 0 || columnWidths) && <span className="rev-refs" style={columnStyle("refs")}>{refs.map((ref, j) => <span key={j} className={`ref-badge ref-${ref.kind}`}>{ref.name}</span>)}</span>}
               <span className="rev-subject" style={columnStyle("subject")} title={rev.subject}>{rev.subject}</span>
               {display.showAuthorColumn && <span className="rev-author" style={columnStyle("author")} title={rev.authorName}>{rev.authorName}</span>}
               {display.showDateColumn && <span className="rev-date" style={columnStyle("date")}>{display.relativeDate ? formatRelativeDate(rev.authorTime) : formatDate(rev.authorTime)}</span>}

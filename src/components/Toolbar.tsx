@@ -18,7 +18,7 @@ interface Props {
   workspace: "history" | "changes";
   inspectorVisible: boolean;
   leftVisible: boolean;
-  inspectorPosition: "right" | "bottom";
+  layoutPreset: "default" | "wide" | "focus";
   compareBase: string | null;
   leftRef: string | null;
   display: GridDisplayOptions;
@@ -29,7 +29,6 @@ interface Props {
   onRefresh: () => void;
   onToggleLeft: () => void;
   onToggleInspector: () => void;
-  onInspectorPosition: (position: "right" | "bottom") => void;
   onResetLayout: () => void;
   onWideDiff: () => void;
   onFocusHistory: () => void;
@@ -172,13 +171,10 @@ export default function Toolbar(props: Props) {
   const viewItems: MenuItem[] = [
     { id: "left", label: "显示 / 隐藏左侧导航", icon: "menu", shortcut: "Ctrl+B", checked: props.leftVisible, keepOpen: true, onSelect: props.onToggleLeft },
     { id: "inspector", label: "显示 / 隐藏检查器", icon: "panel", checked: props.inspectorVisible, keepOpen: true, onSelect: props.onToggleInspector },
-    { id: "sep-position", separator: true },
-    { id: "position-right", label: "检查器停靠右侧", checked: props.inspectorPosition === "right", onSelect: () => props.onInspectorPosition("right") },
-    { id: "position-bottom", label: "检查器停靠底部", checked: props.inspectorPosition === "bottom", onSelect: () => props.onInspectorPosition("bottom") },
     { id: "sep-preset", separator: true },
-    { id: "layout-default", label: "布局：默认", onSelect: props.onResetLayout },
-    { id: "layout-wide", label: "布局：宽 Diff", onSelect: props.onWideDiff },
-    { id: "layout-focus", label: "布局：专注历史", onSelect: props.onFocusHistory },
+    { id: "layout-default", label: "布局：默认", checked: props.layoutPreset === "default", onSelect: props.onResetLayout },
+    { id: "layout-wide", label: "布局：宽 Diff", checked: props.layoutPreset === "wide", onSelect: props.onWideDiff },
+    { id: "layout-focus", label: "布局：专注历史", checked: props.layoutPreset === "focus", onSelect: props.onFocusHistory },
     { id: "sep-scope", separator: true },
     { id: "scope-all", label: "显示所有分支", icon: "branch", checked: leftRef === null, onSelect: () => props.onBranchScope("all") },
     { id: "scope-current", label: "仅显示当前分支", icon: "branch", checked: leftRef === currentBranch, onSelect: () => props.onBranchScope("current") },

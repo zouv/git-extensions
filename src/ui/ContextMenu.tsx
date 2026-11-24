@@ -45,6 +45,9 @@ export default function ContextMenu({ x, y, items, onClose, ariaLabel = "上下�
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const [submenu, setSubmenu] = useState<{ item: MenuItem; x: number; y: number } | null>(null);
+  // 同一菜单内所有标签按列对齐：只要菜单含勾选 / 图标项，就给每项保留对应列。
+  const showCheckColumn = items.some((item) => !item.separator && item.checked !== undefined);
+  const showIconColumn = items.some((item) => !item.separator && (item.icon || item.color));
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -121,9 +124,8 @@ export default function ContextMenu({ x, y, items, onClose, ariaLabel = "上下�
               item.onSelect?.();
             }}
           >
-            {item.checked !== undefined && <span className="menu-check">{item.checked ? <Icon name="check" size={14} /> : null}</span>}
-            {item.color && <span className="menu-color" style={{ background: item.color }} aria-hidden="true" />}
-            {item.icon && <Icon name={item.icon} />}
+            {showCheckColumn && <span className="menu-check" aria-hidden="true">{item.checked ? <Icon name="check" size={14} /> : null}</span>}
+            {showIconColumn && <span className="menu-icon" aria-hidden="true">{item.icon ? <Icon name={item.icon} /> : item.color ? <span className="menu-color" style={{ background: item.color }} /> : null}</span>}
             <span>{item.label}</span>
             {item.shortcut && <kbd>{item.shortcut}</kbd>}
             {item.children && <Icon name="chevron-right" size={13} />}

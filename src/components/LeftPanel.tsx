@@ -3,6 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent
 import type { BranchInfo, SubmoduleInfo, TagInfo, WorktreeInfo } from "../types";
 import { buildBranchTree } from "../viewState";
 import type { BranchTreeNode } from "../viewState";
+import { loadLeftPanelCollapsed, saveLeftPanelCollapsed } from "../leftPanelState";
 import { planBranchFolderDelete } from "../branchDelete";
 import type { BranchRefKind } from "../branchDelete";
 import Icon from "../ui/Icon";
@@ -10,6 +11,7 @@ import ContextMenu from "../ui/ContextMenu";
 import type { MenuItem } from "../ui/ContextMenu";
 
 interface Props {
+  repoPath: string;
   branches: BranchInfo[];
   tags: TagInfo[];
   submodules: SubmoduleInfo[];
@@ -47,7 +49,9 @@ type MenuTarget = RefMenuTarget | WorktreeMenuTarget | SubmoduleMenuTarget | Fol
 
 export default function LeftPanel(props: Props) {
   const [menu, setMenu] = useState<MenuTarget | null>(null);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // 默认展开「本地分支」，其余分类折叠；折叠状态按仓库持久化，下次打开沿用。
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(loadLeftPanelCollapsed(props.repoPath)));
+  useEffect(() => { saveLeftPanelCollapsed(props.repoPath, collapsed); }, [collapsed, props.repoPath]);
   const [focusKey, setFocusKey] = useState("changes");
   const panelRef = useRef<HTMLElement>(null);
   const [refFilter, setRefFilter] = useState("");

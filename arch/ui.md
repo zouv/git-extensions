@@ -11,7 +11,7 @@
 | 文件 | 职责 | 何时改它 |
 |---|---|---|
 | `src/App.tsx` | 完整主窗口：页签恢复 / 分组、窗口状态、通知、全局命令注册、快捷键与外部启动请求队列 | 改跨仓库状态 / 主窗口生命周期 |
-| `src/RepoWorkspace.tsx` | 单仓库草稿会话、分级刷新、refs / HEAD 轮询、命令注册、任务视图与分栏 | 改仓库内状态流 / 布局 |
+| `src/RepoWorkspace.tsx` | 单仓库草稿会话、分级刷新、refs / HEAD 轮询、命令注册、任务视图与分栏；历史工作区为「上：提交图 + 详情 / 变更文件，下：按需 Diff」 | 改仓库内状态流 / 布局 |
 | `src/commands.ts` | 类型化命令接口、应用 / 仓库命令注册表、`SHORTCUT_HELP` 单一事实源 | 新增可搜索命令或改快捷键帮助 |
 | `src/components/CommandPalette.tsx` | `Ctrl+K` 命令面板：搜索、分组、键盘选择、执行 | 改命令面板交互 |
 | `src/nativeDialog.ts` | `@tauri-apps/plugin-dialog` 的原生目录 / 文件选择封装 | 改打开、克隆、新建、补丁路径选择 |
@@ -27,14 +27,15 @@
 | `src/components/RepositoryRecordList.tsx` / `RepositorySearchDialog.tsx` | 管理与查找共用记录行、roving 键盘、本地搜索、按需打开与失败定位入口 | 改仓库查找 / 记录列表 |
 | `src/ui/Dialog.tsx` / `dialogSize.ts` | 统一弹窗：初始焦点、焦点陷阱、浮层栈、busy / dirty 关闭保护、焦点恢复；可选四边 / 四角拖拽调整尺寸并按 `sizeKey` 持久化；`closeOnBackdrop=false` 可禁止遮罩关闭 | 改所有弹窗的共同行为 |
 | `src/explorerWindowState.ts` | 资源管理器轻量动作窗口按 action 保存 / 恢复原生窗口尺寸 | 改轻量窗口尺寸规则 |
-| `src/ui/ContextMenu.tsx` | 统一右键菜单：视口定位、焦点循环、`keepOpen` 多选菜单、`children` 一级子菜单、浮层栈 | 改菜单行为 |
+| `src/ui/ContextMenu.tsx` | 统一右键菜单：视口定位、焦点循环、`keepOpen` 多选菜单、`children` 一级子菜单、浮层栈；菜单内按勾选 / 图标列统一对齐 | 改菜单行为 |
 | `src/ui/Confirm.tsx` | 应用内危险确认；危险操作默认聚焦“取消”，requireAck 聚焦勾选框 | 改危险确认策略 |
 | `src/ui/SplitHandle.tsx` / `Icon.tsx` | 可拖拽分栏与本地 SVG 图标 | 改共享交互原语 |
 | `src/components/Toolbar.tsx` | 命令栏：左侧 Repository / Navigate / View / Commands 四个下拉菜单；分支下拉（切换 + 分支管理入口）/ 远程 / 过滤 / 恢复与 Stash 快捷图标 | 改工具栏组织 |
-| `src/components/LeftPanel.tsx` | 本地变更 / 全部提交 / 分支 / 标签 / Submodules / Worktrees；分支标签过滤、200 条分页、树键盘移动、worktree 打开、分支目录右键批量删除 | 改引用导航 |
+| `src/components/LeftPanel.tsx` / `src/leftPanelState.ts` | 本地变更 / 全部提交 / 分支 / 标签 / Submodules / Worktrees；默认只展开本地分支，分类与文件夹折叠状态按仓库持久化；分支标签过滤、200 条分页、树键盘移动、worktree 打开、分支目录右键批量删除；宽度自由拖拽无上限 | 改引用导航 / 折叠恢复 |
 | `src/branchDelete.ts` | 分支目录收集与删除计划纯函数：`prefix/` 匹配、嵌套、远程 HEAD 排除、合并状态 → 是否强制 | 改目录删除规则 |
 | `src/branchDeleteDialog.tsx` | 单分支 / 本地目录 / 远程目录删除确认框：动态确认按钮与警告文案 | 改删除确认文案或样式 |
-| `src/components/RevisionGrid.tsx` | 虚拟化提交列表 + Canvas 分支图；`aria-activedescendant`、容器级方向键、增量图宽；View 菜单控制图列 / 作者 / 日期 / SHA / 远程标签 / 标签 / 相对时间；可选 `showColumnHeader` + 受控 `columnWidths`（列头分隔线拖拽 / 键盘微调 / 双击复位，仅 View history 启用） | 改列表 / 图渲染 / 列宽规则 |
+| `src/components/RevisionGrid.tsx` | 虚拟化提交列表 + Canvas 分支图；`aria-activedescendant`、容器级方向键、增量图宽；引用紧贴分支图与主题（无固定空白列），整行高亮覆盖分支图节点；View 菜单控制图列 / 作者 / 日期 / SHA / 远程标签 / 标签 / 相对时间；可选 `showColumnHeader` + 受控 `columnWidths`（仅 View history 启用） | 改列表 / 图渲染 / 列宽规则 |
+| `src/components/CommitFilesPanel.tsx` | 检查器下半部的提交变更文件列表：列表 / 文件树切换、状态字母 + 路径、500 条封顶、上下键 / Home / End / Enter、与底部 Diff 联动 | 改提交文件列表交互 |
 | `src/components/DiffView.tsx` | 文件列表 / 目录树、过滤与 500 条封顶、按需 patch、Inline / Split、hunk 导航与内联 Hunk 暂存 / 取消暂存 / 丢弃、行右键、增删统计、偏好经 diffPrefs 按仓库保存并跨实例同步 | 改 diff 展示 |
 | `src/diffPrefs.ts` | Diff 行内 / 并排与换行偏好：按仓库键 localStorage 持久化 + 同窗口订阅通知 + 跨窗口 storage 事件同步 | 改 diff 偏好存储 / 同步 |
 | `src/viewState.ts` | Diff 解析 / 分类 / 分栏 / 折叠 / 虚拟窗口、`extractHunkPatch`、`buildFileTreeRows`、`buildBranchTree`、`applyAutosquashOrder`、草稿恢复、dirty 规则 | 改可测试的视图状态规则 |
@@ -74,11 +75,12 @@
 | 右键菜单 / 多选菜单 | `ui/ContextMenu.tsx`；`RepositoryGroupNav.tsx` 的 `menuItems` / `groupItems` | 组勾选保持打开；子项读取最新配置，Esc 只关闭栈顶 |
 | 通知 / 错误反馈 | `NotificationCenter.tsx` 的 `ToastItem`、`clearAll`；`App.tsx` 的 `notify`；`ui/InlineError.tsx` | 成功 toast 4 秒自动消失，hover / focus 暂停；错误保留在通知中心 |
 | 变更预览 / 轮询 | `RepoWorkspace.tsx` 的 `refreshAux`、`pollOnce`；`ChangesPanel.tsx` 的 `showPreview` 与 status effect | 后台重取保留旧 patch；status 无实质变化不重绘 DiffView |
+| 主窗口历史布局 / 检查器 / 底部 Diff | `RepoWorkspace.tsx` 的 `historyView`、`selectedCommitFile`、`loadCommit(oid, openDiff)`、`onRevisionAction("diff")`、检查器分栏与底部 Diff 关闭按钮；`CommitFilesPanel.tsx`；`settings.ts` 的 `inspectorSize` / `inspectorInfoHeight` / `historyDiffHeight` | 上：提交图 + 详情（上）/ 变更文件（下），下：选中文件后才显示 Diff；双击 / Enter 提交自动打开第一个文件，Esc 关闭 |
 | 提交 / 暂存 / Amend / Hunk / 还原 / ignore | `ChangesPanel.tsx` 的 `run`、`doCommit`、`toggleAmend`、`applyHunk`、`restorePaths`、`pathsUnder`、`renderList`、`onRowClick`、`targetPaths`、`resizeLists`、`listKeyDown`、`commitError`；`viewState.ts::extractHunkPatch` / `buildFileTreeRows` / `rangeSelection` | 行选中与勾选框分开维护，批量按钮取并集；Ctrl+A 只改行选中；列表分割比例存 `UILayout.changesListSplit`；Amend 自动回填 HEAD 提交信息；Hunk 丢弃与还原更改需危险确认；ignore 经 `IgnorePathDialog` 选根 / 所属目录 |
 | Push 待推送提交 / 提交内容查看 | `PushDialog.tsx` 的 unpushed effect 与 `push-commits` 列表；`CommitContentDialog.tsx`；后端 `cli.rs::get_unpushed_commits` | 有 upstream 比 upstream，无 upstream 按显式 remote/target；baseRef=null 提示先 Fetch；点击行打开内容弹窗 |
-| 提交图选择 / 图宽 / 右键扩展动作 | `RevisionGrid.tsx` 的容器 keydown、`aria-activedescendant`、`graphScan`、`RevisionAction` | 支持合并到当前分支、Fixup/Squash、导出补丁/归档、Bisect Good/Bad |
+| 提交图选择 / 图宽 / 右键扩展动作 | `RevisionGrid.tsx` 的容器 keydown、`aria-activedescendant`、`graphScan`、`RevisionAction` | 引用与主题紧贴分支图，选中整行高亮覆盖图节点；支持合并到当前分支、Fixup/Squash、导出补丁/归档、Bisect Good/Bad |
 | Diff 模式 / 文件过滤 / Hunk 按钮 | `DiffView.tsx` 的 `changeDiffMode` / `changeWrap`、`filteredEntries`、`renderHunkBar`、`openLineMenu`、`goDiff`；`diffPrefs.ts` | 偏好经 `saveDiffPrefs` 写入并广播；文件列表 500 条封顶 |
-| 左侧导航 / 分支文件夹树 | `LeftPanel.tsx` 的 `refFilter`、`refLimit`、`collapsedFolders`、`focusProps`、`treeKeyDown`、`onOpenWorktree`、`onDeleteBranchFolder`；`viewState.ts::buildBranchTree`；`branchDelete.ts::planBranchFolderDelete`、`decideBranchDeletion` | 分支按 `/` 分层可折叠；右键支持远程检出、重命名、远程删除与合并；目录右键可批量删除整棵子树，含当前 HEAD 的本地目录禁用 |
+| 左侧导航 / 分支文件夹树 | `LeftPanel.tsx` 的 `refFilter`、`refLimit`、`collapsed`、`focusProps`、`treeKeyDown`、`onOpenWorktree`、`onDeleteBranchFolder`；`leftPanelState.ts` 的 `loadLeftPanelCollapsed` / `saveLeftPanelCollapsed`；`viewState.ts::buildBranchTree`；`branchDelete.ts::planBranchFolderDelete`、`decideBranchDeletion` | 分支按 `/` 分层可折叠；默认只展开本地分支，折叠状态按仓库恢复；width 由拖拽决定、不设上限；右键支持远程检出、重命名、远程删除与合并；目录右键可批量删除整棵子树，含当前 HEAD 的本地目录禁用 |
 | 工具栏分支切换 / 分支管理入口 | `Toolbar.tsx` 的 `branchMenu`、`branchItems`、`onCheckoutBranch`；`BranchDialog.tsx` | 下拉列出全部本地分支，当前分支勾选并禁用；底部「分支管理…」才打开管理弹窗；弹窗只在输入真正变化时算 dirty |
 | 工具栏四菜单 / 提交导航 / 视图显示 | `Toolbar.tsx` 的 `repositoryItems` / `navigateItems` / `viewItems` / `commandItems`；`RepoWorkspace.tsx` 的 `goToRevision` / `goParent` / `goChild` / `goMergeBase` / `navigateBackward` / `stepQuickSearch`；`RevisionGrid.tsx` 的 `display`；`settings.ts` 的 `GridDisplayOptions` | 导航只使用已加载的 `revisions` / `parents`；View 显示选项按仓库保存在 `UILayout`，隐藏列不改变后端顺序与 lane |
 | Merge / Pull / Remotes / Worktree / 搜索 / 命令日志 / Bisect | `MergeDialog.tsx`、`PullDialog.tsx`、`RemotesDialog.tsx`、`WorktreeDialog.tsx`、`SearchDialog.tsx`、`CommandLogDialog.tsx`；`RepoWorkspace.tsx` 的 Bisect 横幅 | `Ctrl+Shift+H` 打开搜索、`Ctrl+Shift+G` 打开命令日志 |
@@ -134,6 +136,13 @@
 - `ChangesPanel` 对当前预览文件做 stale-while-revalidate：保留旧 `file`，后台重取；patch 未变时保持原对象，避免 DiffView 卸载与滚动 / 模式复位。初次失败保留错误并停止自动重试，等待用户重选。
 - `DiffView` 的 Inline / Split 与换行偏好经 `diffPrefs.ts` 存 `git-extensions.diffMode:<repoPath>` / `git-extensions.diffWrap:<repoPath>`；写入即广播给同仓库其它挂载实例，跨窗口靠 storage 事件同步。
 
+### 主窗口历史布局（提交图 + 检查器 + 底部 Diff）
+
+- 历史工作区固定为上下两段：上段左侧提交图，右侧检查器再分成「提交详情（上）/ 变更文件（下）」；下段 Diff 面板只在选中变更文件后出现。`RepoWorkspace` 用 `historyView` 判断渲染，`ChangesPanel` 始终挂载并用 `display:none` 隐藏，避免切视图丢草稿。
+- 单击提交只刷新详情与文件列表，`selectedCommitFile` 清空、底部 Diff 隐藏；双击提交或按 Enter（`RevisionAction = "diff"`）会经 `loadCommit(oid, true)` 自动选中第一个文件并打开 Diff。Esc 优先关闭底部 Diff，再清对比基准。
+- 同提交刷新时按路径保留已选文件；切到其它提交则清空。`inspectorSize`（宽，右栏右锚定，拖拽方向为 `-delta`）、`inspectorInfoHeight`（详情高）、`historyDiffHeight`（底部 Diff 高）按仓库保存，宽度不设上下限，双击分隔条恢复默认。
+- 检查器不再有「详情 / 差异」页签，也没有「移动到底部 / 最大化」按钮；View 菜单只保留显示 / 隐藏检查器与布局预设，三种预设按当前左右面板状态显示选中。底部 Diff 复用 `DiffView` 的单文件模式（`files=[selectedFile]` + `loadFile`），右上角 X（或 Esc）关闭面板。
+
 ### 键盘列表与树
 
 - `RevisionGrid` 容器是唯一 Tab 停靠点，行使用 `role="option"` + `aria-activedescendant`；方向键 / Home / End / PgUp / PgDn / Enter 由容器处理，选中变化后滚动保持容器焦点。
@@ -178,6 +187,9 @@
 - **dirty 守卫要覆盖所有关闭路径**：Esc、遮罩、标题栏 X、底部“取消 / 关闭”按钮和 Alt+F4 都必须走同一套确认；仅给 Dialog 加 dirty 不够。
 - **通知不能被 slice 静默丢弃**：错误是用户唯一的 Git stderr 查看入口；只显示最近几条并让“清理”清空全部会让错误永久丢失。抽屉保留全部，清理需确认。
 - **轮询不能重置 DiffView**：预览刷新时保留旧 patch；`setPreview({file:null})` 会让面板闪 spinner 并丢失滚动 / 模式 / 折叠。
+- **底部 Diff 由 `selectedCommitFile` 驱动**：单击提交只刷新详情 / 文件列表并关闭 Diff，双击或 Enter 才自动打开第一个文件；同提交刷新按路径保留选择，切提交必须清空。右上角 X 与 Esc 关闭面板。`DiffView` 的 `files` 数组要用 `useMemo` 固定（避免每次渲染触发选中 / 观察器重置）。
+- **右锚定面板的拖拽方向相反**：检查器在容器右侧，拖拽右移应缩小宽度，`inspectorSize` 用 `-delta`；左侧导航左锚定用 `+delta`，底部 Diff 用 `-delta`。方向写反会表现为分隔条跟随鼠标反向移动 / 拖不动。
+- **菜单列对齐按菜单整体判断**：`ContextMenu` 只要菜单内含勾选或图标项，就给每一项渲染空的勾选 / 图标占位列，否则无图标项会左移；三种布局预设也传 `checked` 显示当前布局。
 - **命令注册按 active 仓库**：非活动 RepoWorkspace 不能注册命令，否则在 A 仓库会执行 B 的刷新 / 提交 / 分支操作。
 - **分支管理 dirty 不能把自动回填当修改**：选中分支会把原名填进重命名框，dirty 必须是 `renameTo !== selectedBranch.name`；否则打开分支管理后直接关闭也会提示「放弃未保存的修改」。
 - **工具栏分支按钮是下拉而不是管理入口**：点击展开本地分支菜单，当前分支勾选并禁用，底部「分支管理…」才打开 `BranchDialog`；不要把两个动作合并回一个按钮。
@@ -196,9 +208,9 @@
 - **页签分组 / 拖拽 / 启动恢复**：Default 内部 ID 不变、界面为未分组，不可改名 / 删除，但可以固定、取消固定与参与排序；view 与持久记录 / 会话分离。Pin 图标用完整组色表示选中、未选中灰化；组顺序统一管理 Pin 顺序，指针排序沿用页签的 6px 阈值 / 插入线 / Esc 取消 / 边缘滚动，Alt+1…9 与 Alt+0 独占切组，Ctrl+1…9 按当前可见页签切换。取消最后一个选中组进入 `none` 视图（不回落全部打开）；顶部栏不再显示范围文字，当前范围只放按钮 title / aria-label。页签 6px 阈值、条外 / Esc / 失捕取消；恢复缺失与 `[]` 不等价，`sessionRestored` 前禁写打开列表，StrictMode 用 ref 防双跑；路径迁移必须同步活动目标。
 - **组记忆与确认竞态**：切组时按记忆挑页签，日常 effect 只纠正不可见活动项，不能把手动激活又拉回旧记忆。批量关闭 / 移除记录用同步门闩及逐路径 dirty 快照，确认等待后必须再复核写状态。
 
-- **窄窗布局依赖容器查询与宽度上限**：提交图以 `.workspace-main` 为命名容器隐藏作者 / 日期 / SHA 列，`.rev-refs` 保持固定宽度以对齐标题；检查器用 `max-width: calc(100% - 380px)` 给核心视图留空间。不要恢复 `.revision-content min-width:500` 或固定 400 / 420 面板宽度。变更文件面板（`.changes-left`）例外：按用户要求移除 300–720 拖拽夹取与 CSS min/max 上限，宽度完全由拖拽决定（双击分隔条恢复 420），不要恢复限制。
+- **窄窗布局依赖容器查询，但左右侧栏不设宽度上限**：提交图以 `.workspace-main` 为命名容器隐藏作者 / 日期 / SHA 列，`.rev-refs` 保持自适应宽度并随窄窗收紧上限。不要恢复 `.revision-content min-width:500`。左侧导航（`.left-panel`）、右侧检查器（`.inspector`）与变更文件面板（`.changes-left`）按用户要求移除拖拽夹取与 CSS min/max 上限，宽度完全由拖拽决定（双击分隔条分别恢复 224 / 400 / 420），不要恢复限制。
 - **提交框标题、Amend 与字数统计必须流式排列**：`.commit-title-count` 不能恢复绝对定位覆盖标题输入框；标题 / 正文都处理 Ctrl+Enter 提交。
-- **DiffView 的 compact / showStats 分离**：检查器差异页传 `compact`（文件下拉选择器、隐藏标准路径头），`showFileHeader=false` 时仍可用 `showStats` 显示 +/−；Inline 行号在 `renderContent` 渲染，不要只给 Split 加行号。
+- **DiffView 的 showFileHeader / showStats 分离**：外部已有文件列表时传 `showFileHeader={false}` 隐藏标准路径头与文件列（变更预览、Stash、文件历史），仍可用 `showStats` 显示 +/−；底部 Diff 只有一个文件时保留路径头。Inline 行号在 `renderContent` 渲染，不要只给 Split 加行号。
 - **工具栏响应式不能只隐藏不补位**：四菜单文字标签在 1280px 以下收起；1100px 以下 `.toolbar-overflow` 必须换成真实 `.toolbar-more` 菜单，否则恢复历史 / Stash / 标签 / 子模块入口会静默消失。
 - **查找弹窗单击只聚焦**：`RepositoryRecordList` 用 Enter / 双击打开，不要再传 `openOnClick`；否则鼠标用户无法先选中再重新定位 / 从列表移除。
 - **术语与快捷键帮助**：Git 命令保留英文，应用概念统一中文；快捷键说明集中在 `commands.ts::SHORTCUT_HELP` 的分组数组，新增快捷键时同步。

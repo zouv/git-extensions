@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { api, nextLogRequestId, onLogBatch } from "./api";
 import { hasSessionDrafts } from "./viewState";
 import { decideBranchDeletion, planBranchFolderDelete } from "./branchDelete";
@@ -14,6 +14,7 @@ import LeftPanel from "./components/LeftPanel";
 import RevisionGrid from "./components/RevisionGrid";
 import type { RevisionAction } from "./components/RevisionGrid";
 import CommitInfo from "./components/CommitInfo";
+import CommitFilesPanel from "./components/CommitFilesPanel";
 import DiffView from "./components/DiffView";
 import type { FileAction } from "./components/DiffView";
 import ChangesPanel from "./components/ChangesPanel";
@@ -90,9 +91,8 @@ export default function RepoWorkspace(props: Props) {
   const [workspace, setWorkspace] = useState<Workspace>("history");
   const [task, setTask] = useState<Task>(null);
   const [compareBase, setCompareBase] = useState<string | null>(null);
-  const [inspectorTab, setInspectorTab] = useState<"details" | "diff">("details");
+  const [selectedCommitFile, setSelectedCommitFile] = useState<FileDiff | null>(null);
   const [layout, setLayout] = useState(() => loadLayout(repo.path, settings));
-  const [maximized, setMaximized] = useState(false);
   const [leftRef, setLeftRef] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [message, setMessage] = useState("就绪");
@@ -141,6 +141,8 @@ export default function RepoWorkspace(props: Props) {
 
   const requestIdRef = useRef(0);
   const selectionRef = useRef(0);
+  const commitOidRef = useRef<string | null>(null);
+  const selectedCommitFileRef = useRef<FileDiff | null>(null);
   const headOidRef = useRef("");
   const headNameRef = useRef("");
   const refsFingerprint = useRef("");
@@ -153,7 +155,6 @@ export default function RepoWorkspace(props: Props) {
   const selectedOidsRef = useRef<string[]>([]);
   const logListenReadyRef = useRef<Promise<unknown> | null>(null);
   const confirm = useConfirm();
-  const inspectorId = useId();
   const notifyRef = useRef(props.onNotify);
   const metaRef = useRef(props.onMeta);
   notifyRef.current = props.onNotify;
@@ -163,6 +164,7 @@ export default function RepoWorkspace(props: Props) {
   settingsRef.current = settings;
   leftRefRef.current = leftRef;
   selectedOidsRef.current = selectedOids;
+  selectedCommitFileRef.current = selectedCommitFile;
 
   useEffect(() => { if (!(import.meta.env.DEV && import.meta.env.VITE_TEST_REPO)) saveLayout(repo.path, layout); }, [layout, repo.path]);
   useEffect(() => metaRef.current({
@@ -186,9 +188,13 @@ export default function RepoWorkspace(props: Props) {
     return () => { void api.cancelLog(repo.path, requestIdRef.current); requestIdRef.current = 0; selectionRef.current++; auxSequence.current++; auxPending.current.requested = null; void unlisten.then((fn) => fn()); };
   }, [repo.path]);
 
-  const loadCommit = useCallback((oid: string) => {
+  const loadCommit = useCallback((oid: string, openDiff = false) => {
     const selection = ++selectionRef.current;
+    // 同一提交刷新时保留已选中的文件；切换到其它提交则清空，避免展示旧提交的文件。
+    const keepPath = commitOidRef.current === oid ? selectedCommitFileRef.current?.path ?? null : null;
+    commitOidRef.current = oid;
     setDetailLoading(true); setCommit(null); setCommitDiff([]); setContained(null); setCommitError("");
+    if (!keepPath) setSelectedCommitFile(null);
     Promise.all([
       api.getCommit(repo.path, oid),
       api.getCommitFiles(repo.path, oid),
@@ -196,6 +202,8 @@ export default function RepoWorkspace(props: Props) {
     ]).then(([detail, diff, contains]) => {
       if (selectionRef.current !== selection) return;
       setCommit(detail); setCommitDiff(diff); setContained(contains); setDetailLoading(false);
+      const target = openDiff ? diff[0] : keepPath ? diff.find((file) => file.path === keepPath || file.oldPath === keepPath) : undefined;
+      setSelectedCommitFile(target ?? null);
     }).catch((e) => {
       if (selectionRef.current !== selection) return;
       const details = String(e);
@@ -213,10 +221,10 @@ export default function RepoWorkspace(props: Props) {
     if (history.oids.length > 100) history.oids.shift();
     history.index = history.oids.length - 1;
   }, []);
-  const selectRevision = useCallback((oid: string, record = true) => {
+  const selectRevision = useCallback((oid: string, record = true, openDiff = false) => {
     setSelectedOids([oid]);
     if (record) recordHistory(oid);
-    loadCommit(oid);
+    loadCommit(oid, openDiff);
   }, [loadCommit, recordHistory]);
 
   const startLogWhenReady = useCallback((id: number, revspec?: string | null) => {
@@ -342,7 +350,7 @@ export default function RepoWorkspace(props: Props) {
 
   const openCompare = useCallback((base: string, target: string) => {
     if (getRepoOperation(repo.path)) return;
-    const open = () => { if (getRepoOperation(repo.path)) return; setWorkspace("history"); setTask({ type: "compare", base, target }); setMaximized(false); };
+    const open = () => { if (getRepoOperation(repo.path)) return; setWorkspace("history"); setTask({ type: "compare", base, target }); };
     if ((task?.type === "conflict" && conflictDirty) || (task?.type === "rebase" && rebaseDirty)) {
       const isConflict = task.type === "conflict";
       void confirm({ title: isConflict ? "离开冲突编辑器？" : "离开 Rebase 计划？", body: "未执行的编辑将保留在当前仓库会话，重新打开任务可继续；关闭仓库页签才会丢失。", confirmLabel: "保留草稿并打开对比" }).then((ok) => {
@@ -371,7 +379,7 @@ export default function RepoWorkspace(props: Props) {
       setMessage(details); notifyRef.current("error", "操作失败", details);
       const state = await api.getOperationState(repo.path).catch(() => null);
       if (state) setOperation(state);
-      if (state && state.kind !== "none" && state.kind !== "bisect") { setWorkspace("changes"); setTask({ type: "conflict" }); setMaximized(false); }
+      if (state && state.kind !== "none" && state.kind !== "bisect") { setWorkspace("changes"); setTask({ type: "conflict" }); }
     } finally { setBusy(false); }
   }, [refreshAll, refreshWorktree, repo.path]);
 
@@ -416,7 +424,14 @@ export default function RepoWorkspace(props: Props) {
 
   const onRevisionAction = useCallback(async (action: RevisionAction, rev: Revision) => {
     const target = `${rev.shortId} ${rev.subject}`;
-    if (action === "diff") { setInspectorTab("diff"); setLayout((prev) => ({ ...prev, showInspector: true })); setTask(null); }
+    if (action === "diff") {
+      setTask(null);
+      setLayout((prev) => ({ ...prev, showInspector: true }));
+      // 选中提交后先展示详情与文件列表；双击 / Enter 时自动打开第一个文件的底部 Diff。
+      if (commitOidRef.current === rev.oid && commit?.oid === rev.oid) setSelectedCommitFile(commitDiff[0] ?? null);
+      else if (selectedOidsRef.current[selectedOidsRef.current.length - 1] === rev.oid) loadCommit(rev.oid, true);
+      else selectRevision(rev.oid, true, true);
+    }
     else if (action === "copy-sha" || action === "copy-subject") {
       await navigator.clipboard?.writeText(action === "copy-sha" ? rev.oid : rev.subject);
       setMessage(action === "copy-sha" ? "已复制完整提交 SHA" : "已复制提交主题");
@@ -428,7 +443,7 @@ export default function RepoWorkspace(props: Props) {
     } else if (action === "new-branch") { setBranchStart(rev.oid); setBranchMode("create"); setShowBranches(true); }
     else if (action === "reset") { setResetTarget(rev.oid); }
     else if (action === "new-tag") { setTagTarget(rev.oid); setShowTags(true); }
-    else if (action === "interactive-rebase") { setTask({ type: "rebase", oid: rev.oid }); setMaximized(false); }
+    else if (action === "interactive-rebase") { setTask({ type: "rebase", oid: rev.oid }); }
     else if (action === "merge-into-head") { setMergeTarget(rev.oid); }
     else if (action === "fixup" || action === "squash-commit") {
       if (statusRef.current.staged.length === 0) {
@@ -487,7 +502,7 @@ export default function RepoWorkspace(props: Props) {
       const call = action === "cherry-pick" ? () => api.cherryPick(repo.path, rev.oid) : action === "revert" ? () => api.revert(repo.path, rev.oid) : () => api.rebase(repo.path, rev.oid);
       void runAction(call, `${label} 完成`);
     }
-  }, [compareBase, confirm, openCompare, operation?.kind, repo.path, repoInfo.name, runAction]);
+  }, [commit, commitDiff, compareBase, confirm, loadCommit, openCompare, operation?.kind, repo.path, repoInfo.name, runAction, selectRevision]);
 
   const deleteBranch = useCallback(async (branch: BranchInfo) => {
     if (branchDeleteFlow.current || busyRef.current || getRepoOperation(repo.path)) return;
@@ -745,7 +760,7 @@ export default function RepoWorkspace(props: Props) {
     setLayout((prev) => ({ ...prev, [option]: !prev[option] }));
   }, []);
 
-  const showConflict = useCallback(() => { setWorkspace("changes"); setTask({ type: "conflict" }); setMaximized(false); }, []);
+  const showConflict = useCallback(() => { setWorkspace("changes"); setTask({ type: "conflict" }); }, []);
   const dismissTask = useCallback(async () => {
     if (getRepoOperation(repo.path)) return;
     if ((task?.type === "conflict" && conflictDirty) || (task?.type === "rebase" && rebaseDirty)) {
@@ -753,7 +768,7 @@ export default function RepoWorkspace(props: Props) {
       const ok = await confirm({ title: isConflict ? "离开冲突编辑器？" : "离开 Rebase 计划？", body: isConflict ? "当前文件有未保存编辑。" : "当前重排、动作和提交信息编辑尚未执行。", confirmLabel: "保留草稿并离开" });
       if (!ok || getRepoOperation(repo.path)) return;
     }
-    setTask(null); setMaximized(false);
+    setTask(null);
   }, [conflictDirty, confirm, rebaseDirty, repo.path, task]);
   const switchWorkspace = useCallback(async (next: Workspace): Promise<boolean> => {
     if (getRepoOperation(repo.path)) return false;
@@ -762,7 +777,7 @@ export default function RepoWorkspace(props: Props) {
       const ok = await confirm({ title: isConflict ? "离开冲突编辑器？" : "离开 Rebase 计划？", body: isConflict ? "当前文件有未保存编辑。" : "当前重排、动作和提交信息编辑尚未执行。", confirmLabel: "保留草稿并切换" });
       if (!ok || getRepoOperation(repo.path)) return false;
     }
-    setWorkspace(next); setTask(null); setMaximized(false);
+    setWorkspace(next); setTask(null);
     return true;
   }, [conflictDirty, confirm, rebaseDirty, repo.path, task]);
 
@@ -923,8 +938,8 @@ export default function RepoWorkspace(props: Props) {
     const onKey = (event: KeyboardEvent) => {
       if (document.querySelector(".modal-backdrop, .context-menu")) return;
       if (event.key === "Escape") {
-        if (maximized) { setMaximized(false); return; }
         if (task) { void dismissTask(); return; }
+        if (selectedCommitFile && workspace === "history") { setSelectedCommitFile(null); return; }
         if (compareBase) { setCompareBase(null); return; }
         closeDialog(); return;
       }
@@ -977,7 +992,7 @@ export default function RepoWorkspace(props: Props) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, closeDialog, compareBase, dismissTask, fileExplorer, goChild, goMergeBase, goParent, maximized, navigateBackward, navigateForward, openCommitPanel, openCompare, refreshAll, runRemote, stepQuickSearch, switchWorkspace, task, workspace]);
+  }, [active, closeDialog, compareBase, dismissTask, fileExplorer, goChild, goMergeBase, goParent, navigateBackward, navigateForward, openCommitPanel, openCompare, refreshAll, runRemote, selectedCommitFile, stepQuickSearch, switchWorkspace, task, workspace]);
 
   // 活动仓库把自身动作注册到命令面板；切走时注销，避免在 A 仓库执行 B 的命令。
   useEffect(() => {
@@ -994,10 +1009,8 @@ export default function RepoWorkspace(props: Props) {
       { id: `repo:${repo.path}:copy-sha`, title: "复制选中提交 SHA", group: "当前仓库", shortcut: "Ctrl+Shift+C", enabled: selectedOids.length > 0, run: () => { const oid = selectedOids[selectedOids.length - 1]; if (oid) void navigator.clipboard?.writeText(oid); } },
       { id: `repo:${repo.path}:left`, title: "显示 / 隐藏左侧导航", group: "视图", shortcut: "Ctrl+B", run: () => setLayout((prev) => ({ ...prev, showLeft: !prev.showLeft })) },
       { id: `repo:${repo.path}:inspector`, title: "显示 / 隐藏检查器", group: "视图", run: () => setLayout((prev) => ({ ...prev, showInspector: !prev.showInspector })) },
-      { id: `repo:${repo.path}:inspector-right`, title: "检查器：右侧", group: "视图", run: () => setLayout((prev) => ({ ...prev, showInspector: true, inspectorPosition: "right" })) },
-      { id: `repo:${repo.path}:inspector-bottom`, title: "检查器：底部", group: "视图", run: () => setLayout((prev) => ({ ...prev, showInspector: true, inspectorPosition: "bottom" })) },
       { id: `repo:${repo.path}:layout-default`, title: "布局：默认", group: "视图", run: () => setLayout(resetLayout(repo.path, settings)) },
-      { id: `repo:${repo.path}:layout-wide`, title: "布局：宽 Diff", group: "视图", run: () => setLayout((prev) => ({ ...prev, showLeft: false, showInspector: true, inspectorPosition: "right", inspectorSize: 640 })) },
+      { id: `repo:${repo.path}:layout-wide`, title: "布局：宽 Diff", group: "视图", run: () => setLayout((prev) => ({ ...prev, showLeft: false, showInspector: true, inspectorSize: 640 })) },
       { id: `repo:${repo.path}:layout-history`, title: "布局：专注历史", group: "视图", run: () => { void switchWorkspace("history").then((ok) => { if (ok) setLayout((prev) => ({ ...prev, showInspector: false })); }); } },
       { id: `repo:${repo.path}:branches`, title: "分支管理…", group: "Git 操作", shortcut: "Ctrl+Shift+B", enabled: !busy, run: () => { setBranchStart(undefined); setBranchSelected(undefined); setBranchMode("checkout"); setShowBranches(true); } },
       { id: `repo:${repo.path}:merge`, title: "合并分支到当前 HEAD…", group: "Git 操作", keywords: ["merge", "squash"], enabled: !busy, run: () => setMergeTarget("") },
@@ -1025,16 +1038,17 @@ export default function RepoWorkspace(props: Props) {
   const updateCommitDirty = useCallback((value: boolean) => setCommitDirty(value), []);
   const updateConflictDirty = useCallback((value: boolean) => setConflictDirty(value || conflictDrafts.current.size > 0), []);
   const updateRebaseDirty = useCallback((value: boolean) => setRebaseDirty(value || rebaseDrafts.current.size > 0), []);
-  const verticalInspector = layout.inspectorPosition === "right";
+  const historyView = workspace === "history" && !task;
+  const layoutPreset = !layout.showInspector ? "focus" : !layout.showLeft ? "wide" : "default";
+  const selectedCommitFiles = useMemo(() => selectedCommitFile ? [selectedCommitFile] : [], [selectedCommitFile]);
 
   return (
     <div className="repo-workspace">
-      <Toolbar repo={repoInfo} branches={branches} loading={logLoading} busy={busy} revisionCount={filteredRevisions.length} aheadBehind={aheadBehind} filter={filter} workspace={workspace} inspectorVisible={layout.showInspector} leftVisible={layout.showLeft} inspectorPosition={layout.inspectorPosition} compareBase={compareBase}
+      <Toolbar repo={repoInfo} branches={branches} loading={logLoading} busy={busy} revisionCount={filteredRevisions.length} aheadBehind={aheadBehind} filter={filter} workspace={workspace} inspectorVisible={layout.showInspector} leftVisible={layout.showLeft} layoutPreset={layoutPreset} compareBase={compareBase}
         leftRef={leftRef} display={layout} selectedShortId={selectedRevision?.shortId ?? null} conflictCount={operation?.conflicts.length ?? 0}
         onFilter={setFilter} onCheckoutBranch={(name) => { if (name !== repoInfo.headBranch) void runAction(() => api.checkoutBranch(repo.path, name), `已切换到 ${name}`); }} onRefresh={refreshAll} onToggleLeft={() => setLayout((prev) => ({ ...prev, showLeft: !prev.showLeft }))} onToggleInspector={() => setLayout((prev) => ({ ...prev, showInspector: !prev.showInspector }))}
-        onInspectorPosition={(position) => setLayout((prev) => ({ ...prev, inspectorPosition: position, showInspector: true }))}
         onResetLayout={() => setLayout(resetLayout(repo.path, settings))}
-        onWideDiff={() => setLayout((prev) => ({ ...prev, showLeft: false, showInspector: true, inspectorPosition: "right", inspectorSize: 640 }))}
+        onWideDiff={() => setLayout((prev) => ({ ...prev, showLeft: false, showInspector: true, inspectorSize: 640 }))}
         onFocusHistory={() => { void switchWorkspace("history").then((ok) => { if (ok) setLayout((prev) => ({ ...prev, showInspector: false })); }); }}
         onBranches={openBranches} onStash={() => setShowStash(true)} onTags={openTags} onSubmodules={() => setShowSubmodules(true)}
         onRemotes={() => setShowRemotes(true)} onWorktrees={() => setShowWorktrees(true)} onPullOptions={() => setShowPullOptions(true)} onMerge={() => setMergeTarget("")} onSearch={() => setShowSearch(true)} onCommandLog={() => setShowCommandLog(true)}
@@ -1064,7 +1078,7 @@ export default function RepoWorkspace(props: Props) {
         </div>
       )}
       <div className="workspace-body">
-        {layout.showLeft && <LeftPanel branches={branches} tags={tags} submodules={submodules} worktrees={worktrees} activeRef={leftRef} workspace={workspace} changeCount={changeCount} width={layout.leftWidth} conflictCount={operation?.conflicts.length ?? 0}
+        {layout.showLeft && <LeftPanel repoPath={repo.path} branches={branches} tags={tags} submodules={submodules} worktrees={worktrees} activeRef={leftRef} workspace={workspace} changeCount={changeCount} width={layout.leftWidth} conflictCount={operation?.conflicts.length ?? 0}
           onWorkspace={(next) => { void switchWorkspace(next); }} onFilter={setLeftRef} onCheckout={(name) => void runAction(() => api.checkoutBranch(repo.path, name), `已切换到 ${name}`)}
           onCheckoutRemote={(remoteBranch) => void runAction(() => api.checkoutRemoteBranch(repo.path, remoteBranch), `已检出并跟踪 ${remoteBranch}`)}
           onMergeRef={(ref) => setMergeTarget(ref)}
@@ -1077,31 +1091,46 @@ export default function RepoWorkspace(props: Props) {
           onCopyPath={(path) => { void navigator.clipboard?.writeText(path).then(() => setMessage("已复制路径")); }}
           onRevealPath={(path) => { void api.revealPath(path).then(() => setMessage("已在文件管理器中显示")).catch((e) => setMessage(String(e))); }}
           onOpenWorktree={props.onOpenRepo} />}
-        {layout.showLeft && <SplitHandle direction="vertical" label="调整导航宽度" onResize={(delta) => setLayout((prev) => ({ ...prev, leftWidth: Math.min(360, Math.max(160, prev.leftWidth + delta)) }))} onReset={() => setLayout((prev) => ({ ...prev, leftWidth: 224 }))} />}
-        <div className={`content-area${verticalInspector ? " horizontal" : " vertical"}`}>
-          <main className="workspace-main" style={{ display: maximized ? "none" : undefined }}>
+        {layout.showLeft && <SplitHandle direction="vertical" label="调整导航宽度" onResize={(delta) => setLayout((prev) => ({ ...prev, leftWidth: Math.max(0, prev.leftWidth + delta) }))} onReset={() => setLayout((prev) => ({ ...prev, leftWidth: 224 }))} />}
+        <div className="content-area">
+          <div className="main-history" style={{ display: historyView ? "flex" : "none" }}>
+            <div className="main-history-top">
+              <main className="workspace-main">
+                {historyView && <RevisionGrid revisions={filteredRevisions} selectedOids={selectedOids} onSelect={selectCommit} onContextAction={(action, rev) => void onRevisionAction(action, rev)} loading={logLoading} compareBase={compareBase} layoutKey={deferredFilter} display={layout} />}
+              </main>
+              {layout.showInspector && <>
+                <SplitHandle direction="vertical" label="调整检查器宽度" onResize={(delta) => setLayout((prev) => ({ ...prev, inspectorSize: Math.max(0, prev.inspectorSize - delta) }))} onReset={() => setLayout((prev) => ({ ...prev, inspectorSize: 400 }))} />
+                <section className="inspector" style={{ width: layout.inspectorSize }} tabIndex={-1}>
+                  <div className="inspector-header">
+                    <span className="inspector-title">提交详情 / 变更文件</span>
+                    <button className="icon-button" title="关闭检查器" aria-label="关闭检查器" onClick={() => setLayout((prev) => ({ ...prev, showInspector: false }))}><Icon name="close" /></button>
+                  </div>
+                  <div className="inspector-detail" style={{ height: layout.inspectorInfoHeight }}>
+                    {commitError ? <InlineError message={commitError} /> : <CommitInfo commit={commit} contained={contained} loading={detailLoading} onCopy={(text, label) => { void navigator.clipboard?.writeText(text).then(() => setMessage(`已复制${label}`)); }} onFilterRef={(name) => { setLeftRef(name); setWorkspace("history"); }} onOpenCommit={(oid) => goToRevision(oid, "父提交")} />}
+                  </div>
+                  <SplitHandle direction="horizontal" label="调整提交详情与变更文件列表高度" onResize={(delta) => setLayout((prev) => ({ ...prev, inspectorInfoHeight: Math.max(60, prev.inspectorInfoHeight + delta) }))} onReset={() => setLayout((prev) => ({ ...prev, inspectorInfoHeight: 260 }))} />
+                  <CommitFilesPanel files={commitDiff} selectedPath={selectedCommitFile?.path ?? null} loading={detailLoading} emptyLabel={commit ? "该提交没有文件变更" : "选择一个提交查看变更文件"} onSelect={(file) => setSelectedCommitFile((current) => current?.path === file.path ? null : file)} />
+                </section>
+              </>}
+            </div>
+            {selectedCommitFile && <>
+              <SplitHandle direction="horizontal" label="调整 Diff 面板高度" onResize={(delta) => setLayout((prev) => ({ ...prev, historyDiffHeight: Math.max(0, prev.historyDiffHeight - delta) }))} onReset={() => setLayout((prev) => ({ ...prev, historyDiffHeight: 320 }))} />
+              <section className="main-history-diff" style={{ height: layout.historyDiffHeight }}>
+                <button type="button" className="history-diff-close" title="关闭差异 (Esc)" aria-label="关闭差异" onClick={() => setSelectedCommitFile(null)}><Icon name="close" size={14} /></button>
+                <DiffView files={selectedCommitFiles} loadFile={loadCommitFile} loading={detailLoading} highlightEnabled={settings.highlightEnabled} onFileAction={onCommitFileAction} prefKey={repo.path} />
+              </section>
+            </>}
+          </div>
+          <main className="workspace-main" style={{ display: historyView ? "none" : "flex" }}>
             {task?.type === "compare" && <CompareView repoPath={repo.path} initialBase={task.base} initialTarget={task.target} refs={refs} onClose={() => setTask(null)} onFileAction={onFileAction} onError={compareError} />}
             {task?.type === "rebase" && <RebasePlanner key={task.oid} repoPath={repo.path} startOid={task.oid} draft={rebaseDrafts.current.get(task.oid)} onDraftChange={saveRebaseDraft} onExit={() => setTask(null)} onConflict={showConflict} onChanged={refreshAll} onDirtyChange={updateRebaseDirty} onNotify={props.onNotify} />}
             {task?.type === "conflict" && <ConflictCenter repoPath={repo.path} drafts={conflictDrafts.current} onDraftChange={saveConflictDraft} onExit={() => setTask(null)} onChanged={refreshAll} onDirtyChange={updateConflictDirty} onNotify={props.onNotify} />}
-            {!task && workspace === "history" && <RevisionGrid revisions={filteredRevisions} selectedOids={selectedOids} onSelect={selectCommit} onContextAction={(action, rev) => void onRevisionAction(action, rev)} loading={logLoading} compareBase={compareBase} layoutKey={deferredFilter} display={layout} />}
             <div className="changes-workspace" style={{ display: workspace === "changes" && !task ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
               <ChangesPanel repoPath={repo.path} status={status} width={layout.changesWidth} conflictCount={operation?.conflicts.length ?? 0} error={auxError} onWidth={(changesWidth) => setLayout((prev) => ({ ...prev, changesWidth }))}
                 listSplit={layout.changesListSplit} onListSplit={(changesListSplit) => setLayout((prev) => ({ ...prev, changesListSplit }))}
                 onRefresh={(historyChanged) => historyChanged ? refreshAll() : refreshWorktree()} refreshVersion={worktreeVersion} setMessage={setMessage} highlightEnabled={settings.highlightEnabled} onFileAction={onFileAction} onPathAction={onPathAction} onDiscard={discard} onOpenConflict={showConflict} onDirtyChange={updateCommitDirty} focusCommitSignal={focusCommitSignal} />
             </div>
           </main>
-          {workspace === "history" && !task && layout.showInspector && <>
-            {!maximized && <SplitHandle direction={verticalInspector ? "vertical" : "horizontal"} label="调整检查器尺寸" onResize={(delta) => setLayout((prev) => ({ ...prev, inspectorSize: Math.min(720, Math.max(180, prev.inspectorSize - delta)) }))} onReset={() => setLayout((prev) => ({ ...prev, inspectorSize: 400 }))} />}
-            <section className={`inspector${maximized ? " maximized" : ""}`} style={verticalInspector && !maximized ? { width: layout.inspectorSize } : !maximized ? { height: layout.inspectorSize } : undefined} tabIndex={-1}>
-              <div className="inspector-header">
-                <div className="tabs" role="tablist" aria-label="检查器视图" onKeyDown={(e) => { if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return; e.preventDefault(); const next = inspectorTab === "details" ? "diff" : "details"; setInspectorTab(next); document.getElementById(`${inspectorId}-${next}-tab`)?.focus(); }}><button role="tab" id={`${inspectorId}-details-tab`} aria-selected={inspectorTab === "details"} aria-controls={`${inspectorId}-panel`} className={inspectorTab === "details" ? "active" : ""} onClick={() => setInspectorTab("details")}>详情</button><button role="tab" id={`${inspectorId}-diff-tab`} aria-selected={inspectorTab === "diff"} aria-controls={`${inspectorId}-panel`} className={inspectorTab === "diff" ? "active" : ""} onClick={() => setInspectorTab("diff")}>差异{commitDiff.length > 0 ? ` (${commitDiff.length})` : ""}</button></div>
-                <button className="icon-button" title={verticalInspector ? "移动到底部" : "移动到右侧"} aria-label={verticalInspector ? "将检查器移动到底部" : "将检查器移动到右侧"} onClick={() => setLayout((prev) => ({ ...prev, inspectorPosition: verticalInspector ? "bottom" : "right" }))}><Icon name="panel" /></button>
-                <button className="icon-button" title={maximized ? "还原 (Esc)" : "最大化"} aria-label={maximized ? "还原检查器" : "最大化检查器"} onClick={() => setMaximized(!maximized)}>{maximized ? "↙" : "↗"}</button>
-                <button className="icon-button" title="关闭检查器" aria-label="关闭检查器" onClick={() => { setMaximized(false); setLayout((prev) => ({ ...prev, showInspector: false })); }}><Icon name="close" /></button>
-              </div>
-              <div className="inspector-content" role="tabpanel" id={`${inspectorId}-panel`} aria-labelledby={`${inspectorId}-${inspectorTab}-tab`}>{commitError ? <InlineError message={commitError} /> : inspectorTab === "details" ? <CommitInfo commit={commit} contained={contained} loading={detailLoading} onCopy={(text, label) => { void navigator.clipboard?.writeText(text).then(() => setMessage(`已复制${label}`)); }} onFilterRef={(name) => { setLeftRef(name); setWorkspace("history"); }} onOpenCommit={(oid) => goToRevision(oid, "父提交")} /> : <DiffView files={commitDiff} loadFile={loadCommitFile} loading={detailLoading} highlightEnabled={settings.highlightEnabled} onFileAction={onCommitFileAction} prefKey={repo.path} compact />}</div>
-            </section>
-          </>}
         </div>
       </div>
       <div className="status-bar">
@@ -1120,12 +1149,12 @@ export default function RepoWorkspace(props: Props) {
       {showRemotes && <RemotesDialog repoPath={repo.path} onClose={() => setShowRemotes(false)} onChanged={refreshAll} setMessage={setMessage} />}
       {showWorktrees && <WorktreeDialog repoPath={repo.path} onClose={() => setShowWorktrees(false)} onChanged={refreshAll} onOpenWorktree={props.onOpenRepo} setMessage={setMessage} />}
       {showCommandLog && <CommandLogDialog repoPath={repo.path} onClose={() => setShowCommandLog(false)} />}
-      {showSearch && <SearchDialog repoPath={repo.path} onClose={() => setShowSearch(false)} onSelectCommit={(oid) => { setTask(null); setWorkspace("history"); selectRevision(oid); setInspectorTab("details"); setLayout((prev) => ({ ...prev, showInspector: true })); }} onOpenFileAtLine={(file) => { setFileAction({ action: "blame", file: { path: file, oldPath: null, status: "modified", isBinary: false, truncated: false, patch: "" } }); }} />}
+      {showSearch && <SearchDialog repoPath={repo.path} onClose={() => setShowSearch(false)} onSelectCommit={(oid) => { setTask(null); setWorkspace("history"); selectRevision(oid); setLayout((prev) => ({ ...prev, showInspector: true })); }} onOpenFileAtLine={(file) => { setFileAction({ action: "blame", file: { path: file, oldPath: null, status: "modified", isBinary: false, truncated: false, patch: "" } }); }} />}
       {showRepoInfo && <RepositorySettingsDialog repo={repoInfo} onClose={() => setShowRepoInfo(false)} setMessage={setMessage} />}
       {showStash && <StashDialog repoPath={repo.path} onClose={() => setShowStash(false)} onChanged={refreshAll} setMessage={setMessage} />}
       {showTags && <TagDialog repoPath={repo.path} initialTarget={tagTarget} onClose={() => setShowTags(false)} onChanged={refreshAll} setMessage={setMessage} />}
       {showSubmodules && <SubmoduleDialog repoPath={repo.path} onClose={() => setShowSubmodules(false)} onChanged={refreshAll} setMessage={setMessage} />}
-      {fileAction?.action === "blame" && <BlameDialog repoPath={repo.path} file={fileAction.file.path} oid={fileAction.oid} onClose={() => setFileAction(null)} onOpenCommit={(oid) => { setFileAction(null); setTask(null); setWorkspace("history"); selectRevision(oid); setInspectorTab("details"); setLayout((prev) => ({ ...prev, showInspector: true })); }} />}
+      {fileAction?.action === "blame" && <BlameDialog repoPath={repo.path} file={fileAction.file.path} oid={fileAction.oid} onClose={() => setFileAction(null)} onOpenCommit={(oid) => { setFileAction(null); setTask(null); setWorkspace("history"); selectRevision(oid); setLayout((prev) => ({ ...prev, showInspector: true })); }} />}
       {fileAction?.action === "history" && <FileHistoryDialog repoPath={repo.path} file={fileAction.file.path} highlightEnabled={settings.highlightEnabled} onClose={() => setFileAction(null)} />}
       {showCheckoutRevision && <CheckoutRevisionDialog repoPath={repo.path} onClose={() => setShowCheckoutRevision(false)} onChanged={refreshAll} setMessage={setMessage} />}
       {showDiffTool && <DiffToolDialog repoPath={repo.path} status={status} onClose={() => setShowDiffTool(false)} setMessage={setMessage} />}

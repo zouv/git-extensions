@@ -197,6 +197,45 @@ test("变更文件列表宽度不设上限，仅挡住非法值", () => {
   });
 });
 
+test("左侧导航宽度不设上限，仅挡住非法值", () => {
+  withStorage((storage) => {
+    storage.setItem("git-extensions.layout.v2:/wide", JSON.stringify({ leftWidth: 900 }));
+    assert.equal(loadLayout("/wide", DEFAULT_SETTINGS).leftWidth, 900);
+    storage.setItem("git-extensions.layout.v2:/zero", JSON.stringify({ leftWidth: 0 }));
+    assert.equal(loadLayout("/zero", DEFAULT_SETTINGS).leftWidth, 0);
+    storage.setItem("git-extensions.layout.v2:/bad", JSON.stringify({ leftWidth: "wide" }));
+    assert.equal(loadLayout("/bad", DEFAULT_SETTINGS).leftWidth, DEFAULT_LAYOUT.leftWidth);
+    storage.setItem("git-extensions.layout.v2:/neg", JSON.stringify({ leftWidth: -5 }));
+    assert.equal(loadLayout("/neg", DEFAULT_SETTINGS).leftWidth, 0);
+  });
+});
+
+test("右侧检查器宽度不设上限，仅挡住非法值", () => {
+  withStorage((storage) => {
+    storage.setItem("git-extensions.layout.v2:/wide-inspector", JSON.stringify({ inspectorSize: 1400 }));
+    assert.equal(loadLayout("/wide-inspector", DEFAULT_SETTINGS).inspectorSize, 1400);
+    storage.setItem("git-extensions.layout.v2:/zero-inspector", JSON.stringify({ inspectorSize: 0 }));
+    assert.equal(loadLayout("/zero-inspector", DEFAULT_SETTINGS).inspectorSize, 0);
+    storage.setItem("git-extensions.layout.v2:/bad-inspector", JSON.stringify({ inspectorSize: "wide" }));
+    assert.equal(loadLayout("/bad-inspector", DEFAULT_SETTINGS).inspectorSize, DEFAULT_LAYOUT.inspectorSize);
+    storage.setItem("git-extensions.layout.v2:/neg-inspector", JSON.stringify({ inspectorSize: -20 }));
+    assert.equal(loadLayout("/neg-inspector", DEFAULT_SETTINGS).inspectorSize, 0);
+  });
+});
+
+test("检查器详情高度与底部 Diff 高度持久化", () => {
+  withStorage((storage) => {
+    storage.setItem("git-extensions.layout.v2:/panes", JSON.stringify({ inspectorInfoHeight: 340, historyDiffHeight: 280 }));
+    const loaded = loadLayout("/panes", DEFAULT_SETTINGS);
+    assert.equal(loaded.inspectorInfoHeight, 340);
+    assert.equal(loaded.historyDiffHeight, 280);
+    storage.setItem("git-extensions.layout.v2:/pane-bad", JSON.stringify({ inspectorInfoHeight: "tall", historyDiffHeight: "low" }));
+    const fallback = loadLayout("/pane-bad", DEFAULT_SETTINGS);
+    assert.equal(fallback.inspectorInfoHeight, DEFAULT_LAYOUT.inspectorInfoHeight);
+    assert.equal(fallback.historyDiffHeight, DEFAULT_LAYOUT.historyDiffHeight);
+  });
+});
+
 test("未暂存 / 已暂存列表分割比例持久化并夹取到 0.15–0.85", () => {
   withStorage((storage) => {
     storage.setItem("git-extensions.layout.v2:/split", JSON.stringify({ changesListSplit: 0.7 }));
