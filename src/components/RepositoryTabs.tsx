@@ -8,12 +8,14 @@ import { DEFAULT_GROUP_ID, displayRepoName, groupById, groupForRepo, visibleGrou
 import type { RepoGroup, RepoGroupConfig } from "../repoGroups";
 import type { GroupNavMode } from "../settings";
 import { insertionIndex, movePath } from "../tabOrder";
+import { disambiguateLabels } from "../repoIdentity";
 import type { IconName } from "../ui/Icon";
 import Icon from "../ui/Icon";
 import ContextMenu from "../ui/ContextMenu";
 import Dialog from "../ui/Dialog";
 import { useDirtyClose } from "../ui/useDirtyClose";
 import GroupAvatar from "./GroupAvatar";
+import RepoAvatar from "./RepoAvatar";
 
 export interface SessionMeta { busy: boolean; dirty: boolean; conflictCount: number; loading?: boolean; error?: string | null }
 
@@ -89,7 +91,11 @@ export default function RepositoryTabs(props: Props) {
   const groupInsertionRef = useRef<Insertion | null>(null);
   const suppressClickRef = useRef(false);
   const tabMode = props.groupNavMode === "tab";
-  const label = (repo: RepoInfo) => displayRepoName(props.repoGroups, repo);
+  const labels = useMemo(
+    () => disambiguateLabels(props.repos, (repo) => displayRepoName(props.repoGroups, repo)),
+    [props.repoGroups, props.repos],
+  );
+  const label = (repo: RepoInfo) => labels[repo.path] ?? displayRepoName(props.repoGroups, repo);
   const aliasDirty = aliasTarget ? aliasValue !== (props.repoGroups.aliases[aliasTarget.path] ?? "") : false;
   const closeAlias = useDirtyClose(aliasDirty, false, () => setAliasTarget(null));
 
@@ -446,7 +452,8 @@ export default function RepositoryTabs(props: Props) {
   const renderTab = (repo: RepoInfo, group: RepoGroup) => {
     const state = props.meta[repo.path];
     const style = { "--repo-group-color": group.color } as CSSProperties;
-    const pathTitle = props.repoGroups.aliases[repo.path] ? `${label(repo)}（${repo.path}）` : repo.path;
+    const displayName = displayRepoName(props.repoGroups, repo);
+    const pathTitle = props.repoGroups.aliases[repo.path] ? `${displayName}（${repo.path}）` : repo.path;
     return (
       <div
         className={`repository-tab${repo.path === props.activePath ? " active" : ""}${dragPath === repo.path ? " dragging" : ""}`}
@@ -460,7 +467,7 @@ export default function RepositoryTabs(props: Props) {
         role="tab"
         aria-selected={repo.path === props.activePath}
         tabIndex={repo.path === props.activePath ? 0 : -1}
-        title={`${pathTitle} · 分组：${group.name}`}
+        title={`${pathTitle} · 分组：${group.name} · 分支：${repo.headBranch ?? "detached HEAD"}`}
         style={style}
         onPointerDown={(event) => beginDrag(event, repo)}
         onPointerMove={moveDrag}
@@ -481,7 +488,7 @@ export default function RepositoryTabs(props: Props) {
         <span className="repository-tab-icon">
           {state?.busy || state?.loading
             ? <span className="spinner" aria-label={state?.busy ? "操作中" : "正在加载"} />
-            : <Icon name="folder" />}
+            : <RepoAvatar path={repo.path} name={displayName} />}
         </span>
         <span className="repository-tab-name">{label(repo)}</span>
         {state?.conflictCount ? <span className="tab-badge conflict">{state.conflictCount}</span> : state?.dirty ? <span className="dirty-dot" title="有未保存草稿" /> : state?.error ? <span className="tab-error" title={state.error} aria-label="读取失败"><Icon name="warning" size={12} /></span> : null}

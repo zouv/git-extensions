@@ -15,6 +15,8 @@
 | `src/components/TitleBar.tsx` | 同行顶部：应用菜单 / 组入口 / 页签 / 查找与窗口控制；按 `groupNavMode` 决定显示 Pin 栏或页签内分组图标 | 改顶部导航 / 窗口行为 |
 | `src/components/RepositoryGroupNav.tsx` | 组入口与多选菜单；`pin` 模式额外渲染 Pin 彩色缩写图标栏，支持拖动排序并与组顺序同步 | 改分组菜单 / Pin 栏 |
 | `src/components/RepositoryTabs.tsx` | `tab` 模式按组渲染「组图标 + 该组页签」并可收起 / 展开、拖动分组、组内拖动页签；`pin` 模式平铺页签；页签关闭 / 键盘 / 溢出列表 / 激活滚入；右键移动分组 / 别名 | 改页签与分组绘制 |
+| `src/components/RepoAvatar.tsx` | 仓库页签字母徽标：显示名缩写 + 路径稳定色 + 自动对比文字 | 改页签图标外观 |
+| `src/repoIdentity.ts` | 仓库缩写、路径稳定色、文字对比色、同名页签父目录后缀；纯函数无副作用 | 改页签图标识别规则 |
 | `src/components/RepoGroupsDialog.tsx` / `GroupAvatar.tsx` / `GroupColorPanel.tsx` | 左组选右记录的组管理器：CRUD / 固定 / 56 色色板面板 / 别名 / 多选归组 / 安全关闭移除 / 分组拖拽排序 / 自定义图标文字 | 改分类整理 |
 | `src/components/RepositoryRecordList.tsx` / `RepositorySearchDialog.tsx` | 管理与查找共用记录行、roving 键盘、本地搜索、按需打开与失败定位入口 | 改仓库查找 / 记录列表 |
 | `src/components/NotificationCenter.tsx` | 通知 toast 与错误详情抽屉 | 改全局反馈 |
@@ -33,6 +35,7 @@
 |---|---|---|
 | 打开仓库 / 页签 / 启动恢复 | `App.tsx` 的 `openRepo`（可选 `groupId` / `alias`）、`activateRepo`、`discardSessions`、`closeRepo`、`closeOthers`、`reorderRepos`、`reorderGroupRepos`、`reorderVisibleGroups`、打开弹窗、恢复 effect；`openRepos.ts` | 恢复期禁止普通打开；路径规范化同步活动目标；仅懒挂载活动页签；打开弹窗「自动 / 空」不覆盖现有归属与别名 |
 | 分组显示模式 / 分组排序 | `settings.ts::groupNavMode`；`SettingsDialog.tsx`；`RepositoryTabs.tsx` 的 `tabMode` / `collapsedGroups` / `beginGroupDrag` / `updateGroupInsertion` / `finishGroupDrag`；`repoGroups.ts::visibleGroupIds` / `reorderGroupSlots` / `groupForShortcut`；`App.tsx::reorderVisibleGroups` | `tab` 默认：组图标在页签内、点击收起展开、组可拖拽；隐藏 Pin / 固定 UI，Alt+1…9 按分组段顺序；`pin`：原 Pin 图标栏与固定组快捷键 |
+| 仓库页签图标 / 同名区分 | `repoIdentity.ts` 的 `abbreviation` / `repoAvatarColor` / `avatarTextColor` / `disambiguateLabels`；`RepoAvatar.tsx`；`RepositoryTabs.tsx` 的 `labels` / `renderTab` | 缩写来自显示名（别名优先），颜色来自规范化路径；同名仓库追加父目录后缀，只改显示不改别名 |
 | 通知 / 错误反馈 | `NotificationCenter.tsx` 的 `ToastItem`、`clearAll`；`App.tsx` 的 `notify` | 成功 toast 4 秒自动消失，hover / focus 暂停；错误保留在通知中心 |
 | 分组导航 / 页签别名 | `repoGroups.ts` 的 `toggleActiveGroup` / `groupForPinShortcut` / `selectGroup` / `selectAllOpen` / `pickVisibleActive` / `reorderPinned` / `reorderGroups` / `setGroupBadge` / `setGroupColor`；`RepositoryGroupNav.tsx`、`RepoGroupsDialog.tsx`、`GroupColorPanel.tsx`、`RepositoryTabs.tsx`、`App.tsx` 打开弹窗 | Pin / 菜单多选：全部打开下点击组进入单选、取消最后一组保持无选择（`view.kind = "none"`）；Alt+1…9 按组顺序独占固定组、Alt+0 未分组；组顺序是管理器与 Pin 的单一事实源；页签右键可直接移动分组；Ctrl+1…9 切页签 |
 | 持久记录管理 / 查找 / 定位 | `repositoryRecords.ts::loadRepositoryRecords / filterRepositoryRecords`；`repositorySession.ts::closeBlockedPaths / canonicalActivePath / newRepositoryGroup`；`App.tsx::openRecorded / addRecorded / closeRepos / removeRecorded / relocateRecorded` | 关闭保留记录；目标已存在时保留其未分组 / 无别名语义 |
@@ -53,7 +56,8 @@
   - 键盘导航只遍历展开组的页签；溢出菜单选中收起组页签时先展开再激活。
 - **`pin` 模式**：`RepositoryGroupNav` 渲染 Pin 图标栏，页签平铺渲染；原有 Pin 点击切组、拖动排序、Alt+1…9 按固定组不变。
 - **`tab` 模式隐藏 Pin**：分组菜单不渲染 Pin 尾随操作，组管理器不显示「固定」标记 / 菜单项 / 保存提示里的固定字样；Alt+1…9 改按 `groups` 分组段顺序切组。
-- 页签的加载 / 操作中 spinner 占用固定的 16px 文件图标槽位，不能追加在名称末尾，否则状态切换会拉宽页签并跳动。
+- 页签的加载 / 操作中 spinner 占用固定的 18px 仓库徽标槽位，不能追加在名称末尾，否则状态切换会拉宽页签并跳动。
+- 页签图标使用仓库字母徽标（`RepoAvatar`）：缩写取显示名（别名优先），底色由规范化仓库路径哈希到 12 个固定低饱和色，文字按亮度自动取白 / 深色；同名仓库在显示名后追加父目录后缀，悬停标题补充分支。
 - 两种模式共用 Chrome 风格页签样式：活动页签顶部圆角 + 组色描边；`tab` 模式展开时高亮线贯穿组图标与页签底部（收起时隐藏），并有分组段的组色底纹；`pin` 模式使用页签底部高亮线。
 - 收起状态是 `RepositoryTabs` 的会话内 state，不写入 `RepoGroupConfig`；重启后全部展开。
 
@@ -97,4 +101,5 @@
 - **Tab 模式收起分组与键盘**：收起组的页签不渲染，方向键只能在 `visibleTabRepos` 内移动；活动页签被收起时内容区保持不变，溢出菜单 / Alt+数字激活目标时必须先展开该组。组图标 `pointerdown` 要 `stopPropagation`，避免同时触发页签拖拽。
 - **组记忆与确认竞态**：切组时按记忆挑页签，日常 effect 只纠正不可见活动项，不能把手动激活又拉回旧记忆。批量关闭 / 移除记录用同步门闩及逐路径 dirty 快照，确认等待后必须再复核写状态。
 - **通知不能被 slice 静默丢弃**：错误是用户唯一的 Git stderr 查看入口；只显示最近几条并让“清理”清空全部会让错误永久丢失。抽屉保留全部，清理需确认。
+- **页签身份色必须来自路径**：用显示名或分组色会让同名仓库 / 同组仓库难以区分；缩写可随别名变化，但颜色不能。重名后缀只改页签显示，不写回别名或路径。
 - **关闭其它页签要说明保留原因**：dirty / busy 页签不能静默跳过；一次确认列出将关闭与将保留的页签。

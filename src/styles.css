@@ -80,7 +80,8 @@ kbd { font: 11px Consolas, monospace; }
 .repository-tab:hover { background: var(--surface); }
 .repository-tab.active { color: var(--fg); background: var(--selected); box-shadow: inset 0 1px 0 var(--repo-group-color), inset 1px 0 0 var(--repo-group-color), inset -1px 0 0 var(--repo-group-color); }
 .repository-tab.active::before, .repository-tab:hover::before, .tab-group .repository-tab:last-of-type::before { display: none; }
-.repository-tab-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 16px; width: 16px; height: 16px; }
+.repository-tab-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 18px; width: 18px; height: 18px; }
+.repo-avatar { display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14); color: #fff; font-weight: 600; letter-spacing: .02em; line-height: 1; flex: 0 0 auto; pointer-events: none; }
 .repository-tab .group-avatar { flex: 0 0 auto; }
 .tab-group { position: relative; display: flex; align-items: stretch; flex: 0 0 auto; border-radius: 8px 8px 0 0; }
 .tab-group + .tab-group { margin-left: 6px; }
