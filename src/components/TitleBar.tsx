@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
 import type { RepoInfo } from "../types";
 import type { RepoGroupConfig } from "../repoGroups";
+import type { GroupNavMode } from "../settings";
 import type { SessionMeta } from "./RepositoryTabs";
 import RepositoryTabs from "./RepositoryTabs";
 import ContextMenu from "../ui/ContextMenu";
@@ -29,6 +30,9 @@ interface Props {
   onCopyPath: (path: string) => void;
   onReveal: (path: string) => void;
   onReorderRepo: (orderedPaths: string[]) => void;
+  onReorderGroupRepos: (groupId: string, orderedPaths: string[]) => void;
+  onReorderGroups: (orderedGroupIds: string[]) => void;
+  groupNavMode: GroupNavMode;
   onRepoGroupsChange: (next: RepoGroupConfig) => void;
   onSetRepoAlias: (path: string, alias: string) => void;
   onSetRepoGroup: (path: string, groupId: string) => void;
@@ -92,12 +96,13 @@ export default function TitleBar(props: Props) {
           <img src={appIcon} width={20} height={20} alt="" draggable={false} />
         </button>
 
-        <RepositoryGroupNav config={config} onChange={props.onRepoGroupsChange} onManage={props.onManageRepoGroups ?? props.onManageGroups ?? (() => {})} />
+        <RepositoryGroupNav config={config} mode={props.groupNavMode} onChange={props.onRepoGroupsChange} onManage={props.onManageRepoGroups ?? props.onManageGroups ?? (() => {})} />
       <RepositoryTabs
         repos={props.repos}
         activePath={props.activePath}
         meta={props.meta}
         repoGroups={config}
+        groupNavMode={props.groupNavMode}
         onSetAlias={props.onSetRepoAlias}
         onSetGroup={props.onSetRepoGroup}
         onActivate={props.onActivate}
@@ -108,6 +113,8 @@ export default function TitleBar(props: Props) {
         onCopyPath={props.onCopyPath}
         onReveal={props.onReveal}
         onReorder={props.onReorderRepo}
+        onReorderGroupRepos={props.onReorderGroupRepos}
+        onReorderGroups={props.onReorderGroups}
         onBlankContextMenu={(x, y) => setAppMenu({ x, y })}
       />
       <button type="button" className="title-repo-search" title="查找仓库" aria-label="查找仓库" onClick={props.onSearchRepositories}>

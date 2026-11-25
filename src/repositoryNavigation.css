@@ -55,7 +55,7 @@
 .repository-navigation-title .title-repo-search-label { white-space: nowrap; }
 .repository-navigation-title .title-window-controls { margin-left: 0; }
 .repository-navigation-title .repository-tabs { flex: 1 1 0; min-width: 0; }
-.repository-navigation-title .repository-tab { min-width: 145px; max-width: 240px; touch-action: none; }
+.repository-navigation-title .repository-tab { min-width: 155px; max-width: 240px; touch-action: none; }
 .repository-navigation-title .repository-tab-overflow {
   width: 28px;
   height: 28px;
@@ -76,5 +76,5 @@
 }
 @media (max-width: 620px) {
   .repository-navigation-title .repository-group-nav { max-width: 25%; margin-right: 4px; }
-  .repository-navigation-title .repository-tab { min-width: 120px; }
+  .repository-navigation-title .repository-tab { min-width: 128px; }
 }

@@ -74,10 +74,27 @@ kbd { font: 11px Consolas, monospace; }
 .repository-tab-scroll::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .repository-tab-list { position: relative; display: flex; align-items: stretch; flex: 0 0 auto; }
 .repository-tab-blank { flex: 1 0 32px; min-width: 32px; align-self: stretch; }
-.repository-tab { position: relative; display: flex; align-items: center; gap: 7px; min-width: 160px; max-width: 240px; padding: 0 7px 0 12px; color: var(--muted); border-right: 1px solid var(--border); cursor: default; user-select: none; }
-.repository-tab::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--repo-group-color); pointer-events: none; }
+.repository-tab { position: relative; display: flex; align-items: center; gap: 7px; min-width: 160px; max-width: 240px; padding: 0 7px 0 10px; color: var(--muted); cursor: default; user-select: none; border-radius: 8px 8px 0 0; }
+.repository-tab::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--repo-group-color); pointer-events: none; z-index: 1; }
+.repository-tab::before { content: ""; position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 1px; height: 16px; background: var(--border); pointer-events: none; }
 .repository-tab:hover { background: var(--surface); }
-.repository-tab.active { color: var(--fg); background: var(--selected); }
+.repository-tab.active { color: var(--fg); background: var(--selected); box-shadow: inset 0 1px 0 var(--repo-group-color), inset 1px 0 0 var(--repo-group-color), inset -1px 0 0 var(--repo-group-color); }
+.repository-tab.active::before, .repository-tab:hover::before, .tab-group .repository-tab:last-of-type::before { display: none; }
+.repository-tab-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 16px; width: 16px; height: 16px; }
+.repository-tab .group-avatar { flex: 0 0 auto; }
+.tab-group { position: relative; display: flex; align-items: stretch; flex: 0 0 auto; border-radius: 8px 8px 0 0; }
+.tab-group + .tab-group { margin-left: 6px; }
+.tab-group-pill { display: flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 34px; padding: 0 4px; border: 0; border-radius: 8px 8px 0 0; background: transparent; color: var(--muted); cursor: default; touch-action: none; }
+.tab-group-pill:hover { background: var(--hover); }
+.tab-group-pill:focus-visible { outline: none; }
+.tab-group-pill:focus-visible .group-avatar { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tab-group.dragging { opacity: .45; }
+.tab-group-pill.dragging { opacity: .45; }
+.repository-tabs.group-nav-tab .tab-group { background: color-mix(in srgb, var(--repo-group-color) 7%, transparent); position: relative; }
+/* Tab 模式：分组高亮线画在整段底部（组图标 + 页签连续），收起时不显示。 */
+.repository-tabs.group-nav-tab .tab-group:not(.collapsed) { border-bottom: 2px solid var(--repo-group-color); }
+.repository-tabs.group-nav-tab .repository-tab::after { display: none; }
+.tab-group-insertion-line { position: absolute; z-index: 3; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--accent); pointer-events: none; }
 .repository-tab.dragging { opacity: .45; }
 .repository-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .tab-insertion-line { position: absolute; z-index: 3; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--accent); pointer-events: none; }
@@ -164,7 +181,7 @@ kbd { font: 11px Consolas, monospace; }
 }
 .conflict-entry { margin: 6px; color: #ffc078; border-color: #64492c; background: #2e251b; }
 .content-area { display: flex; flex: 1; min-width: 0; min-height: 0; }
-/* 主窗口历史视图：上方「提交记录 + 详情 / 变更文件」，下方按需显示 Diff。 */
+/* 主窗口历史视图：上方「提交记录 + 详情 / 变更文件」，下方常驻 Diff 面板（未选文件时显示空状态）。 */
 .main-history { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
 .main-history-top { display: flex; flex: 1; min-width: 0; min-height: 0; }
 .workspace-main { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; container-name: revisions; container-type: inline-size; }
@@ -192,10 +209,8 @@ kbd { font: 11px Consolas, monospace; }
 .commit-file-dir > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .commit-file-dir:hover { background: var(--hover); color: var(--fg); }
 .main-history-diff { position: relative; flex: 0 0 auto; max-height: calc(100% - 120px); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-.history-diff-close { position: absolute; z-index: 3; top: 6px; right: 8px; width: 22px; height: 22px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--elevated); color: var(--muted); }
-.history-diff-close:hover { color: var(--fg); background: var(--hover); }
 .main-history-diff > .diff-view { flex: 1; min-width: 0; min-height: 0; }
-.main-history-diff .diff-toolbar { border-top: 0; padding-right: 36px; }
+.main-history-diff .diff-toolbar { border-top: 0; }
 .tabs { display: flex; gap: 2px; }
 .tabs button { border: 0; background: transparent; color: var(--muted); border-radius: 3px; }
 .tabs button.active { color: var(--accent); background: var(--hover); }

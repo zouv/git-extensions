@@ -7,10 +7,14 @@ export interface AppSettings {
   highlightEnabled: boolean;
   showLeftPanel: boolean;
   maxLogCount: number;
+  /** 顶部栏分组显示方式：页签内图标（tab，默认）或 Pin 图标栏（pin）。 */
+  groupNavMode: GroupNavMode;
   explorerContextMenuEnabled: boolean;
   explorerContextMenuPlacements: ExplorerMenuPlacements;
   explorerAlwaysShowAllCommands: boolean;
 }
+
+export type GroupNavMode = "tab" | "pin";
 
 /** View 菜单里可持久化的提交图显示选项；按仓库保存。 */
 export interface GridDisplayOptions {
@@ -43,6 +47,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   highlightEnabled: true,
   showLeftPanel: true,
   maxLogCount: 100_000,
+  groupNavMode: "tab",
   explorerContextMenuEnabled: false,
   explorerContextMenuPlacements: defaultExplorerMenuPlacements(),
   explorerAlwaysShowAllCommands: false,
@@ -93,6 +98,7 @@ export function loadSettings(): AppSettings {
       highlightEnabled: typeof raw.highlightEnabled === "boolean" ? raw.highlightEnabled : DEFAULT_SETTINGS.highlightEnabled,
       showLeftPanel: typeof raw.showLeftPanel === "boolean" ? raw.showLeftPanel : DEFAULT_SETTINGS.showLeftPanel,
       maxLogCount: numberOption(raw.maxLogCount, LOG_LIMITS, DEFAULT_SETTINGS.maxLogCount),
+      groupNavMode: raw.groupNavMode === "pin" ? "pin" : "tab",
       explorerContextMenuEnabled: typeof raw.explorerContextMenuEnabled === "boolean" ? raw.explorerContextMenuEnabled : DEFAULT_SETTINGS.explorerContextMenuEnabled,
       explorerContextMenuPlacements: normalizeExplorerMenuPlacements(raw.explorerContextMenuPlacements),
       explorerAlwaysShowAllCommands: typeof raw.explorerAlwaysShowAllCommands === "boolean" ? raw.explorerAlwaysShowAllCommands : DEFAULT_SETTINGS.explorerAlwaysShowAllCommands,

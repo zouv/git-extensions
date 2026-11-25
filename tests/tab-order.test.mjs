@@ -5,7 +5,7 @@ import ts from "typescript";
 
 const source = await readFile(new URL("../src/tabOrder.ts", import.meta.url), "utf8");
 const url = "data:text/javascript;base64," + Buffer.from(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText).toString("base64");
-const { insertionIndex, movePath } = await import(url);
+const { insertionIndex, movePath, replaceFiltered } = await import(url);
 
 const tab = (left, width = 160) => ({ left, width });
 
@@ -34,4 +34,11 @@ test("越界下标夹紧，未知路径保持原顺序", () => {
   assert.deepEqual(movePath(["/a", "/b"], "/a", 99), ["/b", "/a"]);
   assert.deepEqual(movePath(["/a", "/b"], "/x", 1), ["/a", "/b"]);
   assert.deepEqual(movePath([], "/a", 0), []);
+});
+
+test("按过滤条件替换子集：只改匹配项的槽位", () => {
+  const items = ["a1", "b1", "a2", "b2", "a3"];
+  assert.deepEqual(replaceFiltered(items, ["a3", "a1", "a2"], (item) => item.startsWith("a")), ["a3", "b1", "a1", "b2", "a2"]);
+  assert.deepEqual(replaceFiltered(items, ["x"], (item) => item.startsWith("a")), items, "数量不匹配保持原样");
+  assert.deepEqual(replaceFiltered(items, [], () => false), items);
 });

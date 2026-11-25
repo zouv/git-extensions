@@ -12,7 +12,8 @@ const {
   groupForRepo, groupById, visibleRepos, reposInGroup, isGroupSelected,
   toggleActiveGroup, setActiveGroups, ensureGroupActive, primaryGroupId, setRepoGroup,
   createGroup, renameGroup, deleteGroup, togglePin, pinnedGroups, reorderPinned, reorderGroups,
-  groupForPinShortcut, displayRepoName, setRepoAlias, fallbackGroupColor, setGroupColor, setGroupBadge,
+  reorderGroupSlots, visibleGroupIds,
+  groupForPinShortcut, groupForShortcut, displayRepoName, setRepoAlias, fallbackGroupColor, setGroupColor, setGroupBadge,
   MAX_GROUP_BADGE,
 } = await import(url);
 
@@ -183,6 +184,36 @@ test("管理器拖拽排序：完整重排组顺序，Pin 顺序与快捷键随�
   assert.equal(reorderGroups(c, [b, b, a]), c, "重复 id 拒绝");
   assert.equal(reorderGroups(c, [b, a, "nope"]), c, "未知 id 拒绝");
   assert.deepEqual(reorderGroups(c, [DEFAULT_GROUP_ID, a, b]).groups.map((g) => g.id), [DEFAULT_GROUP_ID, a, b]);
+});
+
+test("Tab 模式 Alt 快捷键按分组段顺序，Pin 模式仍按固定组", () => {
+  let c = createGroup(createGroup(emptyConfig(), "A"), "B");
+  const [a, b] = [c.groups[1].id, c.groups[2].id];
+  c = togglePin(c, b);
+  assert.equal(groupForShortcut(c, 0, "tab"), DEFAULT_GROUP_ID);
+  assert.equal(groupForShortcut(c, 1, "tab"), a);
+  assert.equal(groupForShortcut(c, 2, "tab"), b);
+  assert.equal(groupForShortcut(c, 1, "pin"), b, "Pin 模式只取固定组");
+  assert.equal(groupForShortcut(c, 2, "pin"), null);
+  assert.equal(groupForShortcut(c, 9, "tab"), null);
+  assert.equal(groupForShortcut(c, -1, "tab"), null);
+  assert.equal(groupForShortcut(c, 1.5, "tab"), null);
+});
+
+test("Tab 模式分组排序：只重排可见组槽位，隐藏组保持原位", () => {
+  let c = createGroup(createGroup(createGroup(emptyConfig(), "A"), "B"), "C");
+  const [a, b, d] = [c.groups[1].id, c.groups[2].id, c.groups[3].id];
+  const ordered = reorderGroupSlots(c, [d, a]);
+  assert.deepEqual(ordered.groups.map((group) => group.id), [DEFAULT_GROUP_ID, d, b, a]);
+  assert.equal(reorderGroupSlots(c, [a, a]), c, "重复 id 拒绝");
+  assert.equal(reorderGroupSlots(c, ["nope"]), c, "未知 id 拒绝");
+
+  const open = [repo("a"), repo("b")];
+  c = setRepoGroup(c, "/repos/a", a);
+  c = setRepoGroup(c, "/repos/b", b);
+  assert.deepEqual(visibleGroupIds(c, open), [a, b], "按 groups 顺序列出有可见仓库的组");
+  assert.deepEqual(visibleGroupIds(selectGroup(c, b), open), [b]);
+  assert.deepEqual(visibleGroupIds(c, []), []);
 });
 
 test("仓库页签别名：设置 / 覆盖 / 清空恢复仓库名", () => {

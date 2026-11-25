@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { AppSettings } from "../settings";
+import type { AppSettings, GroupNavMode } from "../settings";
 import type { ExplorerAction, ExplorerMenuPlacement } from "../types";
 import {
   EXPLORER_MENU_ACTIONS, EXPLORER_MENU_GROUPS, explorerMenuLevelCounts, explorerMenuPreview,
@@ -126,6 +126,13 @@ export default function SettingsDialog({ settings, onSave, onApply, onClose, exp
         </>}
         {category === "interface" && <>
           <h4>界面</h4>
+          <label className="setting-row"><span>分组显示方式</span>
+            <select value={draft.groupNavMode} disabled={saving} onChange={(e) => update("groupNavMode", e.target.value as GroupNavMode)}>
+              <option value="tab">页签内显示分组图标</option>
+              <option value="pin">顶部 Pin 图标栏</option>
+            </select>
+          </label>
+          <div className="settings-note">页签内模式点击分组图标收起 / 展开，分组可拖拽排序；Pin 模式点击 Pin 图标切换分组。两种模式都保留分组菜单与 Alt+1…9 快捷键。</div>
           <label className="setting-row"><span>Diff 语法高亮</span><input type="checkbox" checked={draft.highlightEnabled} disabled={saving} onChange={(e) => update("highlightEnabled", e.target.checked)} /></label>
           <label className="setting-row"><span>新仓库默认显示导航</span><input type="checkbox" checked={draft.showLeftPanel} disabled={saving} onChange={(e) => update("showLeftPanel", e.target.checked)} /></label>
           <div className="settings-note">面板尺寸与位置按仓库独立保存。</div>

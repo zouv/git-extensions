@@ -24,10 +24,11 @@ import { loadOpenRepos, restoreCandidates, sanitizeRecentRepos, saveOpenRepos } 
 import { canonicalActivePath, closeBlockedPaths, newRepositoryGroup } from "./repositorySession";
 import type { RepoGroupConfig } from "./repoGroups";
 import {
-  DEFAULT_GROUP_ID, ensureGroupActive, groupForPinShortcut, groupForRepo, loadRepoGroups,
+  DEFAULT_GROUP_ID, ensureGroupActive, groupForShortcut, groupForRepo, loadRepoGroups,
   displayRepoName, saveRepoGroups, setRepoAlias, setRepoGroup, visibleRepos,
-  rememberGroupActive, pickVisibleActive, selectGroup, relocateRepoConfig,
+  rememberGroupActive, pickVisibleActive, selectGroup, relocateRepoConfig, reorderGroupSlots,
 } from "./repoGroups";
+import { replaceFiltered } from "./tabOrder";
 import {
   loadRepositoryRecords, saveRepositoryRecords, recordRepository, removeRepositoryRecords,
   relocateRepositoryRecord, repositoryName,
@@ -848,7 +849,8 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
     rememberActive(fallback);
   }, []);
 
-  // Alt+1…9 独占选中固定组，Alt+0 独占未分组；不改变组的归属或固定状态。
+  // Alt+1…9 选中当前显示顺序下的第 N 个组（Tab 模式按分组段顺序，Pin 模式按固定组顺序）；
+  // Alt+0 始终是未分组；不改变组的归属或固定状态。
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
@@ -860,14 +862,14 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       else if (/^Numpad[0-9]$/.test(event.code)) digit = Number(event.code.slice(6));
       if (digit === null) return;
       const config = groupsRef.current;
-      const groupId = groupForPinShortcut(config, digit);
+      const groupId = groupForShortcut(config, digit, settings.groupNavMode);
       if (!groupId) return;
       event.preventDefault();
       updateRepoGroups(selectGroup(config, groupId));
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [updateRepoGroups]);
+  }, [settings.groupNavMode, updateRepoGroups]);
 
   // 页签栏可能只显示部分分组；只重排可见页签占用的槽位，隐藏页签保持原位。
   const reorderRepos = useCallback((orderedVisiblePaths: string[]) => {
@@ -882,6 +884,22 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       return next.some((repo, index) => repo !== prev[index]) ? next : prev;
     });
   }, []);
+
+  // Tab 模式页签按分组渲染：只重排该组占用的槽位，其它组保持原位。
+  const reorderGroupRepos = useCallback((groupId: string, orderedPaths: string[]) => {
+    setRepos((prev) => {
+      const byPath = new Map(prev.map((repo) => [repo.path, repo]));
+      const replacement = orderedPaths.map((path) => byPath.get(path)).filter((repo): repo is RepoInfo => !!repo);
+      if (replacement.length !== orderedPaths.length) return prev;
+      const next = replaceFiltered(prev, replacement, (repo) => groupForRepo(groupsRef.current, repo.path) === groupId);
+      return next.some((repo, index) => repo !== prev[index]) ? next : prev;
+    });
+  }, []);
+
+  // Tab 模式拖动分组段：只重排可见组槽位，避免把隐藏组挤出原位。
+  const reorderVisibleGroups = useCallback((orderedGroupIds: string[]) => {
+    updateRepoGroups(reorderGroupSlots(groupsRef.current, orderedGroupIds));
+  }, [updateRepoGroups]);
 
   // 窗口关闭保护：任一仓库有未保存草稿或写操作进行中时需确认。
   const allowCloseRef = useRef(false);
@@ -937,6 +955,9 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
         onCopyPath={(path) => { void navigator.clipboard?.writeText(path).then(() => notify(path, "success", "已复制仓库路径")); }}
         onReveal={(path) => { void api.revealPath(path).catch((e) => notify(path, "error", "无法打开文件管理器", String(e))); }}
         onReorderRepo={reorderRepos}
+        onReorderGroupRepos={reorderGroupRepos}
+        onReorderGroups={reorderVisibleGroups}
+        groupNavMode={settings.groupNavMode}
         onRepoGroupsChange={updateRepoGroups}
         onSetRepoAlias={(path, alias) => updateRepoGroups(setRepoAlias(repoGroups, path, alias))}
         onSetRepoGroup={(path, groupId) => updateRepoGroups(setRepoGroup(repoGroups, path, groupId))}
@@ -995,6 +1016,7 @@ function AppShell({ initialLaunches = [] }: { initialLaunches?: LaunchRequest[] 
       </div>}
       {showGroupManager && <RepoGroupsDialog config={repoGroups} records={records} repos={repos}
         activePath={activePath} meta={meta} errors={recordErrors} busy={opening || recordBusy || restoring}
+        groupNavMode={settings.groupNavMode}
         initialGroupId={managerGroupId} onChange={updateRepoGroups} onClose={() => setShowGroupManager(false)}
         onOpen={openRecorded} onAdd={addRecorded} onCloseRepos={closeRepos} onRemove={removeRecorded} onRelocate={relocateRecorded} />}
       {showRepositorySearch && <RepositorySearchDialog config={repoGroups} records={records} repos={repos}

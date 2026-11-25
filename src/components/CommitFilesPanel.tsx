@@ -44,7 +44,7 @@ export default function CommitFilesPanel({ files, selectedPath, loading = false,
     else return;
     event.preventDefault();
     const file = fileRows[next]?.value;
-    // 键盘只移动 / 打开选中项；再次点击同一文件才由父组件切换关闭底部 Diff。
+    // 键盘只移动 / 打开选中项；再次点击同一文件才由父组件取消选中（底部 Diff 面板保持显示空状态）。
     if (file && file.path !== selectedPath) onSelect(file);
     const items = listRef.current?.querySelectorAll<HTMLElement>(".commit-file-item");
     items?.[next]?.scrollIntoView({ block: "nearest" });

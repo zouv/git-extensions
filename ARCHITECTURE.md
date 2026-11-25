@@ -6,7 +6,7 @@
 >
 > **体量**：不超过 25,000 字（按字符计，命令见 AGENTS §4）；超了按 AGENTS §1.1 拆到 `arch/<module>.md`，总览只留 §0 / §0.5 / §1。单元格写「是什么、在哪、为什么」，一般不超过 150 字；不写日期、版本、改动经过（归 CHANGELOG / git log）。
 >
-> 文中「AGENTS §x」指 `AGENTS.md` 的章节；不带前缀的 §x 指本文件。
+> 文中「AGENTS §x」指 `AGENTS.md` 的章节；不带前缀的 §x 指本文件；`ui-shell` / `ui-workspace` / `ui-dialogs` 指 `arch/` 下同名分册。
 
 ---
 
@@ -31,21 +31,21 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 
 | 任务类型 | 该读（仅限） | 可忽略 | 入口小节 |
 |---|---|---|---|
-| 改提交日志 / 分支图数据 | `src-tauri/src/git/log.rs`、`src/components/RevisionGrid.tsx` | 其它后端模块、diff / changes 组件 | §2.1、§3；`arch/ui.md §2` |
-| 改 diff 获取或渲染 | `src-tauri/src/git/diff.rs`、`src/components/DiffView.tsx`、`src/viewState.ts` 与调用方 loader | log.rs、写路径 | §2、§3、§4；`arch/ui.md §2–§3` |
-| 改暂存 / 提交 / 分支 / 远程 / Worktree / Merge / Bisect 或写调度 | `src-tauri/src/git/cli.rs`、`commands.rs`、`operations.rs`、`repo.rs`；`src/api.ts`、`repoOperations.ts` / `useRepoBusy.ts` 与对应写操作组件 | 读路径模块 | §2、§3、§4；`arch/ui.md §2–§3` |
-| 改提交搜索 / 代码搜索 / 导出补丁与归档 / 命令日志 | `src-tauri/src/git/history.rs`、`cli.rs`、`commands.rs`；`src/components/{Search,CommandLog}Dialog.tsx`、`RevisionGrid.tsx` | 分支图渲染与写锁 | §2、§4；`arch/ui.md §1–§2` |
-| 改后台读调度 / 失效与刷新 | `operations.rs`、`commands.rs`、`log.rs`；`src/api.ts`、`repoOperations.ts`、`RepoWorkspace.tsx`、`ChangesPanel.tsx` | 无关写组件 | §2、§3、§7；`arch/ui.md §3` |
-| 改 Reset / 恢复 | `src-tauri/src/git/reset.rs`、`commands.rs`；`src/components/ResetDialog.tsx`、`RecoveryDialog.tsx`、`RepoWorkspace.tsx` | 分支图与高亮 Worker | §2、§3、§4；`arch/ui.md §2` |
-| 改页面布局 / 状态流转 | `src/App.tsx`、`src/RepoWorkspace.tsx`、`src/ui/`、`src/styles.css` | 后端 git 模块 | `arch/ui.md §1–§3` |
-| 改顶部栏 / 窗口控制 / 页签与 Pin 拖拽 | `src/components/TitleBar.tsx`、`RepositoryTabs.tsx`、`src/App.tsx`、`src/tabOrder.ts`、`src-tauri/src/window_host.rs`、`capabilities/default.json` | 后端 git 模块 | `arch/ui.md §1–§3、§5`；§7 窗口生命周期 |
-| 改仓库页签分组 / 固定 / 排序 / 图标文字 / 别名 / 持久记录与查找 | `src/repoGroups.ts`、`repositoryRecords.ts` / `repositorySession.ts`、`src/components/{RepositoryGroupNav,GroupAvatar,RepoGroupsDialog,RepositoryRecordList,RepositorySearchDialog,TitleBar,RepositoryTabs}.tsx`、`src/App.tsx`、`repositoryNavigation.css` / `repositoryManager.css` | 后端 git 模块 | `arch/ui.md §1–§3、§5` |
-| 改启动恢复 / 页签持久化 | `src/App.tsx`、`src/openRepos.ts`、`tests/open-repos.test.mjs` | 后端 git 模块、其它 UI 组件 | `arch/ui.md §2–§3、§5` |
-| 改命令面板 / 统一快捷键 | `src/commands.ts`、`src/components/CommandPalette.tsx`、`src/App.tsx`、`src/RepoWorkspace.tsx` | 后端 git 模块 | `arch/ui.md §2–§3` |
-| 改弹窗焦点 / 关闭保护 / 通知 | `src/ui/Dialog.tsx`、`src/ui/layerStack.ts`、`src/ui/useDirtyClose.ts`、`src/ui/Confirm.tsx`、`src/components/NotificationCenter.tsx`、`src/App.tsx`、`src/dialogState.ts` | Git 读写模块 | `arch/ui.md §2–§3、§5` |
-| 改原生目录选择 / 拖放打开 | `src/nativeDialog.ts`、`src/App.tsx`、`src/components/{Clone,CreateRepository,ApplyPatch}Dialog.tsx`、`src-tauri/src/lib.rs`、`Cargo.toml`、`capabilities/default.json` | Git 读写模块 | `arch/ui.md §2–§3` |
+| 改提交日志 / 分支图数据 | `src-tauri/src/git/log.rs`、`src/components/RevisionGrid.tsx` | 其它后端模块、diff / changes 组件 | §2.1、§3；`ui-workspace §1–§2` |
+| 改 diff 获取或渲染 | `src-tauri/src/git/diff.rs`、`src/components/DiffView.tsx`、`src/viewState.ts` 与调用方 loader | log.rs、写路径 | §2、§3、§4；`ui-workspace §1–§3` |
+| 改暂存 / 提交 / 分支 / 远程 / Worktree / Merge / Bisect 或写调度 | `src-tauri/src/git/cli.rs`、`commands.rs`、`operations.rs`、`repo.rs`；`src/api.ts`、`repoOperations.ts` / `useRepoBusy.ts` 与对应写操作组件 | 读路径模块 | §2、§3、§4；`ui-workspace §1–§2`；`ui-dialogs §1` |
+| 改提交搜索 / 代码搜索 / 导出补丁与归档 / 命令日志 | `src-tauri/src/git/history.rs`、`cli.rs`、`commands.rs`；`src/components/{Search,CommandLog}Dialog.tsx`、`RevisionGrid.tsx` | 分支图渲染与写锁 | §2、§4；`ui-workspace §1–§2` |
+| 改后台读调度 / 失效与刷新 | `operations.rs`、`commands.rs`、`log.rs`；`src/api.ts`、`repoOperations.ts`、`RepoWorkspace.tsx`、`ChangesPanel.tsx` | 无关写组件 | §2、§3、§7；`ui-workspace §3` |
+| 改 Reset / 恢复 | `src-tauri/src/git/reset.rs`、`commands.rs`；`src/components/ResetDialog.tsx`、`RecoveryDialog.tsx`、`RepoWorkspace.tsx` | 分支图与高亮 Worker | §2、§3、§4；`ui-workspace §1–§2`；`ui-dialogs §1` |
+| 改页面布局 / 状态流转 | `src/App.tsx`、`src/RepoWorkspace.tsx`、`src/ui/`、`src/styles.css` | 后端 git 模块 | `ui-workspace §1–§3`；`ui-shell §1` |
+| 改顶部栏 / 窗口控制 / 页签与 Pin 拖拽 | `src/components/TitleBar.tsx`、`RepositoryTabs.tsx`、`src/App.tsx`、`src/tabOrder.ts`、`src-tauri/src/window_host.rs`、`capabilities/default.json` | 后端 git 模块 | `ui-shell §1–§3、§5`；§7 窗口生命周期 |
+| 改仓库页签分组 / 固定 / 排序 / 别名 / 持久记录与查找 | `src/repoGroups.ts`、`repositoryRecords.ts` / `repositorySession.ts`、`src/components/{RepositoryGroupNav,GroupAvatar,RepoGroupsDialog,RepositoryRecordList,RepositorySearchDialog,TitleBar,RepositoryTabs}.tsx`、`src/App.tsx`、`repositoryNavigation.css` / `repositoryManager.css` | 后端 git 模块 | `ui-shell §1–§3、§5` |
+| 改启动恢复 / 页签持久化 | `src/App.tsx`、`src/openRepos.ts`、`tests/open-repos.test.mjs` | 后端 git 模块、其它 UI 组件 | `ui-shell §2–§3、§5` |
+| 改命令面板 / 统一快捷键 | `src/commands.ts`、`src/components/CommandPalette.tsx`、`src/App.tsx`、`src/RepoWorkspace.tsx` | 后端 git 模块 | `ui-dialogs §1–§3` |
+| 改弹窗焦点 / 关闭保护 / 通知 | `src/ui/Dialog.tsx`、`src/ui/layerStack.ts`、`src/ui/useDirtyClose.ts`、`src/ui/Confirm.tsx`、`src/components/NotificationCenter.tsx`、`src/App.tsx`、`src/dialogState.ts` | Git 读写模块 | `ui-dialogs §1–§3`；`ui-shell §3` |
+| 改原生目录选择 / 拖放打开 | `src/nativeDialog.ts`、`src/App.tsx`、`src/components/{Clone,CreateRepository,ApplyPatch}Dialog.tsx`、`src-tauri/src/lib.rs`、`Cargo.toml`、`capabilities/default.json` | Git 读写模块 | `ui-dialogs §1–§2`；`ui-shell §1` |
 | 改资源管理器菜单 / 外部启动 / 克隆进度 / Rename | [`arch/explorer.md`](./arch/explorer.md)，按分册定位源码 | 无关 Git 读路径与 Diff 组件 | 分册 §1–§5 |
-| 改对比 / 冲突 / 交互式 Rebase | `src/components/CompareView.tsx`、`ConflictCenter.tsx`、`RebasePlanner.tsx`；后端 `diff.rs`、`status.rs`、`rebase.rs` | 提交图与高亮 Worker | §2、§3、§4；`arch/ui.md §1–§3` |
+| 改对比 / 冲突 / 交互式 Rebase | `src/components/CompareView.tsx`、`ConflictCenter.tsx`、`RebasePlanner.tsx`；后端 `diff.rs`、`status.rs`、`rebase.rs` | 提交图与高亮 Worker | §2、§3、§4；`ui-workspace §1–§3` |
 | 改文档 / 流程 | 对应的 `docs/` 篇章或根目录文档 | 源码 | AGENTS §5 |
 
 > 跨多个区域的任务才需要跨列读；仍然遵循「**先定位函数名，再只读那几个函数**」，不要整文件通读。
@@ -72,7 +72,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 | `src-tauri/src/window_host.rs` | 单实例请求队列、主窗口聚焦、轻量动作窗口创建与最后窗口退出 | 改外部启动 / 多窗口路由 |
 | `src-tauri/src/git/history.rs` | git2 逐行 blame、CLI `--follow` 单文件历史、目录 / 文件范围 changelog、提交搜索与 `git grep` | 改文件历史 / 搜索 / 行数上限 |
 | `src/types.ts` / `src/api.ts` | 前后端共享 TS 类型、在途读取去重 / `writeInvoke`、log-batch 订阅 | 改 IPC 字段 / 调用方式 |
-| 前端页面、组件、交互原语、持久化与样式 | 见 [`arch/ui.md §1`](./arch/ui.md) | 改布局 / 交互 / 前端状态 |
+| 前端页面、组件、交互原语、持久化与样式 | 见 [`arch/ui.md`](./arch/ui.md)（路由） | 改布局 / 交互 / 前端状态 |
 | `src-tauri/tests/smoke.rs` / `workflows.rs` / `safety.rs` / `repository_capabilities.rs` | 临时真实仓库测试：基础流程、文件 / 冲突、Rebase、参数 / Push 安全、写互斥与新增仓库能力 | 改命令行为时补对应用例 |
 | `tests/*.test.mjs` | Node 测试：正式 TS busy / 读取去重 / 草稿 / Diff、分组、打开页签、拖拽排序规则 | 改调度 / 视图 / 存储规则 |
 | `src-tauri/examples/bench.rs` | release 日志、全量 diff / 按需首文件选中链路性能测量 | 改测量指标或核心读路径 |
@@ -115,7 +115,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 
 ### 2.2 前端（`src/`）
 
-前端页面、组件、交互原语、持久化、键盘与命令的入口表已拆到 [`arch/ui.md §2`](./arch/ui.md)。先按 §0.5 路由定位，再只读分册对应行，不在总览重复维护。
+前端页面、组件、交互原语、持久化、键盘与命令的入口表已拆到 [`arch/ui.md`](./arch/ui.md) 路由页。先按 §0.5 路由定位，只读命中分册。
 
 ---
 
@@ -130,7 +130,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 
 ### 前端刷新与预览链路
 
-启动恢复与按需挂载、按需 Diff 预览、写操作后的分级刷新与轮询、diff 预览的 stale-while-revalidate 见 [`arch/ui.md §3`](./arch/ui.md)。后端读取令牌、写互斥与任务视图的 Git 语义见下节。
+启动恢复与按需挂载、按需 Diff 预览、写操作后的分级刷新与轮询、diff 预览的 stale-while-revalidate 见 [`arch/ui-workspace.md §3`](./arch/ui-workspace.md)。后端读取令牌、写互斥与任务视图的 Git 语义见下节。
 
 ### 写操作调度与安全
 
@@ -194,7 +194,7 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 
 ## 5. 样式 / 资源分段地图
 
-样式锚点见 [`arch/ui.md §4`](./arch/ui.md)；图标资源跨平台要求见 §7。
+样式锚点见 [`arch/ui.md`](./arch/ui.md) 的「样式分段」；图标资源跨平台要求见 §7。
 
 ---
 
@@ -233,8 +233,8 @@ React (src/) ──invoke──> Rust 命令 (src-tauri/src/git/*) ──读─�
 - **文件历史路径属于对应提交**：--follow 的 rename 状态用 NUL 分隔解析，不用作者 / subject 可包含的文本哨兵；返回 filePath，查看历史 diff 使用该时期路径并从清单取得 oldPath。
 - **图标资源必须跨平台齐全**：即使 bundle 未显式引用，`generate_context!` 在非 Windows 构建也需要 PNG；`icons/` 同时保留 ICO / PNG / ICNS，并在 bundle 配置中引用。应用图标只改 `docs/icons/git-extensions.svg`，要重新生成并同步 `src-tauri/icons/`，不要只替换某一个尺寸。
 - **窗口启动请求必须可重复读取**：`get_window_bootstrap` 不能 `mem::take` 初始请求，否则 WebView 刷新（F5 / Ctrl+R / 前端重载）后拿不到动作，窗口停在「无法启动窗口」；`WindowSession` 分离 `initial` 与 `pending`，前端同时在捕获阶段拦截 F5 / Ctrl+R。轻量窗口隐藏创建，若前端页面加载失败会永远不显示，`show_after_timeout` 3 秒兜底 show，至少让用户看到错误页并可关闭。
-- **前端交互取舍见分册**：顶部栏 / 页签拖拽 / 分组 / 启动恢复 / 草稿隔离 / 设置白名单 / 高亮限量 / 读取去重等 UI 规则见 [`arch/ui.md §5`](./arch/ui.md)；窗口生命周期与 capabilities 仍以本节和后端代码为准。
-- **窄窗布局用容器查询，侧栏宽度不设上限**：提交图列与工具栏溢出规则见 [`arch/ui.md §5`](./arch/ui.md)；不要恢复固定 `min-width:500`。左侧导航、右侧检查器与变更文件面板按用户要求自由拖拽，已移除 160–360 / 180–720 / 300–720 夹取与 CSS 上限，不要恢复；右锚定检查器拖拽用 `-delta`。主窗口历史视图现为「上：提交图 + 详情 / 变更文件，下：按需 Diff」，不再有检查器停靠 / 最大化切换，见 [`arch/ui.md §3`](./arch/ui.md)。
+- **前端交互取舍见分册**：顶部栏 / 页签 / 分组 / 启动恢复 / 草稿隔离 / 设置白名单 / 高亮限量 / 读取去重等规则见 `ui-*` §5；窗口生命周期与 capabilities 仍以本节和后端代码为准。
+- **窄窗布局用容器查询，侧栏宽度不设上限**：提交图列与工具栏溢出规则见 `ui-workspace §5`；不要恢复固定 `min-width:500`。左侧导航、右侧检查器与变更文件面板按用户要求自由拖拽，已移除 160–360 / 180–720 / 300–720 夹取与 CSS 上限，不要恢复。历史布局见 `ui-workspace §3`。
 - **Explorer 文件/目录动作不同**：Commit/Pull/Push/Stash/View changes/Checkout 只在目录上下文，Difftool/Apply patch 只在文件上下文，View history 在文件、目录与目录背景中都显示（文件 `--follow`、目录按 pathspec），Rename 只在具体文件 / 目录（不进目录背景）；注册表菜单无法判断目录是否为有效 Git 仓库。**Windows 的 16 项上限作用于整棵级联菜单（Git Extensions 子菜单 + Others 及其子项合计），不是每层 16 项**；超出部分被系统静默丢弃。`validate_levels` 按目录 / 文件上下文分别统计并阻止保存，不自动迁移命令；一级项用 `GitExt.Top.*` 键紧跟 Git Extensions；二级分组为 Repository & sync / Branches & Repos / Files & history / Settings，Create new repository 与 Open repository 归在 Branches & Repos。成功同步后会清理 `GitExt.*` 命名空间里带所有权标记但不在 known 计划中的遗留键（旧开发版分组顺序会留下 `30.03.reset-file-changes` 之类重复项，既重复显示又占用 16 项容量）。Add files 的 Filter 是唯一按 Git pathspec 展开的写入口；`git stash push -u` 不能带 `--literal-pathspecs`，否则未跟踪文件不会被 stash。
 - **Explorer 目录作用域提交**：Commit 从资源管理器目录打开时只展示并提交该目录已暂存内容；`cli.rs::commit_ex_scoped` 用临时 index（HEAD + 目录 `--cached` 补丁）提交，真实 index 中其它目录的暂存改动不受影响，amend 也只替换目录内部分。临时 index 绕过 Git 对 merge / 冲突的拒绝，所以后端在非 Clean 状态显式报错。View changes / View history 把目录作为 pathspec。
 - **Repository 菜单的配置文件 / 维护动作只接受白名单**：`edit_repo_file` 只能打开 `.gitignore`、`.git/info/exclude`、`.gitattributes`、`.mailmap`、`.git/config`，不接受前端任意路径；`git_maintenance` 只接受 `gc` 与 `delete-index-lock`。删除 `index.lock` 前必须由 UI 二次确认，但仍无法排除外部 Git 进程竞态；不要把这里扩成通用命令执行入口。

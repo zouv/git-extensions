@@ -268,6 +268,12 @@ export function visibleRepos<T extends { path: string }>(config: RepoGroupConfig
   return repos.filter((repo) => active.has(groupForRepo(config, repo.path)));
 }
 
+/** 当前视图下有可见仓库的组 id，按 groups 顺序返回（Tab 模式的分组段顺序）。 */
+export function visibleGroupIds<T extends { path: string }>(config: RepoGroupConfig, repos: T[]): string[] {
+  const present = new Set(visibleRepos(config, repos).map((repo) => groupForRepo(config, repo.path)));
+  return config.groups.filter((group) => present.has(group.id)).map((group) => group.id);
+}
+
 export function reposInGroup<T extends { path: string }>(config: RepoGroupConfig, repos: T[], groupId: string): T[] {
   return repos.filter((repo) => groupForRepo(config, repo.path) === groupId);
 }
@@ -435,9 +441,17 @@ export function togglePin(config: RepoGroupConfig, groupId: string): RepoGroupCo
 
 /** Alt+1…9 按固定顺序取非默认组（未分组固定时仍走 Alt+0），越界返回 null。 */
 export function groupForPinShortcut(config: RepoGroupConfig, digit: number): string | null {
+  return groupForShortcut(config, digit, "pin");
+}
+
+/** Tab 模式按分组段顺序取快捷组，Pin 模式按固定组顺序；Alt+0 始终是未分组。 */
+export function groupForShortcut(config: RepoGroupConfig, digit: number, mode: "tab" | "pin"): string | null {
   if (!Number.isInteger(digit) || digit < 0 || digit > 9) return null;
   if (digit === 0) return groupById(config, DEFAULT_GROUP_ID) ? DEFAULT_GROUP_ID : null;
-  return pinnedGroups(config).filter((group) => group.id !== DEFAULT_GROUP_ID)[digit - 1]?.id ?? null;
+  const ordered = mode === "tab"
+    ? config.groups.filter((group) => group.id !== DEFAULT_GROUP_ID)
+    : pinnedGroups(config).filter((group) => group.id !== DEFAULT_GROUP_ID);
+  return ordered[digit - 1]?.id ?? null;
 }
 
 /** 顶部栏拖动排序：只在固定项占用的槽位内重排，组顺序随之更新。 */
@@ -458,6 +472,18 @@ export function reorderGroups(config: RepoGroupConfig, orderedGroupIds: string[]
     || orderedGroupIds.some((id) => !current.includes(id))) return config;
   const byId = new Map(config.groups.map((group) => [group.id, group]));
   const groups = orderedGroupIds.map((id) => byId.get(id)!);
+  const pinned = new Set(config.pinnedGroupIds);
+  return { ...config, groups, pinnedGroupIds: groups.filter((group) => pinned.has(group.id)).map((group) => group.id) };
+}
+
+/** Tab 模式拖动可见组：只重排这些组的槽位，被视图隐藏的组保持原位。 */
+export function reorderGroupSlots(config: RepoGroupConfig, orderedVisibleIds: string[]): RepoGroupConfig {
+  const byId = new Map(config.groups.map((group) => [group.id, group]));
+  if (new Set(orderedVisibleIds).size !== orderedVisibleIds.length
+    || orderedVisibleIds.some((id) => !byId.has(id))) return config;
+  const visible = new Set(orderedVisibleIds);
+  const queue = [...orderedVisibleIds];
+  const groups = config.groups.map((group) => visible.has(group.id) ? byId.get(queue.shift()!)! : group);
   const pinned = new Set(config.pinnedGroupIds);
   return { ...config, groups, pinnedGroupIds: groups.filter((group) => pinned.has(group.id)).map((group) => group.id) };
 }

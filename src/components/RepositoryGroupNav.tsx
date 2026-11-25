@@ -5,6 +5,7 @@ import {
   selectAllOpen, selectGroup, toggleActiveGroup, togglePin,
 } from "../repoGroups";
 import type { RepoGroup, RepoGroupConfig } from "../repoGroups";
+import type { GroupNavMode } from "../settings";
 import { insertionIndex, movePath } from "../tabOrder";
 import ContextMenu from "../ui/ContextMenu";
 import type { MenuItem } from "../ui/ContextMenu";
@@ -13,6 +14,8 @@ import GroupAvatar from "./GroupAvatar";
 
 interface Props {
   config: RepoGroupConfig;
+  /** tab：分组图标显示在页签内；pin：显示独立的 Pin 图标栏。 */
+  mode: GroupNavMode;
   onChange: (next: RepoGroupConfig) => void;
   onManage: (groupId?: string) => void;
 }
@@ -32,7 +35,7 @@ interface Insertion { index: number; left: number }
 const DRAG_THRESHOLD = 6;
 
 /** 组入口与 Pin 图标的多选切换；Pin 顺序由 groups 顺序决定，拖动会同步组顺序。 */
-export default function RepositoryGroupNav({ config, onChange, onManage }: Props) {
+export default function RepositoryGroupNav({ config, mode, onChange, onManage }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [insertion, setInsertion] = useState<Insertion | null>(null);
@@ -45,6 +48,9 @@ export default function RepositoryGroupNav({ config, onChange, onManage }: Props
   latest.current = { config, onChange, onManage };
   const pinned = pinnedGroups(config);
   const numberedPins = pinned.filter((group) => group.id !== DEFAULT_GROUP_ID).map((group) => group.id);
+  const shortcutIds = mode === "tab"
+    ? config.groups.filter((group) => group.id !== DEFAULT_GROUP_ID).map((group) => group.id)
+    : numberedPins;
   const scopeLabel = (() => {
     const view = config.view;
     if (view.kind === "all-open") return "全部打开";
@@ -64,9 +70,9 @@ export default function RepositoryGroupNav({ config, onChange, onManage }: Props
     const state = latest.current;
     state.onChange(toggleActiveGroup(state.config, id));
   };
-  const pinShortcut = (group: RepoGroup): string | undefined => {
+  const groupShortcut = (group: RepoGroup): string | undefined => {
     if (group.id === DEFAULT_GROUP_ID) return "Alt+0";
-    const at = numberedPins.indexOf(group.id);
+    const at = shortcutIds.indexOf(group.id);
     return at >= 0 && at < 9 ? `Alt+${at + 1}` : undefined;
   };
   const reorder = (fromId: string, targetId: string) => {
@@ -211,14 +217,16 @@ export default function RepositoryGroupNav({ config, onChange, onManage }: Props
     return {
       id: `view-${group.id}`, label: group.name, color: group.color,
       checked: isGroupSelected(state.config, group.id), keepOpen: true,
-      shortcut: pinShortcut(group),
+      shortcut: groupShortcut(group),
       onSelect: () => toggleGroup(group.id),
-      trailingAction: {
-        icon: "pin", label: state.config.pinnedGroupIds.includes(group.id) ? `取消 Pin 分组 ${group.name}` : `Pin 分组 ${group.name} 到顶部栏`,
-        checked: state.config.pinnedGroupIds.includes(group.id),
-        keepOpen: true,
-        onSelect: () => { const live = latest.current; live.onChange(togglePin(live.config, group.id)); },
-      },
+      ...(mode === "pin" ? {
+        trailingAction: {
+          icon: "pin" as const, label: state.config.pinnedGroupIds.includes(group.id) ? `取消 Pin 分组 ${group.name}` : `Pin 分组 ${group.name} 到顶部栏`,
+          checked: state.config.pinnedGroupIds.includes(group.id),
+          keepOpen: true,
+          onSelect: () => { const live = latest.current; live.onChange(togglePin(live.config, group.id)); },
+        },
+      } : {}),
     };
   });
   const menuItems: MenuItem[] = [
@@ -244,11 +252,11 @@ export default function RepositoryGroupNav({ config, onChange, onManage }: Props
         onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); openAt(event.currentTarget); } }}>
         <Icon name="group" size={17} />
       </button>
-      {pinned.length > 0 && <div className="title-pinned" ref={stripRef} role="group" aria-label="已 Pin 的仓库页签分组（拖动或 Alt+方向键排序）">
+      {mode === "pin" && pinned.length > 0 && <div className="title-pinned" ref={stripRef} role="group" aria-label="已 Pin 的仓库页签分组（拖动或 Alt+方向键排序）">
         {pinned.map((group) => (
           <button key={group.id} type="button" data-group-id={group.id}
             className={`title-pin${isGroupSelected(config, group.id) ? " active" : ""}${dragId === group.id ? " dragging" : ""}`}
-            title={`${group.name}${pinShortcut(group) ? `（${pinShortcut(group)}）` : ""}（左键切换显示，右键分组菜单，可拖拽排序）`}
+            title={`${group.name}${groupShortcut(group) ? `（${groupShortcut(group)}）` : ""}（左键切换显示，右键分组菜单，可拖拽排序）`}
             aria-label={`分组 ${group.name}`} aria-pressed={isGroupSelected(config, group.id)}
             onPointerDown={(event) => beginDrag(event, group)}
             onPointerMove={moveDrag}

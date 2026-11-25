@@ -19,3 +19,13 @@ export function movePath(paths: readonly string[], fromPath: string, index: numb
   rest.splice(at, 0, fromPath);
   return rest;
 }
+
+/** 用重排后的子集替换原数组中满足 belongs 的槽位，其余元素位置不变。 */
+export function replaceFiltered<T>(items: readonly T[], replacement: readonly T[], belongs: (item: T) => boolean): T[] {
+  const indices: number[] = [];
+  items.forEach((item, index) => { if (belongs(item)) indices.push(index); });
+  if (indices.length !== replacement.length) return [...items];
+  const next = [...items];
+  indices.forEach((index, i) => { next[index] = replacement[i]; });
+  return next;
+}

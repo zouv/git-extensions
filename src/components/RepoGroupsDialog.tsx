@@ -3,6 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import type { RepositoryRecord } from "../repositoryRecords";
 import type { RepoInfo } from "../types";
 import type { RepoGroupConfig } from "../repoGroups";
+import type { GroupNavMode } from "../settings";
 import {
   DEFAULT_GROUP_ID, MAX_GROUP_BADGE, createGroup, deleteGroup, displayRepoName, groupById,
   pinnedGroups, renameGroup, reorderGroups, reposInGroup, setGroupBadge, setGroupColor, setRepoAlias, setRepoGroup, togglePin,
@@ -25,6 +26,8 @@ export interface RepoGroupsDialogProps {
   meta: Record<string, SessionMeta>;
   errors: Record<string, string>;
   busy: boolean;
+  /** tab 模式不显示 Pin / 固定相关状态与设置。 */
+  groupNavMode: GroupNavMode;
   onChange: (config: RepoGroupConfig) => void;
   onClose: () => void;
   initialGroupId?: string;
@@ -350,7 +353,7 @@ export default function RepoGroupsDialog(props: RepoGroupsDialogProps) {
   const menuItems: MenuItem[] = menu?.kind === "group" ? (() => {
     const target = groupById(config, menu.id);
     const isDefault = menu.id === DEFAULT_GROUP_ID;
-    return [
+    const items: MenuItem[] = [
       { id: "create", label: "创建分组…", disabled: locked, onSelect: () => void beginEditor({ kind: "create", initial: "", value: "" }) },
       { id: "rename", label: "重命名分组…", disabled: locked || !target || isDefault, onSelect: () => target && void beginEditor({ kind: "rename", id: target.id, initial: target.name, value: target.name }) },
       { id: "badge", label: "修改图标文字…", disabled: locked || !target, onSelect: () => target && void beginEditor({ kind: "badge", id: target.id, initial: target.badge ?? "", value: target.badge ?? "" }) },
@@ -361,6 +364,7 @@ export default function RepoGroupsDialog(props: RepoGroupsDialogProps) {
       { id: "separator", separator: true },
       { id: "delete", label: "删除分组…", danger: true, disabled: locked || isDefault || !target, onSelect: () => removeGroup(menu.id) },
     ];
+    return props.groupNavMode === "pin" ? items : items.filter((item) => item.id !== "pin");
   })() : menu?.kind === "record" ? (() => {
     const target = records.find((record) => record.path === menu.path);
     const path = menu.path;
@@ -412,7 +416,7 @@ export default function RepoGroupsDialog(props: RepoGroupsDialogProps) {
                   }
                 }} onContextMenu={(event) => { event.preventDefault(); event.currentTarget.focus(); chooseGroup(id); setMenu({ kind: "group", id, x: event.clientX, y: event.clientY }); }}>
                 {item ? <GroupAvatar id={id} name={name} color={item.color} badge={item.badge} size={23} /> : <span className="repository-manager-all-icon" aria-hidden="true">≡</span>}
-                <span className="repository-manager-group-name">{name}</span>{pins.has(id) && <span className="muted" aria-label="已固定">固定</span>}<span className="count-badge">{count}</span>
+                <span className="repository-manager-group-name">{name}</span>{props.groupNavMode === "pin" && pins.has(id) && <span className="muted" aria-label="已固定">固定</span>}<span className="count-badge">{count}</span>
               </button>;
             })}
             {insertion && <span className="repository-manager-group-insertion" style={{ top: insertion.top }} aria-hidden="true" />}
@@ -463,7 +467,7 @@ export default function RepoGroupsDialog(props: RepoGroupsDialogProps) {
               : editor.kind === "badge" ? `图标文字最多 ${MAX_GROUP_BADGE} 个字符；留空后恢复按分组名自动生成。`
               : "输入在点击保存后立即生效。"}</span>
           </form>}
-          <p className="repository-manager-save-note">分类移动、颜色、固定、拖动排序与自定义图标立即保存；分组名称和别名输入需点击保存。关闭页签后仓库仍保留在列表中；从列表移除不会删除磁盘文件。</p>
+          <p className="repository-manager-save-note">分类移动、颜色、{props.groupNavMode === "pin" ? "固定、" : ""}拖动排序与自定义图标立即保存；分组名称和别名输入需点击保存。关闭页签后仓库仍保留在列表中；从列表移除不会删除磁盘文件。</p>
           {message && <div className="repository-manager-inline-error" role="alert">{message}</div>}
         </section>
       </div>

@@ -1113,13 +1113,18 @@ export default function RepoWorkspace(props: Props) {
                 </section>
               </>}
             </div>
-            {selectedCommitFile && <>
-              <SplitHandle direction="horizontal" label="调整 Diff 面板高度" onResize={(delta) => setLayout((prev) => ({ ...prev, historyDiffHeight: Math.max(0, prev.historyDiffHeight - delta) }))} onReset={() => setLayout((prev) => ({ ...prev, historyDiffHeight: 320 }))} />
-              <section className="main-history-diff" style={{ height: layout.historyDiffHeight }}>
-                <button type="button" className="history-diff-close" title="关闭差异 (Esc)" aria-label="关闭差异" onClick={() => setSelectedCommitFile(null)}><Icon name="close" size={14} /></button>
-                <DiffView files={selectedCommitFiles} loadFile={loadCommitFile} loading={detailLoading} highlightEnabled={settings.highlightEnabled} onFileAction={onCommitFileAction} prefKey={repo.path} />
-              </section>
-            </>}
+            <SplitHandle direction="horizontal" label="调整 Diff 面板高度" onResize={(delta) => setLayout((prev) => ({ ...prev, historyDiffHeight: Math.max(0, prev.historyDiffHeight - delta) }))} onReset={() => setLayout((prev) => ({ ...prev, historyDiffHeight: 320 }))} />
+            <section className="main-history-diff" style={{ height: layout.historyDiffHeight }} aria-label="差异">
+              {selectedCommitFile
+                ? <DiffView files={selectedCommitFiles} loadFile={loadCommitFile} loading={detailLoading} highlightEnabled={settings.highlightEnabled} onFileAction={onCommitFileAction} prefKey={repo.path} />
+                : detailLoading && !commit
+                  ? <div className="empty-state" role="status"><span className="spinner" /><span>正在加载提交详情…</span></div>
+                  : <div className="empty-state" role="status">
+                    <Icon name="changes" size={28} />
+                    <strong>{commit ? (commitDiff.length > 0 ? "未选择变更文件" : "该提交没有文件变更") : "未选择提交"}</strong>
+                    <span>{commit ? (commitDiff.length > 0 ? "在变更文件列表中选择一个文件，即可在此查看差异。" : "选择一个包含文件变更的提交查看差异。") : "在提交记录中选择一个提交，再选择变更文件查看差异。"}</span>
+                  </div>}
+            </section>
           </div>
           <main className="workspace-main" style={{ display: historyView ? "none" : "flex" }}>
             {task?.type === "compare" && <CompareView repoPath={repo.path} initialBase={task.base} initialTarget={task.target} refs={refs} onClose={() => setTask(null)} onFileAction={onFileAction} onError={compareError} />}

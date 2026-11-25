@@ -223,6 +223,20 @@ test("右侧检查器宽度不设上限，仅挡住非法值", () => {
   });
 });
 
+test("分组显示方式默认页签内图标，只接受 tab / pin", () => {
+  assert.equal(DEFAULT_SETTINGS.groupNavMode, "tab");
+  withStorage((storage) => {
+    storage.setItem(SETTINGS_KEY, JSON.stringify({ groupNavMode: "pin" }));
+    assert.equal(loadSettings().groupNavMode, "pin");
+    storage.setItem(SETTINGS_KEY, JSON.stringify({ groupNavMode: "tab" }));
+    assert.equal(loadSettings().groupNavMode, "tab");
+    storage.setItem(SETTINGS_KEY, JSON.stringify({ groupNavMode: "bogus" }));
+    assert.equal(loadSettings().groupNavMode, "tab");
+    storage.setItem(SETTINGS_KEY, "{}");
+    assert.equal(loadSettings().groupNavMode, "tab");
+  });
+});
+
 test("检查器详情高度与底部 Diff 高度持久化", () => {
   withStorage((storage) => {
     storage.setItem("git-extensions.layout.v2:/panes", JSON.stringify({ inspectorInfoHeight: 340, historyDiffHeight: 280 }));
