@@ -66,6 +66,9 @@ export default function FileHistoryDialog({ repoPath, file, highlightEnabled, on
     };
   }, [repoPath, file, selected, entries]);
 
+  // 文件历史里的版本路径属于该提交；「显示完整内容」仍按该路径重新读取。
+  const versionPath = entries.find((entry) => entry.oid === selected)?.filePath ?? file;
+
   return (
     <Dialog title={`文件历史 · ${file}`} onClose={onClose} wide footer={<button onClick={onClose}>关闭</button>}>
       {loading && <div className="panel-hint">加载中…</div>}
@@ -83,7 +86,7 @@ export default function FileHistoryDialog({ repoPath, file, highlightEnabled, on
             ))}
             {entries.length === 0 && <div className="panel-hint">（无历史记录）</div>}
           </div>
-          <div className="history-diff">{diffError ? <div className="inline-error" role="alert">{diffError}</div> : diffLoading ? <div className="panel-hint" role="status">正在读取该版本的文件差异…</div> : diff ? <DiffView files={[diff]} highlightEnabled={highlightEnabled} showFileHeader={false} prefKey={repoPath} /> : <div className="panel-hint">选择提交查看该文件的 diff</div>}</div>
+          <div className="history-diff">{diffError ? <div className="inline-error" role="alert">{diffError}</div> : diffLoading ? <div className="panel-hint" role="status">正在读取该版本的文件差异…</div> : diff ? <DiffView files={[diff]} highlightEnabled={highlightEnabled} showFileHeader={false} loadFile={(file, fullContext) => selected ? api.getCommitFileDiff(repoPath, selected, versionPath, file.oldPath, fullContext).then((files) => files.find((item) => item.path === versionPath || item.oldPath === versionPath) ?? null) : Promise.resolve(null)} /> : <div className="panel-hint">选择提交查看该文件的 diff</div>}</div>
         </>
       )}
     </Dialog>

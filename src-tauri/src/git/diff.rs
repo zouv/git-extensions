@@ -5,6 +5,8 @@ use serde::Serialize;
 const MAX_PATCH_BYTES: usize = 512 * 1024;
 const MAX_TOTAL_PATCH_BYTES: usize = 4 * 1024 * 1024;
 const MAX_DIFF_FILE_BYTES: u64 = 8 * 1024 * 1024;
+/// 「完整上下文」的上下文行数：远大于单 patch 上限能容纳的行数，避免无意义的大数运算。
+const FULL_CONTEXT_LINES: u32 = 1_000_000;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -111,10 +113,14 @@ fn collect(repo: &git2::Repository, diff: &Diff<'_>, patches: bool) -> GitResult
     }
     Ok(files)
 }
-fn options(file: Option<&str>) -> GitResult<DiffOptions> {
+fn options(file: Option<&str>, full_context: bool) -> GitResult<DiffOptions> {
     let mut opts = DiffOptions::new();
     // 自己对大文本做截断，不把大文本伪装成 binary。
     opts.max_size(i64::MAX);
+    if full_context {
+        // 用超大上下文让 patch 覆盖整个文件；最终仍受 MAX_PATCH_BYTES 截断保护。
+        opts.context_lines(FULL_CONTEXT_LINES);
+    }
     if let Some(file) = file {
         validate_relative_path(file)?;
         opts.disable_pathspec_match(true).pathspec(file);
@@ -135,11 +141,12 @@ fn compare(
     file: Option<&str>,
     old_file: Option<&str>,
     patches: bool,
+    full_context: bool,
 ) -> GitResult<CompareDiff> {
     let repo = open(&path)?;
     let base_commit = repo.revparse_single(&base)?.peel_to_commit()?;
     let target_commit = repo.revparse_single(&target)?.peel_to_commit()?;
-    let mut opts = options(file)?;
+    let mut opts = options(file, full_context)?;
     if let Some(old) = old_file {
         validate_relative_path(old)?;
         opts.pathspec(old);
@@ -160,10 +167,10 @@ fn compare(
     })
 }
 pub fn get_compare_diff(path: String, base: String, target: String) -> GitResult<CompareDiff> {
-    compare(path, base, target, None, None, true)
+    compare(path, base, target, None, None, true, false)
 }
 pub fn get_compare_files(path: String, base: String, target: String) -> GitResult<CompareDiff> {
-    compare(path, base, target, None, None, false)
+    compare(path, base, target, None, None, false, false)
 }
 pub fn get_compare_file_diff(
     path: String,
@@ -171,8 +178,18 @@ pub fn get_compare_file_diff(
     target: String,
     file: String,
     old_file: Option<String>,
+    full_context: bool,
 ) -> GitResult<Vec<FileDiff>> {
-    Ok(compare(path, base, target, Some(&file), old_file.as_deref(), true)?.files)
+    Ok(compare(
+        path,
+        base,
+        target,
+        Some(&file),
+        old_file.as_deref(),
+        true,
+        full_context,
+    )?
+    .files)
 }
 fn commit_diff(
     path: String,
@@ -180,6 +197,7 @@ fn commit_diff(
     file: Option<&str>,
     old_file: Option<&str>,
     patches: bool,
+    full_context: bool,
 ) -> GitResult<Vec<FileDiff>> {
     let repo = open(&path)?;
     let oid =
@@ -191,7 +209,7 @@ fn commit_diff(
     } else {
         Some(commit.parent(0)?.tree()?)
     };
-    let mut opts = options(file)?;
+    let mut opts = options(file, full_context)?;
     if let Some(old) = old_file {
         validate_relative_path(old)?;
         opts.pathspec(old);
@@ -203,22 +221,23 @@ fn commit_diff(
     collect(&repo, &diff, patches)
 }
 pub fn get_commit_diff(path: String, oid: String) -> GitResult<Vec<FileDiff>> {
-    commit_diff(path, oid, None, None, true)
+    commit_diff(path, oid, None, None, true, false)
 }
 pub fn get_commit_files(path: String, oid: String) -> GitResult<Vec<FileDiff>> {
-    commit_diff(path, oid, None, None, false)
+    commit_diff(path, oid, None, None, false, false)
 }
 pub fn get_commit_file_diff(path: String, oid: String, file: String) -> GitResult<Vec<FileDiff>> {
-    commit_diff(path, oid, Some(&file), None, true)
+    commit_diff(path, oid, Some(&file), None, true, false)
 }
 fn worktree(
     path: String,
     staged: bool,
     file: Option<&str>,
     old_file: Option<&str>,
+    full_context: bool,
 ) -> GitResult<Vec<FileDiff>> {
     let repo = open(&path)?;
-    let mut opts = options(file)?;
+    let mut opts = options(file, full_context)?;
     if let Some(old) = old_file {
         validate_relative_path(old)?;
         opts.pathspec(old);
@@ -238,14 +257,14 @@ fn worktree(
     collect(&repo, &diff, true)
 }
 pub fn get_worktree_diff(path: String, staged: bool) -> GitResult<Vec<FileDiff>> {
-    worktree(path, staged, None, None)
+    worktree(path, staged, None, None, false)
 }
 pub fn get_worktree_file_diff(
     path: String,
     staged: bool,
     file: String,
 ) -> GitResult<Vec<FileDiff>> {
-    worktree(path, staged, Some(&file), None)
+    worktree(path, staged, Some(&file), None, false)
 }
 
 pub fn get_commit(path: String, oid: String) -> GitResult<CommitDetail> {
@@ -290,8 +309,9 @@ pub fn get_worktree_file_diff_with_old(
     staged: bool,
     file: String,
     old_file: Option<String>,
+    full_context: bool,
 ) -> GitResult<Vec<FileDiff>> {
-    worktree(path, staged, Some(&file), old_file.as_deref())
+    worktree(path, staged, Some(&file), old_file.as_deref(), full_context)
 }
 
 pub fn get_commit_file_diff_with_old(
@@ -299,6 +319,14 @@ pub fn get_commit_file_diff_with_old(
     oid: String,
     file: String,
     old_file: Option<String>,
+    full_context: bool,
 ) -> GitResult<Vec<FileDiff>> {
-    commit_diff(path, oid, Some(&file), old_file.as_deref(), true)
+    commit_diff(
+        path,
+        oid,
+        Some(&file),
+        old_file.as_deref(),
+        true,
+        full_context,
+    )
 }

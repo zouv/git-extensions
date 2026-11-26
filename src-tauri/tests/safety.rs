@@ -479,6 +479,33 @@ fn manifest_does_not_build_patches_and_large_text_is_not_binary() {
     assert!(files[0].patch.len() <= 512 * 1024);
 }
 #[test]
+fn full_context_patch_keeps_unchanged_lines() {
+    let t = Fixture::new(false);
+    let base: String = (1..=60).map(|i| format!("line {i}\n")).collect();
+    t.commit("context.txt", &base);
+    let changed: String = (1..=60)
+        .map(|i| format!("line {}\n", if i == 30 { 999 } else { i }))
+        .collect();
+    t.write("context.txt", &changed);
+    let normal = git::diff::get_worktree_file_diff(t.path(), false, "context.txt".into()).unwrap();
+    let full = git::diff::get_worktree_file_diff_with_old(
+        t.path(),
+        false,
+        "context.txt".into(),
+        None,
+        true,
+    )
+    .unwrap();
+    // 默认只带 3 行上下文；完整上下文包含文件首尾的未修改行。
+    assert!(!normal[0].patch.contains(" line 1\n"));
+    assert!(normal[0].patch.contains(" line 27\n"));
+    assert!(!normal[0].patch.contains(" line 40\n"));
+    assert!(full[0].patch.contains(" line 1\n"));
+    assert!(full[0].patch.contains(" line 27\n"));
+    assert!(full[0].patch.contains("+line 999\n"));
+    assert!(full[0].patch.contains(" line 60\n"));
+}
+#[test]
 fn detached_commit_is_visible_without_branch_or_tag() {
     let t = Fixture::new(false);
     let original = t.commit("base.txt", "base\n");
@@ -657,6 +684,7 @@ fn file_history_follows_renames_and_single_file_compare_keeps_both_paths() {
         renamed.clone(),
         new.into(),
         Some(old.into()),
+        false,
     )
     .unwrap();
     assert_eq!(renamed_patch.len(), 1);
@@ -665,9 +693,15 @@ fn file_history_follows_renames_and_single_file_compare_keeps_both_paths() {
     let manifest = git::diff::get_compare_files(t.path(), first.clone(), renamed.clone()).unwrap();
     assert_eq!(manifest.files.len(), 1);
     assert_eq!(manifest.files[0].old_path.as_deref(), Some(old));
-    let single =
-        git::diff::get_compare_file_diff(t.path(), first, renamed, new.into(), Some(old.into()))
-            .unwrap();
+    let single = git::diff::get_compare_file_diff(
+        t.path(),
+        first,
+        renamed,
+        new.into(),
+        Some(old.into()),
+        false,
+    )
+    .unwrap();
     assert_eq!(single.len(), 1);
     assert_eq!(single[0].status, "renamed");
     assert_eq!(single[0].old_path.as_deref(), Some(old));

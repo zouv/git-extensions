@@ -813,6 +813,8 @@ fn build_configured_plan(
                 exe,
                 icons,
                 spec.icon,
+                // 一级菜单只保留「Git Extensions」父项的图标；散落的一级命令不显示图标。
+                false,
                 None,
             )?;
         }
@@ -883,6 +885,7 @@ fn build_configured_plan(
                     exe,
                     icons,
                     spec.icon,
+                    true,
                     separator_before,
                 )?;
             }
@@ -949,6 +952,7 @@ fn build_configured_plan(
                     exe,
                     icons,
                     spec.icon,
+                    true,
                     separator_before,
                 )?;
             }
@@ -995,6 +999,7 @@ fn build_known_plan(exe: Option<&Path>) -> Result<Vec<PlannedKey>, ExplorerError
                 exe,
                 None,
                 spec.icon,
+                true,
                 None,
             )?;
         }
@@ -1017,6 +1022,7 @@ fn build_known_plan(exe: Option<&Path>) -> Result<Vec<PlannedKey>, ExplorerError
                 exe,
                 None,
                 spec.icon,
+                true,
                 None,
             )?;
         }
@@ -1031,6 +1037,7 @@ fn build_known_plan(exe: Option<&Path>) -> Result<Vec<PlannedKey>, ExplorerError
                 exe,
                 None,
                 spec.icon,
+                true,
                 None,
             )?;
         }
@@ -1047,6 +1054,7 @@ fn build_known_plan(exe: Option<&Path>) -> Result<Vec<PlannedKey>, ExplorerError
                     exe,
                     None,
                     spec.icon,
+                    true,
                     None,
                 )?;
             }
@@ -1095,6 +1103,7 @@ fn build_known_plan(exe: Option<&Path>) -> Result<Vec<PlannedKey>, ExplorerError
                     exe,
                     None,
                     spec.icon,
+                    true,
                     None,
                 )?;
             }
@@ -1114,6 +1123,7 @@ fn build_known_plan(exe: Option<&Path>) -> Result<Vec<PlannedKey>, ExplorerError
                     exe,
                     None,
                     spec.icon,
+                    true,
                     Some(0),
                 )?;
             }
@@ -1149,6 +1159,7 @@ fn build_known_plan(exe: Option<&Path>) -> Result<Vec<PlannedKey>, ExplorerError
                     exe,
                     None,
                     spec.icon,
+                    true,
                     Some(0),
                 )?;
             }
@@ -1192,6 +1203,7 @@ fn build_known_plan(exe: Option<&Path>) -> Result<Vec<PlannedKey>, ExplorerError
                     exe,
                     None,
                     spec.icon,
+                    true,
                     Some(0),
                 )?;
             }
@@ -1209,12 +1221,13 @@ fn add_menu_item(
     exe: Option<&str>,
     icons: Option<&Path>,
     icon_file: &str,
+    show_icon: bool,
     command_flags: Option<u32>,
 ) -> Result<(), ExplorerError> {
-    let item_values = vec![
-        value("MUIVerb", label),
-        value("Icon", icon_value(exe, icons, icon_file)),
-    ];
+    let mut item_values = vec![value("MUIVerb", label)];
+    if show_icon {
+        item_values.push(value("Icon", icon_value(exe, icons, icon_file)));
+    }
     let item_dwords = command_flags
         .map(|value| vec![dword("CommandFlags", value)])
         .unwrap_or_default();
@@ -1245,6 +1258,7 @@ fn add_legacy_menu_item(
     exe: Option<&str>,
     icons: Option<&Path>,
     icon_file: &str,
+    show_icon: bool,
     command_flags: Option<u32>,
 ) -> Result<(), ExplorerError> {
     let item_index = plan.len();
@@ -1257,6 +1271,7 @@ fn add_legacy_menu_item(
         exe,
         icons,
         icon_file,
+        show_icon,
         command_flags,
     )?;
     plan[item_index]
@@ -2118,6 +2133,39 @@ mod tests {
             .unwrap();
         assert!(top.path.contains(".commit"));
         assert!(top.path.contains("GitExt.Top."));
+    }
+
+    #[test]
+    fn top_level_items_have_no_icons_but_cascade_keeps_them() {
+        let mut placements = [MenuPlacement::Hidden; ExplorerAction::ALL.len()];
+        placements[ExplorerAction::Commit as usize] = MenuPlacement::Top;
+        placements[ExplorerAction::Clone as usize] = MenuPlacement::Cascade;
+        let plan = build_configured_plan(
+            Some(Path::new(r"C:\GitExt\GitExt.exe")),
+            None,
+            &placements,
+            false,
+        )
+        .unwrap();
+        let root = CONTEXTS[0].root;
+        let top = plan
+            .iter()
+            .find(|key| key.path == format!(r"{root}\{}", top_level_key(ExplorerAction::Commit)))
+            .unwrap();
+        assert!(!top.values.iter().any(|entry| entry.name == "Icon"));
+        let cascade = plan
+            .iter()
+            .find(|key| key.path == format!(r"{root}\{CASCADE_KEY}"))
+            .unwrap();
+        assert!(cascade
+            .values
+            .iter()
+            .any(|entry| entry.name == "Icon" && entry.value.contains("GitExt.exe")));
+        let child = plan
+            .iter()
+            .find(|key| key.path.ends_with(r"\shell\10.01.clone"))
+            .unwrap();
+        assert!(child.values.iter().any(|entry| entry.name == "Icon"));
     }
 
     #[test]

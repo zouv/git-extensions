@@ -38,11 +38,13 @@ test("变更文件列表宽度不再夹取上限", () => {
   assert.match(styles, /\.changes-left \{ min-width: 0;/);
 });
 
-test("Diff 偏好经共享存储保存并订阅同步，不在组件内直写 localStorage", () => {
-  assert.match(diffView, /import \{ loadDiffPrefs, saveDiffPrefs, subscribeDiffPrefs \} from "\.\.\/diffPrefs"/);
-  assert.match(diffView, /saveDiffPrefs\(prefKey, \{ mode, wrap \}\)/);
-  assert.match(diffView, /return subscribeDiffPrefs\(prefKey/);
+test("Diff 面板状态经共享存储保存并订阅同步，不在组件内直写 localStorage", () => {
+  assert.match(diffView, /import \{ getDiffPrefs, setDiffPrefs, subscribeDiffPrefs, updateDiffPrefs \} from "\.\.\/diffPrefs"/);
+  assert.match(diffView, /useSyncExternalStore\(subscribeDiffPrefs, getDiffPrefs, getDiffPrefs\)/);
+  assert.match(diffView, /setDiffPrefs\(\{ mode \}\)/);
+  assert.match(diffView, /updateDiffPrefs\(\(current\) => \(\{ collapse: !current\.collapse \}\)\)/);
   assert.doesNotMatch(diffView, /localStorage\.setItem/);
+  assert.doesNotMatch(diffView, /prefKey/);
 });
 
 test("Push 界面列出待推送提交并可查看提交内容", () => {
@@ -51,8 +53,8 @@ test("Push 界面列出待推送提交并可查看提交内容", () => {
   assert.match(pushDialog, /onClick=\{\(\) => setViewOid\(commit\.oid\)\}/);
   assert.match(pushDialog, /\{viewOid && <CommitContentDialog repoPath=\{props\.repoPath\} oid=\{viewOid\}/);
   assert.match(commitContent, /api\.getCommitFiles\(repoPath, oid\)/);
-  assert.match(commitContent, /api\.getCommitFileDiff\(repoPath, oid, file\.path, file\.oldPath\)/);
-  assert.match(commitContent, /prefKey=\{repoPath\}/);
+  assert.match(commitContent, /api\.getCommitFileDiff\(repoPath, oid, file\.path, file\.oldPath, fullContext\)/);
+  assert.match(commitContent, /<DiffView/);
 });
 
 test("get_unpushed_commits 是只读命令并完整注册", () => {

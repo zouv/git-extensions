@@ -36,9 +36,9 @@ export default function CompareView(props: Props) {
     void compare(props.initialBase, props.initialTarget);
     return () => { sequence.current++; };
   }, [compare, props.initialBase, props.initialTarget]);
-  const loadFile = useCallback(async (file: FileDiff) => {
+  const loadFile = useCallback(async (file: FileDiff, fullContext: boolean) => {
     if (!result) return null;
-    const files = await api.getCompareFileDiff(props.repoPath, result.baseOid, result.targetOid, file.path, file.oldPath);
+    const files = await api.getCompareFileDiff(props.repoPath, result.baseOid, result.targetOid, file.path, file.oldPath, fullContext);
     return files.find((f) => f.path === file.path || f.oldPath === file.path) ?? null;
   }, [props.repoPath, result]);
 
@@ -62,7 +62,7 @@ export default function CompareView(props: Props) {
         {loading ? <><span className="spinner" /><span>{result ? "正在重新比较，当前显示上一次结果…" : "正在比较…"}</span></> : result ? <><span className="mono">{result.baseOid.slice(0, 10)}</span><span>→</span><span className="mono">{result.targetOid.slice(0, 10)}</span><span>{result.files.length} 个文件</span></> : <span>比较两个提交、分支或标签的文件树</span>}
       </div>
       {error && <div className="inline-error" role="alert"><span>{error}</span></div>}
-      <div className="task-content"><DiffView files={result?.files ?? []} loadFile={loadFile} loading={loading} onFileAction={props.onFileAction} prefKey={props.repoPath} /></div>
+      <div className="task-content"><DiffView files={result?.files ?? []} loadFile={loadFile} loading={loading} onFileAction={props.onFileAction} /></div>
     </div>
   );
 }

@@ -278,6 +278,22 @@ export type WorkspaceLaunchAction = Exclude<ExplorerAction, "clone" | "create-re
 export interface WorkspaceLaunchRequest { id: number; action: WorkspaceLaunchAction }
 export interface ExplorerIntegrationInfo { supported: boolean }
 export interface CloneProgress { operationId: string; line: string }
+/** Fetch / Pull / Push 的进度行，按 operationId 与其它窗口的操作区分。 */
+export interface RemoteProgress { operationId: string; line: string }
+/** 仓库提交统计：作者聚合 + 月 / 当月每日 / 当周每日三种时间桶。 */
+export interface StatisticsAuthor { key: string; name: string; email: string; count: number }
+export interface StatBucket { key: string; label: string; count: number }
+export interface Statistics {
+  authors: StatisticsAuthor[];
+  totalCommits: number;
+  truncated: boolean;
+  months: StatBucket[];
+  monthDays: StatBucket[];
+  weekDays: StatBucket[];
+  monthsLabel: string;
+  monthLabel: string;
+  weekLabel: string;
+}
 /** branch 为空表示使用远端 HEAD；其余字段映射到 git clone 的同名选项。 */
 export interface CloneOptions {
   branch: string;

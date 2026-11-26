@@ -1885,18 +1885,54 @@ pub fn fetch(path: String, remote: Option<String>) -> GitResult<String> {
     fetch_ex(path, remote, false)
 }
 
-pub fn fetch_ex(path: String, remote: Option<String>, prune: bool) -> GitResult<String> {
-    let _write = acquire_write(&path)?;
+fn fetch_args(
+    repo: &git2::Repository,
+    remote: Option<String>,
+    prune: bool,
+    force: bool,
+    no_tags: bool,
+) -> GitResult<Vec<String>> {
     let mut args = vec!["fetch".to_string()];
     if prune {
         args.push("--prune".to_string());
     }
+    if force {
+        args.push("--force".to_string());
+    }
+    if no_tags {
+        args.push("--no-tags".to_string());
+    }
     if let Some(remote) = remote.filter(|r| !r.trim().is_empty()) {
-        validate_remote(&open(&path)?, &remote)?;
+        validate_remote(repo, &remote)?;
         args.push("--".into());
         args.push(remote);
     }
+    Ok(args)
+}
+
+pub fn fetch_ex(path: String, remote: Option<String>, prune: bool) -> GitResult<String> {
+    let _write = acquire_write(&path)?;
+    let args = fetch_args(&open(&path)?, remote, prune, false, false)?;
     run_git(&path, &args)
+}
+
+/// Fetch 的进度变体：stderr 的进度行实时回调，供前端面板展示；`--force` / `--no-tags`
+/// 对应「覆盖本地引用」与「不获取标签」选项。仍受仓库写互斥保护。
+pub fn fetch_ex_with_progress<F>(
+    path: String,
+    remote: Option<String>,
+    prune: bool,
+    force: bool,
+    no_tags: bool,
+    mut progress: F,
+) -> GitResult<String>
+where
+    F: FnMut(&str) + Send,
+{
+    let _write = acquire_write(&path)?;
+    let mut args = fetch_args(&open(&path)?, remote, prune, force, no_tags)?;
+    args.splice(1..1, ["--progress".into(), "--verbose".into()]);
+    run_git_with_progress_env(&path, &args, &[], &mut progress)
 }
 
 pub fn pull(path: String) -> GitResult<String> {
@@ -1916,6 +1952,62 @@ pub fn pull_ex_advanced(
     fetch_only: bool,
     prune: bool,
     tags_mode: Option<String>,
+) -> GitResult<String> {
+    pull_ex_impl(
+        path,
+        mode,
+        autostash,
+        remote,
+        branch,
+        fetch_only,
+        prune,
+        tags_mode,
+        false,
+        |path, args| run_git(path, args),
+    )
+}
+
+/// Pull 的进度变体：`--progress` 让 Git 即使不在终端也输出抓取进度，
+/// 进度行实时回调给前端面板；合并冲突仍按原有错误返回。
+pub fn pull_ex_advanced_with_progress<F>(
+    path: String,
+    mode: Option<String>,
+    autostash: bool,
+    remote: Option<String>,
+    branch: Option<String>,
+    fetch_only: bool,
+    prune: bool,
+    tags_mode: Option<String>,
+    mut progress: F,
+) -> GitResult<String>
+where
+    F: FnMut(&str) + Send,
+{
+    pull_ex_impl(
+        path,
+        mode,
+        autostash,
+        remote,
+        branch,
+        fetch_only,
+        prune,
+        tags_mode,
+        true,
+        |path, args| run_git_with_progress_env(path, args, &[], &mut progress),
+    )
+}
+
+fn pull_ex_impl(
+    path: String,
+    mode: Option<String>,
+    autostash: bool,
+    remote: Option<String>,
+    branch: Option<String>,
+    fetch_only: bool,
+    prune: bool,
+    tags_mode: Option<String>,
+    progress: bool,
+    mut run: impl FnMut(&str, &[String]) -> GitResult<String>,
 ) -> GitResult<String> {
     let _write = acquire_write(&path)?;
     let tags_mode = tags_mode.as_deref().unwrap_or("auto");
@@ -1943,8 +2035,9 @@ pub fn pull_ex_advanced(
             return Err(GitError::InvalidInput("invalid remote branch".into()));
         }
     }
+    let mut args;
     if fetch_only {
-        let mut args = vec!["fetch".to_string()];
+        args = vec!["fetch".to_string()];
         if prune {
             args.push("--prune".into());
         }
@@ -1956,38 +2049,41 @@ pub fn pull_ex_advanced(
         if let Some(remote) = remote {
             args.push(remote);
         }
-        return run_git(&path, &args);
-    }
-    let mut args = vec!["pull".to_string()];
-    match mode.as_deref().unwrap_or("default") {
-        "default" => {}
-        "rebase" => args.push("--rebase".into()),
-        "ff-only" => args.push("--ff-only".into()),
-        "no-ff" => args.push("--no-ff".into()),
-        other => {
-            return Err(GitError::InvalidInput(format!(
-                "unsupported pull mode: {other}"
-            )))
+    } else {
+        args = vec!["pull".to_string()];
+        match mode.as_deref().unwrap_or("default") {
+            "default" => {}
+            "rebase" => args.push("--rebase".into()),
+            "ff-only" => args.push("--ff-only".into()),
+            "no-ff" => args.push("--no-ff".into()),
+            other => {
+                return Err(GitError::InvalidInput(format!(
+                    "unsupported pull mode: {other}"
+                )))
+            }
+        }
+        if autostash {
+            args.push("--autostash".into());
+        }
+        if prune {
+            args.push("--prune".into());
+        }
+        if tags_mode == "all" {
+            args.push("--tags".into());
+        } else if tags_mode == "none" {
+            args.push("--no-tags".into());
+        }
+        if let Some(remote) = remote {
+            args.push(remote);
+            if let Some(branch) = branch {
+                args.push(branch);
+            }
         }
     }
-    if autostash {
-        args.push("--autostash".into());
+    if progress {
+        args.splice(1..1, ["--progress".into()]);
     }
-    if prune {
-        args.push("--prune".into());
-    }
-    if tags_mode == "all" {
-        args.push("--tags".into());
-    } else if tags_mode == "none" {
-        args.push("--no-tags".into());
-    }
-    if let Some(remote) = remote {
-        args.push(remote);
-        if let Some(branch) = branch {
-            args.push(branch);
-        }
-    }
-    run_git(&path, &args)
+    run(&path, &args)
 }
 
 /// Pull 的工作流窗口需要分别展示 stdout / stderr；失败仍沿用统一原始错误。
@@ -2047,6 +2143,72 @@ pub fn push_ex_advanced(
     force: bool,
     recurse_submodules: bool,
 ) -> GitResult<String> {
+    push_ex_impl(
+        path,
+        remote,
+        branch,
+        expected_head,
+        expected_branch,
+        force_with_lease,
+        push_tags,
+        force,
+        recurse_submodules,
+        false,
+        false,
+        |path, args| run_git(path, args),
+    )
+}
+
+/// Push 的进度变体：额外支持 `--no-verify`（跳过 pre-push hook）与实时进度行。
+/// 仍使用预览中的 HEAD / 分支做过期校验，失败不自动更换远程。
+#[allow(clippy::too_many_arguments)]
+pub fn push_ex_advanced_with_progress<F>(
+    path: String,
+    remote: Option<String>,
+    branch: Option<String>,
+    expected_head: Option<String>,
+    expected_branch: Option<String>,
+    force_with_lease: bool,
+    push_tags: bool,
+    force: bool,
+    recurse_submodules: bool,
+    no_verify: bool,
+    mut progress: F,
+) -> GitResult<String>
+where
+    F: FnMut(&str) + Send,
+{
+    push_ex_impl(
+        path,
+        remote,
+        branch,
+        expected_head,
+        expected_branch,
+        force_with_lease,
+        push_tags,
+        force,
+        recurse_submodules,
+        no_verify,
+        true,
+        |path, args| run_git_with_progress_env(path, args, &[], &mut progress),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_ex_impl(
+    path: String,
+    remote: Option<String>,
+    branch: Option<String>,
+    expected_head: Option<String>,
+    expected_branch: Option<String>,
+    force_with_lease: bool,
+    push_tags: bool,
+    force: bool,
+    recurse_submodules: bool,
+    no_verify: bool,
+    progress: bool,
+    mut run: impl FnMut(&str, &[String]) -> GitResult<String>,
+) -> GitResult<String> {
     if force && force_with_lease {
         return Err(GitError::InvalidInput(
             "--force and --force-with-lease are mutually exclusive".into(),
@@ -2077,6 +2239,13 @@ pub fn push_ex_advanced(
     if recurse_submodules {
         flags.push("--recurse-submodules=check".to_string());
     }
+    if no_verify {
+        flags.push("--no-verify".to_string());
+    }
+    if progress {
+        flags.push("--progress".to_string());
+        flags.push("--verbose".to_string());
+    }
     match (remote, branch) {
         (None, None) => {
             if !info.has_upstream {
@@ -2087,7 +2256,7 @@ pub fn push_ex_advanced(
             // 尊重 Git push 配置；任何失败原样返回，不换远程、不修改 upstream。
             let mut args = vec!["push".into()];
             args.extend(flags);
-            run_git(&path, &args)
+            run(&path, &args)
         }
         (Some(remote), Some(branch)) => {
             if expected_head.is_none() || expected_branch.is_none() {
@@ -2101,7 +2270,7 @@ pub fn push_ex_advanced(
             let mut args = vec!["push".into(), "--set-upstream".into()];
             args.extend(flags);
             args.extend(["--".into(), remote, refspec]);
-            run_git(&path, &args)
+            run(&path, &args)
         }
         _ => Err(GitError::InvalidInput(
             "remote and target branch must be supplied together".into(),

@@ -279,6 +279,45 @@ fn push_fetch_pull_against_local_bare_remote() {
     git::cli::fetch(path.clone(), None).unwrap();
     git::cli::pull(path.clone()).unwrap();
 
+    // 带进度的变体走同一套参数校验 / 写互斥，并把 stderr 进度行实时回调
+    let preview = git::cli::get_push_info(path.clone()).unwrap();
+    let mut push_lines = Vec::new();
+    git::cli::push_ex_advanced_with_progress(
+        path.clone(),
+        None,
+        None,
+        Some(preview.head_oid),
+        Some(preview.branch_ref),
+        false,
+        false,
+        false,
+        false,
+        true,
+        |line| push_lines.push(line.to_string()),
+    )
+    .unwrap();
+    assert!(push_lines
+        .iter()
+        .any(|line| line.contains("Everything") || line.contains("Pushing")));
+    let mut fetch_lines = Vec::new();
+    git::cli::fetch_ex_with_progress(path.clone(), None, false, false, true, |line| {
+        fetch_lines.push(line.to_string())
+    })
+    .unwrap();
+    assert!(!fetch_lines.is_empty());
+    git::cli::pull_ex_advanced_with_progress(
+        path.clone(),
+        Some("rebase".into()),
+        false,
+        None,
+        None,
+        false,
+        false,
+        None,
+        |_| {},
+    )
+    .unwrap();
+
     let _ = fs::remove_dir_all(&bare_root);
 }
 
@@ -602,4 +641,51 @@ fn run_log_invalid_revspec_returns_error() {
 
     let result = git::log::run_log(&path, 1, 1000, Some("no-such-ref"), &|| false, &|_| {});
     assert!(result.is_err());
+}
+
+#[test]
+fn statistics_aggregate_authors_and_time_buckets() {
+    let t = TempRepo::new("stats");
+    let path = t.path();
+    t.write("a.txt", "one\n");
+    git::cli::stage_files(path.clone(), vec!["a.txt".into()]).unwrap();
+    git::cli::commit(path.clone(), "c1".into()).unwrap();
+    {
+        let repo = git2::Repository::open(&t.root).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Other Author").unwrap();
+        config.set_str("user.email", "other@example.com").unwrap();
+    }
+    t.write("a.txt", "two\n");
+    git::cli::stage_files(path.clone(), vec!["a.txt".into()]).unwrap();
+    git::cli::commit(path.clone(), "c2".into()).unwrap();
+
+    let stats = git::stats::get_statistics(path.clone(), None, None).unwrap();
+    assert_eq!(stats.total_commits, 2);
+    assert_eq!(stats.authors.len(), 2);
+    assert_eq!(stats.authors.iter().map(|a| a.count).sum::<u32>(), 2);
+    assert_eq!(stats.months.len(), 1);
+    assert!(!stats.month_days.is_empty());
+    assert_eq!(stats.week_days.len(), 7);
+    assert!(!stats.truncated);
+
+    let key = stats
+        .authors
+        .iter()
+        .find(|author| author.name == "Other Author")
+        .unwrap()
+        .key
+        .clone();
+    let filtered = git::stats::get_statistics(path.clone(), None, Some(key)).unwrap();
+    assert_eq!(filtered.total_commits, 1);
+    // 作者筛选只影响时间桶与总数，作者列表仍是全量。
+    assert_eq!(filtered.authors.len(), 2);
+
+    let head = git::repo::get_branches(path.clone())
+        .unwrap()
+        .into_iter()
+        .find(|branch| branch.is_head)
+        .unwrap();
+    let by_branch = git::stats::get_statistics(path, Some(head.name), None).unwrap();
+    assert_eq!(by_branch.total_commits, 2);
 }

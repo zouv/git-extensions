@@ -1,55 +1,110 @@
 /**
- * Diff 行内 / 并排与换行偏好：按仓库键持久化，并在同窗口多个 DiffView
- * 实例与其它窗口（资源管理器轻量窗口）之间同步，避免常驻挂载的视图
- * 用旧状态覆盖新偏好。
+ * Diff 面板的共享状态：显示模式、换行、折叠、完整内容与底部面板高度。
+ * 所有仓库、所有 DiffView 实例共用一份，避免切换仓库时面板跳动；
+ * 同窗口通过订阅通知，其它窗口通过 storage 事件同步。
  */
 export type DiffMode = "inline" | "split";
 
 export interface DiffPrefs {
   mode: DiffMode;
   wrap: boolean;
+  /** 折叠未修改片段。 */
+  collapse: boolean;
+  /** 显示完整文件内容（后端按完整上下文重新生成 patch）。 */
+  fullContext: boolean;
+  /** 主窗口历史视图底部 Diff 面板高度（px）；所有仓库共用。 */
+  height: number;
 }
 
-export const DIFF_MODE_KEY = "git-extensions.diffMode";
-export const DIFF_WRAP_KEY = "git-extensions.diffWrap";
+export const DIFF_PANEL_KEY = "git-extensions.diffPanel.v1";
 
-const listeners = new Map<string, Set<(prefs: DiffPrefs) => void>>();
+export const DEFAULT_DIFF_PREFS: DiffPrefs = {
+  mode: "inline",
+  wrap: false,
+  collapse: false,
+  fullContext: false,
+  height: 320,
+};
 
-export function loadDiffPrefs(key: string): DiffPrefs {
+function validHeight(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.min(100_000, value))
+    : DEFAULT_DIFF_PREFS.height;
+}
+
+function read(): DiffPrefs {
   try {
+    const raw = JSON.parse(localStorage.getItem(DIFF_PANEL_KEY) ?? "{}") as Partial<DiffPrefs>;
     return {
-      mode: localStorage.getItem(`${DIFF_MODE_KEY}:${key}`) === "split" ? "split" : "inline",
-      wrap: localStorage.getItem(`${DIFF_WRAP_KEY}:${key}`) === "1",
+      mode: raw.mode === "split" ? "split" : "inline",
+      wrap: raw.wrap === true,
+      collapse: raw.collapse === true,
+      fullContext: raw.fullContext === true,
+      height: validHeight(raw.height),
     };
   } catch {
-    return { mode: "inline", wrap: false };
+    return { ...DEFAULT_DIFF_PREFS };
   }
 }
 
-export function saveDiffPrefs(key: string, prefs: DiffPrefs): void {
+function same(left: DiffPrefs, right: DiffPrefs): boolean {
+  return left.mode === right.mode
+    && left.wrap === right.wrap
+    && left.collapse === right.collapse
+    && left.fullContext === right.fullContext
+    && left.height === right.height;
+}
+
+let state: DiffPrefs | null = null;
+const listeners = new Set<() => void>();
+
+/** 当前共享状态；首次调用时从 localStorage 读取。 */
+export function getDiffPrefs(): DiffPrefs {
+  if (!state) state = read();
+  return state;
+}
+
+/** 底部 Diff 面板高度（用于 useSyncExternalStore 的稳定快照）。 */
+export function getDiffPanelHeight(): number {
+  return getDiffPrefs().height;
+}
+
+/** 重新读取存储；storage 事件与测试使用。 */
+export function reloadDiffPrefs(): DiffPrefs {
+  state = read();
+  return state;
+}
+
+export function setDiffPrefs(patch: Partial<DiffPrefs>): void {
+  const current = getDiffPrefs();
+  const next = { ...current, ...patch };
+  if (same(current, next)) return;
+  state = next;
   try {
-    localStorage.setItem(`${DIFF_MODE_KEY}:${key}`, prefs.mode);
-    localStorage.setItem(`${DIFF_WRAP_KEY}:${key}`, prefs.wrap ? "1" : "0");
+    localStorage.setItem(DIFF_PANEL_KEY, JSON.stringify(next));
   } catch { /* 偏好保存失败不影响当前视图 */ }
-  listeners.get(key)?.forEach((listener) => listener(prefs));
+  listeners.forEach((listener) => listener());
 }
 
-/** 订阅指定键的偏好变化：同窗口其它实例的写入通知 + 其它窗口的 storage 事件。 */
-export function subscribeDiffPrefs(key: string, listener: (prefs: DiffPrefs) => void): () => void {
-  let set = listeners.get(key);
-  if (!set) {
-    set = new Set();
-    listeners.set(key, set);
-  }
-  set.add(listener);
+/** 基于最新共享状态做增量更新；拖拽等连续事件不会因闭包里的旧值丢步。 */
+export function updateDiffPrefs(updater: (current: DiffPrefs) => Partial<DiffPrefs>): void {
+  setDiffPrefs(updater(getDiffPrefs()));
+}
+
+/** 订阅共享状态变化；同窗口写入与其它窗口 storage 事件都会触发。 */
+export function subscribeDiffPrefs(listener: () => void): () => void {
+  listeners.add(listener);
   const onStorage = (event: StorageEvent) => {
-    if (event.key !== `${DIFF_MODE_KEY}:${key}` && event.key !== `${DIFF_WRAP_KEY}:${key}`) return;
-    listener(loadDiffPrefs(key));
+    if (event.key !== null && event.key !== DIFF_PANEL_KEY) return;
+    const current = getDiffPrefs();
+    const next = read();
+    if (same(current, next)) return;
+    state = next;
+    listeners.forEach((entry) => entry());
   };
   if (typeof window !== "undefined") window.addEventListener("storage", onStorage);
   return () => {
-    set.delete(listener);
-    if (set.size === 0) listeners.delete(key);
+    listeners.delete(listener);
     if (typeof window !== "undefined") window.removeEventListener("storage", onStorage);
   };
 }

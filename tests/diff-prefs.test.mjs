@@ -5,7 +5,7 @@ import ts from "typescript";
 
 const source = await readFile(new URL("../src/diffPrefs.ts", import.meta.url), "utf8");
 const url = "data:text/javascript;base64," + Buffer.from(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText).toString("base64");
-const { DIFF_MODE_KEY, DIFF_WRAP_KEY, loadDiffPrefs, saveDiffPrefs, subscribeDiffPrefs } = await import(url);
+const { DIFF_PANEL_KEY, DEFAULT_DIFF_PREFS, getDiffPrefs, reloadDiffPrefs, setDiffPrefs, subscribeDiffPrefs } = await import(url);
 
 const memoryStorage = () => {
   const store = new Map();
@@ -19,6 +19,7 @@ const memoryStorage = () => {
 const withStorage = (run) => {
   const original = globalThis.localStorage;
   globalThis.localStorage = memoryStorage();
+  reloadDiffPrefs();
   try {
     run(globalThis.localStorage);
   } finally {
@@ -27,39 +28,34 @@ const withStorage = (run) => {
   }
 };
 
-test("diff 偏好按仓库键读写，缺省为行内 + 不换行", () => {
+test("diff 面板状态全局共享，缺省为行内 + 不换行 + 不折叠 + 320px", () => {
   withStorage((storage) => {
-    assert.deepEqual(loadDiffPrefs("/repo"), { mode: "inline", wrap: false });
-    saveDiffPrefs("/repo", { mode: "split", wrap: true });
-    assert.equal(storage.getItem(`${DIFF_MODE_KEY}:/repo`), "split");
-    assert.equal(storage.getItem(`${DIFF_WRAP_KEY}:/repo`), "1");
-    assert.deepEqual(loadDiffPrefs("/repo"), { mode: "split", wrap: true });
-    assert.deepEqual(loadDiffPrefs("/other"), { mode: "inline", wrap: false });
+    assert.deepEqual(getDiffPrefs(), DEFAULT_DIFF_PREFS);
+    setDiffPrefs({ mode: "split", wrap: true, collapse: true, fullContext: true, height: 280 });
+    assert.notEqual(storage.getItem(DIFF_PANEL_KEY), null);
+    assert.deepEqual(getDiffPrefs(), { mode: "split", wrap: true, collapse: true, fullContext: true, height: 280 });
+    reloadDiffPrefs();
+    assert.deepEqual(getDiffPrefs(), { mode: "split", wrap: true, collapse: true, fullContext: true, height: 280 });
   });
 });
 
-test("同仓库多个订阅者收到写入通知，退订后不再收到", () => {
+test("订阅者收到共享状态变化，退订后不再收到；无变化不通知", () => {
   withStorage(() => {
-    const seenA = [];
-    const seenB = [];
-    const stopA = subscribeDiffPrefs("/repo", (prefs) => seenA.push(prefs));
-    const stopB = subscribeDiffPrefs("/repo", (prefs) => seenB.push(prefs));
-    saveDiffPrefs("/repo", { mode: "split", wrap: false });
-    assert.deepEqual(seenA, [{ mode: "split", wrap: false }]);
-    assert.deepEqual(seenB, [{ mode: "split", wrap: false }]);
-    stopA();
-    saveDiffPrefs("/repo", { mode: "inline", wrap: true });
-    assert.equal(seenA.length, 1);
-    assert.deepEqual(seenB[1], { mode: "inline", wrap: true });
-    stopB();
-    saveDiffPrefs("/other", { mode: "split", wrap: true });
-    assert.equal(seenB.length, 2);
+    const seen = [];
+    const stop = subscribeDiffPrefs(() => seen.push(getDiffPrefs()));
+    setDiffPrefs({ mode: "split" });
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].mode, "split");
+    setDiffPrefs({ mode: "split" });
+    assert.equal(seen.length, 1);
+    stop();
+    setDiffPrefs({ wrap: true });
+    assert.equal(seen.length, 1);
   });
 });
 
-test("其它窗口的 storage 事件只刷新匹配键的偏好", () => {
+test("其它窗口的 storage 事件刷新共享状态", () => {
   withStorage((storage) => {
-    const events = [];
     const handlers = new Set();
     const originalWindow = globalThis.window;
     globalThis.window = {
@@ -67,14 +63,15 @@ test("其它窗口的 storage 事件只刷新匹配键的偏好", () => {
       removeEventListener: (type, handler) => { if (type === "storage") handlers.delete(handler); },
     };
     try {
-      const stop = subscribeDiffPrefs("/repo", (prefs) => events.push(prefs));
+      const seen = [];
+      const stop = subscribeDiffPrefs(() => seen.push(getDiffPrefs()));
       assert.equal(handlers.size, 1);
-      storage.setItem(`${DIFF_MODE_KEY}:/repo`, "split");
-      storage.setItem(`${DIFF_WRAP_KEY}:/repo`, "1");
-      for (const handler of handlers) handler({ key: `${DIFF_MODE_KEY}:/repo` });
-      assert.deepEqual(events, [{ mode: "split", wrap: true }]);
-      for (const handler of handlers) handler({ key: `${DIFF_MODE_KEY}:/other` });
-      assert.equal(events.length, 1);
+      storage.setItem(DIFF_PANEL_KEY, JSON.stringify({ mode: "split", wrap: true, collapse: true, fullContext: false, height: 260 }));
+      for (const handler of handlers) handler({ key: DIFF_PANEL_KEY });
+      assert.equal(seen.length, 1);
+      assert.equal(seen[0].mode, "split");
+      assert.equal(seen[0].collapse, true);
+      assert.equal(seen[0].height, 260);
       stop();
       assert.equal(handlers.size, 0);
     } finally {

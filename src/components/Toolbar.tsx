@@ -1,11 +1,12 @@
 import { useRef, useState } from "react";
-import type { RefObject } from "react";
+import type { MouseEvent as ReactMouseEvent, RefObject } from "react";
 import type { AheadBehind, BranchInfo, GitMaintenanceAction, RepoFileTarget, RepoInfo } from "../types";
 import type { GridDisplayOptions } from "../settings";
 import Icon from "../ui/Icon";
 import type { IconName } from "../ui/Icon";
 import ContextMenu from "../ui/ContextMenu";
 import type { MenuItem } from "../ui/ContextMenu";
+import type { RemoteActionAnchor, RemoteActionKind } from "./RemoteActionPanel";
 
 interface Props {
   repo: RepoInfo;
@@ -44,10 +45,11 @@ interface Props {
   onCommandLog: () => void;
   onBisectStart: () => void;
   onSettings: () => void;
+  onStatistics: () => void;
   onRecovery: () => void;
   onCompare: () => void;
   onClearCompareBase: () => void;
-  onRemote: (kind: "fetch" | "pull" | "push") => void;
+  onRemote: (kind: RemoteActionKind, anchor?: RemoteActionAnchor) => void;
   onFileExplorer: () => void;
   onEditRepoFile: (target: RepoFileTarget) => void;
   onUpdateAllSubmodules: () => void;
@@ -85,8 +87,13 @@ interface Props {
 
 type Point = { x: number; y: number };
 
-function ToolButton({ icon, label, title, onClick, disabled = false, primary = false }: { icon: IconName; label?: string; title: string; onClick: () => void; disabled?: boolean; primary?: boolean }) {
-  return <button className={`tool-button${primary ? " primary" : ""}`} title={title} aria-label={label ?? title} disabled={disabled} onClick={onClick}><Icon name={icon} />{label && <span>{label}</span>}</button>;
+function ToolButton({ icon, label, title, onClick, disabled = false, primary = false, dataAction }: { icon: IconName; label?: string; title: string; onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void; disabled?: boolean; primary?: boolean; dataAction?: string }) {
+  return <button className={`tool-button${primary ? " primary" : ""}`} title={title} aria-label={label ?? title} disabled={disabled} data-remote-action={dataAction} onClick={onClick}><Icon name={icon} />{label && <span>{label}</span>}</button>;
+}
+
+function remoteAnchor(event: ReactMouseEvent<HTMLButtonElement>): RemoteActionAnchor {
+  const rect = event.currentTarget.getBoundingClientRect();
+  return { left: rect.left, top: rect.top, bottom: rect.bottom };
 }
 
 function MenuButton({ icon, label, open, onClick, buttonRef }: { icon: IconName; label: string; open: boolean; onClick: () => void; buttonRef: RefObject<HTMLButtonElement | null> }) {
@@ -126,7 +133,7 @@ export default function Toolbar(props: Props) {
     { id: "sep-repo-1", separator: true },
     { id: "remotes", label: "远程仓库…", icon: "fetch", onSelect: props.onRemotes },
     { id: "sep-repo-2", separator: true },
-    { id: "submodules", label: "管理子模块…", icon: "folder", shortcut: "Ctrl+Shift+M", onSelect: props.onSubmodules },
+    { id: "submodules", label: "管理子模块…", icon: "submodule", shortcut: "Ctrl+Shift+M", onSelect: props.onSubmodules },
     { id: "update-submodules", label: "更新所有子模块", icon: "pull", disabled: busy, onSelect: props.onUpdateAllSubmodules },
     { id: "sync-submodules", label: "同步所有子模块", icon: "refresh", disabled: busy, onSelect: props.onSyncAllSubmodules },
     { id: "sep-repo-3", separator: true },
@@ -239,21 +246,18 @@ export default function Toolbar(props: Props) {
     { id: "more-recovery", label: "恢复历史：HEAD 备份与 reflog", icon: "history", disabled: busy, onSelect: props.onRecovery },
     { id: "more-stash", label: "Stash (Ctrl+Shift+S)", icon: "stash", disabled: busy, onSelect: props.onStash },
     { id: "more-tags", label: "标签 (Ctrl+Shift+T)", icon: "tag", disabled: busy, onSelect: props.onTags },
-    { id: "more-submodules", label: "子模块 (Ctrl+Shift+M)", icon: "folder", disabled: busy, onSelect: props.onSubmodules },
+    { id: "more-submodules", label: "子模块 (Ctrl+Shift+M)", icon: "submodule", disabled: busy, onSelect: props.onSubmodules },
   ];
 
   return (
     <div className="toolbar">
+      <ToolButton icon="menu" title="显示 / 隐藏导航 (Ctrl+B)" onClick={props.onToggleLeft} />
+      <div className="toolbar-separator" />
       <div className="toolbar-group toolbar-menu-group">
         <MenuButton icon="repository" label="仓库" open={!!repositoryMenu} buttonRef={repositoryButton} onClick={() => toggleMenu(repositoryMenu, setRepositoryMenu, repositoryButton.current)} />
         <MenuButton icon="navigate" label="导航" open={!!navigateMenu} buttonRef={navigateButton} onClick={() => toggleMenu(navigateMenu, setNavigateMenu, navigateButton.current)} />
         <MenuButton icon="view" label="视图" open={!!viewMenu} buttonRef={viewButton} onClick={() => toggleMenu(viewMenu, setViewMenu, viewButton.current)} />
         <MenuButton icon="commands" label="命令" open={!!commandsMenu} buttonRef={commandsButton} onClick={() => toggleMenu(commandsMenu, setCommandsMenu, commandsButton.current)} />
-      </div>
-      <div className="toolbar-separator" />
-      <div className="toolbar-group">
-        <ToolButton icon="menu" title="显示 / 隐藏导航 (Ctrl+B)" onClick={props.onToggleLeft} />
-        <ToolButton icon="refresh" title="刷新当前仓库 (F5)" disabled={loading || busy} onClick={props.onRefresh} />
       </div>
       <div className="toolbar-separator" />
       <div className="toolbar-group branch-toolbar-group">
@@ -269,11 +273,20 @@ export default function Toolbar(props: Props) {
         >
           <Icon name="branch" /><strong>{repo.headBranch ?? " detached HEAD"}</strong>{aheadBehind && (aheadBehind.ahead > 0 || aheadBehind.behind > 0) && <span>↑{aheadBehind.ahead} ↓{aheadBehind.behind}</span>}<Icon name="chevron-down" size={13} />
         </button>
+        <ToolButton icon="refresh" title="刷新当前仓库 (F5)" disabled={loading || busy} onClick={props.onRefresh} />
       </div>
+      <div className="toolbar-separator" />
       <div className="toolbar-group remote-actions">
-        <ToolButton icon="fetch" label="Fetch" title="Fetch (Ctrl+Shift+F)" disabled={busy} onClick={() => props.onRemote("fetch")} />
-        <ToolButton icon="pull" label="Pull" title="Pull (Ctrl+Shift+L)" disabled={busy} onClick={() => props.onRemote("pull")} />
-        <ToolButton icon="push" label="Push" title="Push (Ctrl+Shift+P)" disabled={busy} onClick={() => props.onRemote("push")} />
+        <ToolButton icon="fetch" label="Fetch" title="Fetch (Ctrl+Shift+F)" dataAction="fetch" disabled={busy} onClick={(event) => props.onRemote("fetch", remoteAnchor(event))} />
+        <ToolButton icon="pull" label="Pull" title="Pull (Ctrl+Shift+L)" dataAction="pull" disabled={busy} onClick={(event) => props.onRemote("pull", remoteAnchor(event))} />
+        <ToolButton icon="push" label="Push" title="Push (Ctrl+Shift+P)" dataAction="push" disabled={busy} onClick={(event) => props.onRemote("push", remoteAnchor(event))} />
+      </div>
+      <div className="toolbar-separator toolbar-overflow-separator" />
+      <div className="toolbar-overflow">
+        <ToolButton icon="history" title="恢复历史：HEAD 备份与 reflog" disabled={busy} onClick={props.onRecovery} />
+        <ToolButton icon="stash" title="Stash (Ctrl+Shift+S)" disabled={busy} onClick={props.onStash} />
+        <ToolButton icon="tag" title="标签 (Ctrl+Shift+T)" disabled={busy} onClick={props.onTags} />
+        <ToolButton icon="submodule" title="子模块 (Ctrl+Shift+M)" disabled={busy} onClick={props.onSubmodules} />
       </div>
       <div className="toolbar-spacer" />
       {props.workspace === "history" && <>
@@ -283,13 +296,8 @@ export default function Toolbar(props: Props) {
         <ToolButton icon="search" title="高级提交与代码搜索 (Ctrl+Shift+H)" onClick={props.onSearch} />
         <span className="revision-count" title="当前提交数量">{revisionCount.toLocaleString()} 条</span>
       </>}
+      <ToolButton icon="statistics" title="Statistics（提交统计）" onClick={props.onStatistics} />
       <ToolButton icon="settings" title="设置与快捷键 (Ctrl+,)" onClick={props.onSettings} />
-      <div className="toolbar-overflow">
-        <ToolButton icon="history" title="恢复历史：HEAD 备份与 reflog" disabled={busy} onClick={props.onRecovery} />
-        <ToolButton icon="stash" title="Stash (Ctrl+Shift+S)" disabled={busy} onClick={props.onStash} />
-        <ToolButton icon="tag" title="标签 (Ctrl+Shift+T)" disabled={busy} onClick={props.onTags} />
-        <ToolButton icon="folder" title="子模块 (Ctrl+Shift+M)" disabled={busy} onClick={props.onSubmodules} />
-      </div>
       <div className="toolbar-more">
         <button ref={moreButton} type="button" className="tool-button" title="更多操作" aria-label="更多操作" aria-haspopup="menu" aria-expanded={!!moreMenu}
           onPointerDown={(event) => { if (moreMenu) event.stopPropagation(); }}

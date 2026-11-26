@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { api } from "../api";
 import { buildFileTreeRows, extractHunkPatch, rangeSelection } from "../viewState";
@@ -111,6 +111,14 @@ export default function ChangesPanel(props: Props) {
       else { setPreviewError(String(e)); props.setMessage(String(e)); }
     }
   };
+
+  const previewSide = preview?.side;
+  // 「显示完整内容」按需重新读取当前文件；预览本身已带 patch 时 DiffView 直接复用，不重复请求。
+  const loadPreviewFile = useCallback(async (file: FileDiff, fullContext: boolean) => {
+    if (!previewSide) return null;
+    const diffs = await api.getWorktreeFileDiff(repoPath, previewSide === "staged", file.path, file.oldPath, fullContext);
+    return diffs.find((d) => d.path === file.path || d.oldPath === file.path) ?? null;
+  }, [repoPath, previewSide]);
 
   useEffect(() => {
     previewRequest.current += 1;
@@ -447,11 +455,12 @@ export default function ChangesPanel(props: Props) {
       <div className="changes-preview">
         {preview?.file ? <DiffView
           files={[preview.file]}
+          loadFile={loadPreviewFile}
           highlightEnabled={props.highlightEnabled}
           onFileAction={props.onFileAction}
           showFileHeader={false}
           showStats
-          prefKey={repoPath}
+
           hunkActions={preview.file.status !== "conflicted" ? {
             staged: preview.side === "staged",
             busy,

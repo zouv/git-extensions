@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api, nextLogRequestId, onLogBatch } from "./api";
 import { hasSessionDrafts } from "./viewState";
 import { decideBranchDeletion, planBranchFolderDelete } from "./branchDelete";
@@ -8,6 +8,7 @@ import { getRepoOperation } from "./repoOperations";
 import type { AheadBehind, BranchInfo, CommitDetail, ContainedInfo, FileDiff, ConflictDraft, RebaseDraft, OperationState, RepoFileTarget, GitMaintenanceAction, RepoInfo, Revision, StatusSnapshot, SubmoduleInfo, TagInfo, WorktreeInfo, WorkspaceLaunchAction, WorkspaceLaunchRequest } from "./types";
 import type { AppSettings, GridDisplayOptions } from "./settings";
 import { loadLayout, resetLayout, saveLayout } from "./settings";
+import { getDiffPanelHeight, setDiffPrefs, subscribeDiffPrefs, updateDiffPrefs } from "./diffPrefs";
 import type { SessionMeta } from "./components/RepositoryTabs";
 import Toolbar from "./components/Toolbar";
 import LeftPanel from "./components/LeftPanel";
@@ -24,7 +25,8 @@ import RebasePlanner from "./components/RebasePlanner";
 import BranchDialog from "./components/BranchDialog";
 import ResetDialog from "./components/ResetDialog";
 import RecoveryDialog from "./components/RecoveryDialog";
-import PushDialog from "./components/PushDialog";
+import RemoteActionPanel from "./components/RemoteActionPanel";
+import type { RemoteActionAnchor, RemoteActionKind } from "./components/RemoteActionPanel";
 import StashDialog from "./components/StashDialog";
 import TagDialog from "./components/TagDialog";
 import SubmoduleDialog from "./components/SubmoduleDialog";
@@ -40,6 +42,7 @@ import RemotesDialog from "./components/RemotesDialog";
 import WorktreeDialog from "./components/WorktreeDialog";
 import CommandLogDialog from "./components/CommandLogDialog";
 import SearchDialog from "./components/SearchDialog";
+import StatisticsDialog from "./components/StatisticsDialog";
 import RepositorySettingsDialog from "./components/RepositorySettingsDialog";
 import { pickSaveFile } from "./nativeDialog";
 import SplitHandle from "./ui/SplitHandle";
@@ -93,6 +96,8 @@ export default function RepoWorkspace(props: Props) {
   const [compareBase, setCompareBase] = useState<string | null>(null);
   const [selectedCommitFile, setSelectedCommitFile] = useState<FileDiff | null>(null);
   const [layout, setLayout] = useState(() => loadLayout(repo.path, settings));
+  // 底部 Diff 面板高度在仓库间共享，切换页签时不会跳动。
+  const historyDiffHeight = useSyncExternalStore(subscribeDiffPrefs, getDiffPanelHeight, getDiffPanelHeight);
   const [leftRef, setLeftRef] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [message, setMessage] = useState("就绪");
@@ -110,7 +115,7 @@ export default function RepoWorkspace(props: Props) {
   const [initialAuxLoaded, setInitialAuxLoaded] = useState(false);
   const [resetTarget, setResetTarget] = useState<string | null>(null);
   const [showRecovery, setShowRecovery] = useState(false);
-  const [showPush, setShowPush] = useState(false);
+  const [remotePanel, setRemotePanel] = useState<{ kind: RemoteActionKind; anchor: RemoteActionAnchor } | null>(null);
   const [showStash, setShowStash] = useState(false);
   const [showTags, setShowTags] = useState(false);
   const [showSubmodules, setShowSubmodules] = useState(false);
@@ -118,6 +123,7 @@ export default function RepoWorkspace(props: Props) {
   const [showWorktrees, setShowWorktrees] = useState(false);
   const [showPullOptions, setShowPullOptions] = useState(false);
   const [showCommandLog, setShowCommandLog] = useState(false);
+  const [showStatistics, setShowStatistics] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [showRepoInfo, setShowRepoInfo] = useState(false);
   const [mergeTarget, setMergeTarget] = useState<string | null>(null);
@@ -167,6 +173,10 @@ export default function RepoWorkspace(props: Props) {
   selectedCommitFileRef.current = selectedCommitFile;
 
   useEffect(() => { if (!(import.meta.env.DEV && import.meta.env.VITE_TEST_REPO)) saveLayout(repo.path, layout); }, [layout, repo.path]);
+  const resetWorkspaceLayout = useCallback(() => {
+    setLayout(resetLayout(repo.path, settings));
+    setDiffPrefs({ height: 320 });
+  }, [repo.path, settings]);
   useEffect(() => metaRef.current({
     busy,
     dirty: hasSessionDrafts(commitDirty || conflictDirty || rebaseDirty, conflictDrafts.current.size, rebaseDrafts.current.size),
@@ -234,9 +244,9 @@ export default function RepoWorkspace(props: Props) {
     });
   }, [repo.path]);
 
-  const loadCommitFile = useCallback(async (file: FileDiff) => {
+  const loadCommitFile = useCallback(async (file: FileDiff, fullContext: boolean) => {
     if (!commit) return null;
-    const files = await api.getCommitFileDiff(repo.path, commit.oid, file.path, file.oldPath);
+    const files = await api.getCommitFileDiff(repo.path, commit.oid, file.path, file.oldPath, fullContext);
     return files.find((f) => f.path === file.path || f.oldPath === file.path) ?? null;
   }, [repo.path, commit]);
 
@@ -383,12 +393,24 @@ export default function RepoWorkspace(props: Props) {
     } finally { setBusy(false); }
   }, [refreshAll, refreshWorktree, repo.path]);
 
-  const runRemote = useCallback((kind: "fetch" | "pull" | "push") => {
+  // 工具栏按钮传入自身位置；快捷键 / 命令面板没有事件，回退到活动仓库的对应按钮。
+  const remoteAnchor = useCallback((kind: RemoteActionKind): RemoteActionAnchor => {
+    const el = document.querySelector<HTMLElement>(`.repo-host.active [data-remote-action="${kind}"]`);
+    const rect = el?.getBoundingClientRect();
+    return rect ? { left: rect.left, top: rect.top, bottom: rect.bottom } : { left: window.innerWidth / 2 - 220, top: 88, bottom: 88 };
+  }, []);
+
+  const runRemote = useCallback((kind: RemoteActionKind, anchor?: RemoteActionAnchor) => {
     if (busyRef.current || getRepoOperation(repo.path)) return;
-    if (kind === "push") { setShowPush(true); return; }
-    const label = kind === "fetch" ? "Fetch" : "Pull";
-    void runAction(() => api[kind](repo.path), `${label} 完成`);
-  }, [repo.path, runAction]);
+    setRemotePanel((current) => current?.kind === kind ? null : { kind, anchor: anchor ?? remoteAnchor(kind) });
+  }, [repo.path, remoteAnchor]);
+
+  const onRemote = useCallback((kind: RemoteActionKind, anchor?: RemoteActionAnchor) => runRemote(kind, anchor), [runRemote]);
+
+  // 切到其它仓库页签时收起面板，避免 fixed 定位的面板悬浮在别的页签上。
+  useEffect(() => {
+    if (!active) setRemotePanel(null);
+  }, [active]);
 
   const performFileAction = useCallback((action: FileAction, file: FileDiff, oid?: string) => {
     if (action === "history" || action === "blame") {
@@ -809,14 +831,8 @@ export default function RepoWorkspace(props: Props) {
         notifyRef.current("info", "当前仓库有操作进行中，未执行 Pull");
         return;
       }
-      const ok = await confirm({ title: `Pull ${repoInfo.name}？`, body: "将按当前分支的 upstream 配置执行 Pull。若产生冲突，会进入现有冲突解决中心。", confirmLabel: "Pull" });
-      if (!ok) return;
-      if (busyRef.current || getRepoOperation(repo.path)) {
-        notifyRef.current("info", "当前仓库有操作进行中，未执行 Pull");
-        return;
-      }
       runRemote("pull");
-    } else if (action === "push") setShowPush(true);
+    } else if (action === "push") runRemote("push");
     else if (action === "view-stash") setShowStash(true);
     else if (action === "checkout-branch" || action === "create-branch") {
       setBranchStart(undefined); setBranchMode(action === "create-branch" ? "create" : "checkout"); setShowBranches(true);
@@ -824,7 +840,7 @@ export default function RepoWorkspace(props: Props) {
     else if (action === "open-with-difftool") setShowDiffTool(true);
     else if (action === "file-history") setShowTrackedFiles(true);
     else if (action === "apply-patch") setShowApplyPatch(true);
-  }, [confirm, repo.path, repoInfo.name, runRemote, switchWorkspace]);
+  }, [repo.path, runRemote, switchWorkspace]);
 
   const fileExplorer = useCallback(() => {
     void api.revealPath(repo.path)
@@ -928,9 +944,9 @@ export default function RepoWorkspace(props: Props) {
   }, [active, dispatchLaunchAction, initialAuxLoaded, logLoading, props.launchAction, props.onLaunchActionConsumed]);
 
   const closeDialog = useCallback(() => {
-    setResetTarget(null); setShowRecovery(false); setShowPush(false); setShowBranches(false); setShowStash(false); setShowTags(false); setShowSubmodules(false); setFileAction(null);
+    setResetTarget(null); setShowRecovery(false); setRemotePanel(null); setShowBranches(false); setShowStash(false); setShowTags(false); setShowSubmodules(false); setFileAction(null);
     setShowCheckoutRevision(false); setShowDiffTool(false); setShowTrackedFiles(false); setShowApplyPatch(false);
-    setShowRemotes(false); setShowWorktrees(false); setShowPullOptions(false); setShowCommandLog(false); setShowSearch(false); setMergeTarget(null); setShowRepoInfo(false);
+    setShowRemotes(false); setShowWorktrees(false); setShowPullOptions(false); setShowCommandLog(false); setShowSearch(false); setMergeTarget(null); setShowRepoInfo(false); setShowStatistics(false);
   }, []);
 
   useEffect(() => {
@@ -1009,7 +1025,7 @@ export default function RepoWorkspace(props: Props) {
       { id: `repo:${repo.path}:copy-sha`, title: "复制选中提交 SHA", group: "当前仓库", shortcut: "Ctrl+Shift+C", enabled: selectedOids.length > 0, run: () => { const oid = selectedOids[selectedOids.length - 1]; if (oid) void navigator.clipboard?.writeText(oid); } },
       { id: `repo:${repo.path}:left`, title: "显示 / 隐藏左侧导航", group: "视图", shortcut: "Ctrl+B", run: () => setLayout((prev) => ({ ...prev, showLeft: !prev.showLeft })) },
       { id: `repo:${repo.path}:inspector`, title: "显示 / 隐藏检查器", group: "视图", run: () => setLayout((prev) => ({ ...prev, showInspector: !prev.showInspector })) },
-      { id: `repo:${repo.path}:layout-default`, title: "布局：默认", group: "视图", run: () => setLayout(resetLayout(repo.path, settings)) },
+      { id: `repo:${repo.path}:layout-default`, title: "布局：默认", group: "视图", run: resetWorkspaceLayout },
       { id: `repo:${repo.path}:layout-wide`, title: "布局：宽 Diff", group: "视图", run: () => setLayout((prev) => ({ ...prev, showLeft: false, showInspector: true, inspectorSize: 640 })) },
       { id: `repo:${repo.path}:layout-history`, title: "布局：专注历史", group: "视图", run: () => { void switchWorkspace("history").then((ok) => { if (ok) setLayout((prev) => ({ ...prev, showInspector: false })); }); } },
       { id: `repo:${repo.path}:branches`, title: "分支管理…", group: "Git 操作", shortcut: "Ctrl+Shift+B", enabled: !busy, run: () => { setBranchStart(undefined); setBranchSelected(undefined); setBranchMode("checkout"); setShowBranches(true); } },
@@ -1027,10 +1043,11 @@ export default function RepoWorkspace(props: Props) {
       { id: `repo:${repo.path}:fetch`, title: "Fetch", group: "Git 操作", shortcut: "Ctrl+Shift+F", enabled: !busy, run: () => runRemote("fetch") },
       { id: `repo:${repo.path}:pull`, title: "Pull", group: "Git 操作", shortcut: "Ctrl+Shift+L", enabled: !busy, run: () => runRemote("pull") },
       { id: `repo:${repo.path}:push`, title: "Push…", group: "Git 操作", shortcut: "Ctrl+Shift+P", enabled: !busy, run: () => runRemote("push") },
+      { id: `repo:${repo.path}:statistics`, title: "提交统计 (Statistics)…", group: "Git 操作", keywords: ["statistics", "stats", "author"], run: () => setShowStatistics(true) },
     ];
     registerCommands(`repo:${repo.path}`, commands);
     return () => unregisterCommands(`repo:${repo.path}`);
-  }, [active, busy, compareBase, openCompare, operation?.conflicts.length, refreshAll, repo.path, runRemote, selectedOids, settings, showConflict, switchWorkspace]);
+  }, [active, busy, compareBase, openCompare, operation?.conflicts.length, refreshAll, repo.path, resetWorkspaceLayout, runRemote, selectedOids, showConflict, switchWorkspace]);
 
   const refs = useMemo(() => [...branches.map((b) => b.name), ...tags.map((t) => t.name), "HEAD"], [branches, tags]);
   const changeCount = status.staged.length + status.unstaged.length;
@@ -1047,14 +1064,14 @@ export default function RepoWorkspace(props: Props) {
       <Toolbar repo={repoInfo} branches={branches} loading={logLoading} busy={busy} revisionCount={filteredRevisions.length} aheadBehind={aheadBehind} filter={filter} workspace={workspace} inspectorVisible={layout.showInspector} leftVisible={layout.showLeft} layoutPreset={layoutPreset} compareBase={compareBase}
         leftRef={leftRef} display={layout} selectedShortId={selectedRevision?.shortId ?? null} conflictCount={operation?.conflicts.length ?? 0}
         onFilter={setFilter} onCheckoutBranch={(name) => { if (name !== repoInfo.headBranch) void runAction(() => api.checkoutBranch(repo.path, name), `已切换到 ${name}`); }} onRefresh={refreshAll} onToggleLeft={() => setLayout((prev) => ({ ...prev, showLeft: !prev.showLeft }))} onToggleInspector={() => setLayout((prev) => ({ ...prev, showInspector: !prev.showInspector }))}
-        onResetLayout={() => setLayout(resetLayout(repo.path, settings))}
+        onResetLayout={resetWorkspaceLayout}
         onWideDiff={() => setLayout((prev) => ({ ...prev, showLeft: false, showInspector: true, inspectorSize: 640 }))}
         onFocusHistory={() => { void switchWorkspace("history").then((ok) => { if (ok) setLayout((prev) => ({ ...prev, showInspector: false })); }); }}
         onBranches={openBranches} onStash={() => setShowStash(true)} onTags={openTags} onSubmodules={() => setShowSubmodules(true)}
         onRemotes={() => setShowRemotes(true)} onWorktrees={() => setShowWorktrees(true)} onPullOptions={() => setShowPullOptions(true)} onMerge={() => setMergeTarget("")} onSearch={() => setShowSearch(true)} onCommandLog={() => setShowCommandLog(true)}
         onBisectStart={() => void runAction(() => api.bisectStart(repo.path), "已启动 Git Bisect，请标记好/坏提交")}
-        onSettings={props.onSettings} onRecovery={() => setShowRecovery(true)}
-        onCompare={() => openCompare(compareBase ?? selectedOids[0] ?? "HEAD", "HEAD")} onClearCompareBase={() => setCompareBase(null)} onRemote={runRemote}
+        onSettings={props.onSettings} onStatistics={() => setShowStatistics(true)} onRecovery={() => setShowRecovery(true)}
+        onCompare={() => openCompare(compareBase ?? selectedOids[0] ?? "HEAD", "HEAD")} onClearCompareBase={() => setCompareBase(null)} onRemote={onRemote}
         onFileExplorer={fileExplorer} onEditRepoFile={editRepoFile} onUpdateAllSubmodules={updateAllSubmodules} onSyncAllSubmodules={syncAllSubmodules}
         onMaintenance={(action) => void maintenance(action)} onRepositorySettings={() => setShowRepoInfo(true)} onCloseRepo={props.onCloseRepo}
         onGoCurrent={goCurrent} onGoCommit={() => setShowSearch(true)} onGoChild={goChild} onGoParent={goParent} onGoMergeBase={goMergeBase}
@@ -1113,10 +1130,10 @@ export default function RepoWorkspace(props: Props) {
                 </section>
               </>}
             </div>
-            <SplitHandle direction="horizontal" label="调整 Diff 面板高度" onResize={(delta) => setLayout((prev) => ({ ...prev, historyDiffHeight: Math.max(0, prev.historyDiffHeight - delta) }))} onReset={() => setLayout((prev) => ({ ...prev, historyDiffHeight: 320 }))} />
-            <section className="main-history-diff" style={{ height: layout.historyDiffHeight }} aria-label="差异">
+            <SplitHandle direction="horizontal" label="调整 Diff 面板高度" onResize={(delta) => updateDiffPrefs((prefs) => ({ height: Math.max(0, prefs.height - delta) }))} onReset={() => setDiffPrefs({ height: 320 })} />
+            <section className="main-history-diff" style={{ height: historyDiffHeight }} aria-label="差异">
               {selectedCommitFile
-                ? <DiffView files={selectedCommitFiles} loadFile={loadCommitFile} loading={detailLoading} highlightEnabled={settings.highlightEnabled} onFileAction={onCommitFileAction} prefKey={repo.path} />
+                ? <DiffView files={selectedCommitFiles} loadFile={loadCommitFile} loading={detailLoading} highlightEnabled={settings.highlightEnabled} onFileAction={onCommitFileAction} />
                 : detailLoading && !commit
                   ? <div className="empty-state" role="status"><span className="spinner" /><span>正在加载提交详情…</span></div>
                   : <div className="empty-state" role="status">
@@ -1147,13 +1164,25 @@ export default function RepoWorkspace(props: Props) {
       </div>
       {resetTarget && <ResetDialog repoPath={repo.path} target={resetTarget} onClose={() => setResetTarget(null)} onChanged={refreshAll} onNotify={props.onNotify} />}
       {showRecovery && <RecoveryDialog repoPath={repo.path} onClose={() => setShowRecovery(false)} onRestore={(oid) => { setShowRecovery(false); setResetTarget(oid); }} />}
-      {showPush && <PushDialog repoPath={repo.path} onClose={() => setShowPush(false)} onChanged={refreshAll} onNotify={props.onNotify} />}
+      {active && remotePanel && <RemoteActionPanel
+        key={remotePanel.kind}
+        repoPath={repo.path}
+        kind={remotePanel.kind}
+        anchor={remotePanel.anchor}
+        branches={branches}
+        currentBranch={repoInfo.headBranch}
+        onClose={() => setRemotePanel(null)}
+        onChanged={refreshAll}
+        onConflict={showConflict}
+        onNotify={props.onNotify}
+      />}
       {showBranches && <BranchDialog repoPath={repo.path} branches={branches} initialStartPoint={branchStart} initialMode={branchMode} initialSelected={branchSelected} onClose={() => setShowBranches(false)} onChanged={(deletedRefs) => { if (deletedRefs) clearDeletedRef(deletedRefs); refreshAll(); }} setMessage={setMessage} onMergeRef={(ref) => setMergeTarget(ref)} />}
       {mergeTarget !== null && <MergeDialog repoPath={repo.path} headBranch={repoInfo.headBranch} branches={branches} initialTarget={mergeTarget || undefined} onClose={() => setMergeTarget(null)} onChanged={refreshAll} onConflict={showConflict} onNotify={props.onNotify} />}
       {showPullOptions && <PullDialog repoPath={repo.path} headBranch={repoInfo.headBranch} onClose={() => setShowPullOptions(false)} onChanged={refreshAll} onConflict={showConflict} onNotify={props.onNotify} />}
       {showRemotes && <RemotesDialog repoPath={repo.path} onClose={() => setShowRemotes(false)} onChanged={refreshAll} setMessage={setMessage} />}
       {showWorktrees && <WorktreeDialog repoPath={repo.path} onClose={() => setShowWorktrees(false)} onChanged={refreshAll} onOpenWorktree={props.onOpenRepo} setMessage={setMessage} />}
       {showCommandLog && <CommandLogDialog repoPath={repo.path} onClose={() => setShowCommandLog(false)} />}
+      {showStatistics && <StatisticsDialog repoPath={repo.path} branches={branches} tags={tags} onClose={() => setShowStatistics(false)} />}
       {showSearch && <SearchDialog repoPath={repo.path} onClose={() => setShowSearch(false)} onSelectCommit={(oid) => { setTask(null); setWorkspace("history"); selectRevision(oid); setLayout((prev) => ({ ...prev, showInspector: true })); }} onOpenFileAtLine={(file) => { setFileAction({ action: "blame", file: { path: file, oldPath: null, status: "modified", isBinary: false, truncated: false, patch: "" } }); }} />}
       {showRepoInfo && <RepositorySettingsDialog repo={repoInfo} onClose={() => setShowRepoInfo(false)} setMessage={setMessage} />}
       {showStash && <StashDialog repoPath={repo.path} onClose={() => setShowStash(false)} onChanged={refreshAll} setMessage={setMessage} />}

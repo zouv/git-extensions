@@ -32,8 +32,6 @@ export interface UILayout extends GridDisplayOptions {
   inspectorSize: number;
   /** 检查器内提交信息区高度（px）；变更文件列表占余下高度。 */
   inspectorInfoHeight: number;
-  /** 主窗口历史视图底部 Diff 面板高度（px）。 */
-  historyDiffHeight: number;
   showLeft: boolean;
   showInspector: boolean;
   changesWidth: number;
@@ -57,7 +55,6 @@ export const DEFAULT_LAYOUT: UILayout = {
   leftWidth: 224,
   inspectorSize: 400,
   inspectorInfoHeight: 260,
-  historyDiffHeight: 320,
   showLeft: true,
   showInspector: true,
   changesWidth: 420,
@@ -120,7 +117,6 @@ export function loadLayout(repoPath: string, settings: AppSettings): UILayout {
       leftWidth: bounded(raw.leftWidth, 0, 100_000, DEFAULT_LAYOUT.leftWidth),
       inspectorSize: bounded(raw.inspectorSize, 0, 100_000, DEFAULT_LAYOUT.inspectorSize),
       inspectorInfoHeight: bounded(raw.inspectorInfoHeight, 60, 100_000, DEFAULT_LAYOUT.inspectorInfoHeight),
-      historyDiffHeight: bounded(raw.historyDiffHeight, 0, 100_000, DEFAULT_LAYOUT.historyDiffHeight),
       showLeft: typeof raw.showLeft === "boolean" ? raw.showLeft : settings.showLeftPanel,
       showInspector: typeof raw.showInspector === "boolean" ? raw.showInspector : true,
       // 变更文件列表宽度不设上限（用户可自由拖拽）；仅挡住手工改坏的非法值。

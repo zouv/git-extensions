@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { FileDiff } from "../types";
 import {
@@ -6,7 +6,7 @@ import {
   parsePatch, selectedFileIndex,
 } from "../viewState";
 import type { FileTreeRow, InlineRow, PatchLine, SplitRow } from "../viewState";
-import { loadDiffPrefs, saveDiffPrefs, subscribeDiffPrefs } from "../diffPrefs";
+import { getDiffPrefs, setDiffPrefs, subscribeDiffPrefs, updateDiffPrefs } from "../diffPrefs";
 import type { DiffMode } from "../diffPrefs";
 import { languageForPath } from "../languages";
 import type { HighlightResponse } from "../highlight.worker";
@@ -30,34 +30,32 @@ export interface HunkActions {
 interface Props {
   files: FileDiff[];
   loading?: boolean;
-  loadFile?: (file: FileDiff) => Promise<FileDiff | null>;
+  /** 按需读取单文件 patch；fullContext=true 时返回包含整个文件的完整上下文。 */
+  loadFile?: (file: FileDiff, fullContext: boolean) => Promise<FileDiff | null>;
   highlightEnabled?: boolean;
   onFileAction?: (action: FileAction, file: FileDiff) => void;
   /** 单文件预览时隐藏文件标题与文件列表，避免与外部文件列表重复。 */
   showFileHeader?: boolean;
   /** 隐藏文件标题时仍显示增删统计。 */
   showStats?: boolean;
-  /** 按仓库保存 Inline / Split 与换行偏好。 */
-  prefKey?: string;
   /** 工作区 / 暂存区预览时的 Hunk 级暂存、取消暂存与丢弃操作。 */
   hunkActions?: HunkActions;
 }
 
 type DisplayRow = FileTreeRow<FileDiff>;
 
-export default function DiffView({ files, loading, highlightEnabled = true, onFileAction, loadFile, showFileHeader = true, showStats = true, prefKey = "", hunkActions }: Props) {
+export default function DiffView({ files, loading, highlightEnabled = true, onFileAction, loadFile, showFileHeader = true, showStats = true, hunkActions }: Props) {
+  const prefs = useSyncExternalStore(subscribeDiffPrefs, getDiffPrefs, getDiffPrefs);
+  const { mode: diffMode, wrap, collapse, fullContext } = prefs;
   const [selected, setSelected] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(400);
   const [menu, setMenu] = useState<{ x: number; y: number; file: FileDiff } | null>(null);
   const [lineMenu, setLineMenu] = useState<LineMenu | null>(null);
   const [highlight, setHighlight] = useState<Map<number, string>>(new Map());
-  const [wrap, setWrap] = useState(() => loadDiffPrefs(prefKey).wrap);
   const [fileFilter, setFileFilter] = useState("");
   const [listMode, setListMode] = useState<"list" | "tree">("list");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [diffMode, setDiffMode] = useState<DiffMode>(() => loadDiffPrefs(prefKey).mode);
-  const [collapse, setCollapse] = useState(false);
   const [expandedFolds, setExpandedFolds] = useState<Set<string>>(new Set());
   const [activeHunk, setActiveHunk] = useState(-1);
   const workerRef = useRef<Worker | null>(null);
@@ -66,31 +64,23 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
   const rootRef = useRef<HTMLDivElement>(null);
   const selectedPath = useRef<string | null>(null);
   useEffect(() => { setSelected(selectedFileIndex(files, selectedPath.current)); }, [files]);
-  // 偏好按仓库键持久化；prefKey 变化时重读，并订阅同仓库其它 DiffView / 其它窗口的修改，
-  // 避免常驻挂载的视图停留在旧模式或在切换时把旧状态写回。
-  useEffect(() => {
-    const initial = loadDiffPrefs(prefKey);
-    setDiffMode(initial.mode);
-    setWrap(initial.wrap);
-    return subscribeDiffPrefs(prefKey, (next) => {
-      setDiffMode((current) => current === next.mode ? current : next.mode);
-      setWrap((current) => current === next.wrap ? current : next.wrap);
-    });
-  }, [prefKey]);
 
   const manifestFile = files.length > 0 ? files[Math.min(selected, files.length - 1)] : null;
-  const [loaded, setLoaded] = useState<{ source: FileDiff; value: FileDiff | null } | null>(null);
+  const [loaded, setLoaded] = useState<{ source: FileDiff; fullContext: boolean; value: FileDiff | null } | null>(null);
   const [patchError, setPatchError] = useState("");
   const lazySequence = useRef(0);
-  const file = loadFile ? loaded?.source === manifestFile ? loaded.value : null : manifestFile;
-  const patchLoading = !!loadFile && !!manifestFile && loaded?.source !== manifestFile && !patchError;
+  const loadedMatches = !!loaded && loaded.source === manifestFile && loaded.fullContext === fullContext;
+  // 清单已带 patch（如变更预览）且未要求完整上下文时直接使用，避免重复请求。
+  const inlinePatch = !fullContext && !!manifestFile?.patch;
+  const file = loadFile ? (loadedMatches ? loaded.value : inlinePatch ? manifestFile : null) : manifestFile;
+  const patchLoading = !!loadFile && !!manifestFile && !loadedMatches && !inlinePatch && !patchError;
   useEffect(() => {
     const id = ++lazySequence.current; setPatchError("");
-    if (!loadFile || !manifestFile) return;
-    loadFile(manifestFile).then((value) => { if (id === lazySequence.current) setLoaded({ source: manifestFile, value }); })
-      .catch((e) => { if (id === lazySequence.current) { setPatchError(String(e)); setLoaded({ source: manifestFile, value: null }); } });
+    if (!loadFile || !manifestFile || inlinePatch) return;
+    loadFile(manifestFile, fullContext).then((value) => { if (id === lazySequence.current) setLoaded({ source: manifestFile, fullContext, value }); })
+      .catch((e) => { if (id === lazySequence.current) { setPatchError(String(e)); setLoaded({ source: manifestFile, fullContext, value: null }); } });
     return () => { lazySequence.current++; };
-  }, [manifestFile, loadFile]);
+  }, [manifestFile, loadFile, fullContext, inlinePatch]);
 
   const parsed = useMemo(() => parsePatch(file?.patch ?? ""), [file]);
   const additions = useMemo(() => parsed.lines.filter((line) => line.kind === "add").length, [parsed]);
@@ -241,9 +231,11 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
     setScrollTop(0); setActiveHunk(-1);
     if (patchRef.current) patchRef.current.scrollTop = 0;
   }, [fileFilter]);
-  const changeDiffMode = (mode: DiffMode) => { setDiffMode(mode); saveDiffPrefs(prefKey, { mode, wrap }); setExpandedFolds(new Set()); resetPatchScroll(); };
-  const changeWrap = (next: boolean) => { setWrap(next); saveDiffPrefs(prefKey, { mode: diffMode, wrap: next }); };
-  const toggleCollapse = () => { setCollapse((value) => !value); setExpandedFolds(new Set()); resetPatchScroll(); };
+  const changeDiffMode = (mode: DiffMode) => { setDiffPrefs({ mode }); setExpandedFolds(new Set()); resetPatchScroll(); };
+  const changeWrap = (next: boolean) => setDiffPrefs({ wrap: next });
+  const toggleCollapse = () => { updateDiffPrefs((current) => ({ collapse: !current.collapse })); setExpandedFolds(new Set()); resetPatchScroll(); };
+  // 完整上下文会重新生成 patch（未修改行全部展开），滚动与折叠状态一并重置。
+  const toggleFullContext = () => { updateDiffPrefs((current) => ({ fullContext: !current.fullContext })); setExpandedFolds(new Set()); resetPatchScroll(); };
   const toggleFold = (runId: string) => setExpandedFolds((prev) => {
     const next = new Set(prev);
     if (next.has(runId)) next.delete(runId); else next.add(runId);
@@ -399,15 +391,16 @@ export default function DiffView({ files, loading, highlightEnabled = true, onFi
             {showStats && <span className="diff-stat" aria-label={`新增 ${additions} 行，删除 ${deletions} 行`}><span className="diff-stat-add">+{additions}</span><span className="diff-stat-del">−{deletions}</span></span>}
             {showStats && <span className="diff-toolbar-separator" aria-hidden="true" />}
             <div className="diff-mode-group" role="group" aria-label="差异视图模式">
-              <button className={`text-toggle${diffMode === "inline" ? " active" : ""}`} aria-pressed={diffMode === "inline"} title="行内差异" onClick={() => changeDiffMode("inline")}>行内</button>
-              <button className={`text-toggle${diffMode === "split" ? " active" : ""}`} aria-pressed={diffMode === "split"} title="并排差异" onClick={() => changeDiffMode("split")}>并排</button>
+              <button className={`icon-button${diffMode === "inline" ? " active" : ""}`} aria-pressed={diffMode === "inline"} title="Show In-Line（行内差异）" aria-label="行内差异" onClick={() => changeDiffMode("inline")}><Icon name="inline" size={14} /></button>
+              <button className={`icon-button${diffMode === "split" ? " active" : ""}`} aria-pressed={diffMode === "split"} title="Show Side-by-Side（并排差异）" aria-label="并排差异" onClick={() => changeDiffMode("split")}><Icon name="split" size={14} /></button>
             </div>
             <button className="icon-button diff-prev" title="上一处差异 (Alt+↑ / p)" aria-label="上一处差异" disabled={!hasHunks || activeHunk <= 0} onClick={() => goDiff(-1)}><Icon name="chevron-down" size={14} /></button>
             <button className="icon-button" title="下一处差异 (Alt+↓ / n)" aria-label="下一处差异" disabled={!hasHunks || activeHunk >= hunkRows.length - 1} onClick={() => goDiff(1)}><Icon name="chevron-down" size={14} /></button>
             <span className="diff-hunk-count" title="当前差异块 / 总数">{hasHunks ? `${Math.max(activeHunk, 0) + 1}/${hunkRows.length}` : "—"}</span>
-            <button className={`text-toggle${collapse ? " active" : ""}`} aria-pressed={collapse} title="Collapse Unchanged Fragments（折叠未修改片段）" onClick={toggleCollapse}>折叠未修改</button>
-            <button className={`text-toggle${wrap ? " active" : ""}`} disabled={contentLines.length > MAX_HIGHLIGHT_LINES} title={contentLines.length > MAX_HIGHLIGHT_LINES ? "超大 patch 不支持自动换行" : "自动换行"} onClick={() => changeWrap(!wrap)}>换行</button>
-            <button className="icon-button" title="复制当前 patch" onClick={() => { if (file) void navigator.clipboard?.writeText(file.patch); }}><Icon name="copy" size={14} /></button>
+            <button className={`icon-button${collapse ? " active" : ""}`} aria-pressed={collapse} title="Collapse Unchanged Fragments（折叠未修改片段）" aria-label="折叠未修改片段" onClick={toggleCollapse}><Icon name="collapse" size={14} /></button>
+            <button className={`icon-button${wrap ? " active" : ""}`} aria-pressed={wrap} disabled={contentLines.length > MAX_HIGHLIGHT_LINES} title={contentLines.length > MAX_HIGHLIGHT_LINES ? "超大 patch 不支持自动换行" : "Wrap Lines（自动换行）"} aria-label="自动换行" onClick={() => changeWrap(!wrap)}><Icon name="wrap" size={14} /></button>
+            {loadFile && <button className={`icon-button${fullContext ? " active" : ""}`} aria-pressed={fullContext} title="Show Full Content（显示完整内容）" aria-label="显示完整内容" onClick={toggleFullContext}><Icon name="full-context" size={14} /></button>}
+            <button className="icon-button" title="复制当前 patch" aria-label="复制当前 patch" onClick={() => { if (file) void navigator.clipboard?.writeText(file.patch); }}><Icon name="copy" size={14} /></button>
           </div>
           {file?.truncated && <div className="truncated-hint" role="status">文件或 patch 超过安全限制，未完整显示；请使用外部工具查看。</div>}
           <div className={`diff-patch${effectiveWrap ? " wrap" : ""}`} onScroll={(e) => { setScrollTop(e.currentTarget.scrollTop); setActiveHunk(computeActiveHunk()); }} ref={patchRef}>

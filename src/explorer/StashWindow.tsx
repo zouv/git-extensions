@@ -300,12 +300,12 @@ export default function StashWindow({ target, onBusyChange, onDirtyChange, setMe
             files={[preview]}
             highlightEnabled={highlightEnabled}
             showFileHeader={false}
-            prefKey={repoPath}
-            loadFile={(file) => isWorking
-              ? api.getWorktreeFileDiff(repoPath, (working.find((item) => item.path === file.path)?.staged ?? false), file.path, file.oldPath)
+
+            loadFile={(file, fullContext) => isWorking
+              ? api.getWorktreeFileDiff(repoPath, (working.find((item) => item.path === file.path)?.staged ?? false), file.path, file.oldPath, fullContext)
                 .then((diffs) => diffs.find((item) => item.path === file.path || item.oldPath === file.path) ?? null)
               : stashOid
-                ? api.getCommitFileDiff(repoPath, stashOid, file.path, file.oldPath)
+                ? api.getCommitFileDiff(repoPath, stashOid, file.path, file.oldPath, fullContext)
                   .then((diffs) => diffs.find((item) => item.path === file.path || item.oldPath === file.path) ?? null)
                 : Promise.resolve(null)}
           />

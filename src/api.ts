@@ -25,7 +25,8 @@ import type {
   ResetMode, ResetPreview, ResetResult, RecoveryEntry,
   ExplorerIntegrationInfo, LaunchRequest, PatchPreview, ExplorerMenuItem, ExplorerAction,
   WindowBootstrap, ExplorerTarget, ScopedHistoryEntry, CommandOutput,
-  RemoteInfo, CommandLogEntry, GrepMatch, MergeMode, PullMode, CloneProgress, CloneOptions,
+  RemoteInfo, CommandLogEntry, GrepMatch, MergeMode, PullMode, CloneProgress, CloneOptions, RemoteProgress,
+  Statistics,
   PatchFileInfo, PatchApplyState, FileContent,
   BranchDeleteStatus,
   RepoFileTarget, GitMaintenanceAction,
@@ -69,8 +70,8 @@ export const api = {
   getCommitDiff: (path: string, oid: string) =>
     invoke<FileDiff[]>("get_commit_diff", { path, oid }),
   getCommitFiles: (path: string, oid: string) => invoke<FileDiff[]>("get_commit_files", { path, oid }),
-  getCommitFileDiff: (path: string, oid: string, file: string, oldFile?: string | null) => invoke<FileDiff[]>("get_commit_file_diff", { path, oid, file, oldFile }),
-  getWorktreeFileDiff: (path: string, staged: boolean, file: string, oldFile?: string | null) => invoke<FileDiff[]>("get_worktree_file_diff", { path, staged, file, oldFile }),
+  getCommitFileDiff: (path: string, oid: string, file: string, oldFile?: string | null, fullContext = false) => invoke<FileDiff[]>("get_commit_file_diff", { path, oid, file, oldFile, fullContext }),
+  getWorktreeFileDiff: (path: string, staged: boolean, file: string, oldFile?: string | null, fullContext = false) => invoke<FileDiff[]>("get_worktree_file_diff", { path, staged, file, oldFile, fullContext }),
   getWorktreeDiff: (path: string, staged: boolean) =>
     invoke<FileDiff[]>("get_worktree_diff", { path, staged }),
   getStatus: (path: string) => invoke<StatusSnapshot>("get_status", { path }),
@@ -115,8 +116,12 @@ export const api = {
   getAheadBehind: (path: string) => invoke<AheadBehind | null>("get_ahead_behind", { path }),
   fetch: (path: string, remote?: string, prune = false) =>
     writeInvoke<string>("fetch", { path, remote, prune }),
+  fetchWithProgress: (path: string, options: { remote?: string; prune?: boolean; force?: boolean; noTags?: boolean }, operationId: string) =>
+    writeInvoke<string>("fetch_with_progress", { path, remote: options.remote, prune: options.prune ?? false, force: options.force ?? false, noTags: options.noTags ?? false, operationId }),
   pull: (path: string, mode: PullMode = "default", autostash = false, remote?: string, branch?: string, fetchOnly = false, prune = false, tagsMode: "auto" | "all" | "none" = "auto") =>
     writeInvoke<string>("pull", { path, mode, autostash, remote, branch, fetchOnly, prune, tagsMode }),
+  pullWithProgress: (path: string, mode: PullMode, autostash: boolean, remote: string | undefined, branch: string | undefined, prune: boolean, tagsMode: "auto" | "all" | "none", operationId: string) =>
+    writeInvoke<string>("pull_with_progress", { path, mode, autostash, remote, branch, fetchOnly: false, prune, tagsMode, operationId }),
   pullWithOutput: (path: string) => writeInvoke<CommandOutput>("pull_with_output", { path }),
   getPushInfo: (path: string) => invoke<PushInfo>("get_push_info", { path }),
   getUnpushedCommits: (path: string, remote?: string | null, branch?: string | null) =>
@@ -142,6 +147,31 @@ export const api = {
       force,
       recurseSubmodules,
     }),
+  pushWithProgress: (
+    path: string,
+    remote: string | undefined,
+    branch: string | undefined,
+    preview: PushInfo | undefined,
+    forceWithLease: boolean,
+    pushTags: boolean,
+    force: boolean,
+    recurseSubmodules: boolean,
+    noVerify: boolean,
+    operationId: string,
+  ) =>
+    writeInvoke<string>("push_with_progress", {
+      path,
+      remote,
+      branch,
+      expectedHead: preview?.headOid,
+      expectedBranch: preview?.branchRef,
+      forceWithLease,
+      pushTags,
+      force,
+      recurseSubmodules,
+      noVerify,
+      operationId,
+    }),
   stashList: (path: string) => invoke<StashInfo[]>("stash_list", { path }),
   stashPush: (path: string, message: string, includeUntracked: boolean, keepIndex = false, paths: string[] = []) =>
     writeInvoke<string>("stash_push", { path, message, includeUntracked, keepIndex, paths }),
@@ -153,6 +183,8 @@ export const api = {
   rebase: (path: string, onto: string) => writeInvoke<string>("rebase", { path, onto }),
   getContainedIn: (path: string, oid: string) =>
     invoke<ContainedInfo>("get_contained_in", { path, oid }),
+  getStatistics: (path: string, revspec?: string | null, author?: string | null) =>
+    invoke<Statistics>("get_statistics", { path, revspec: revspec ?? null, author: author ?? null }),
   tagList: (path: string) => invoke<TagInfo[]>("tag_list", { path }),
   createTag: (path: string, name: string, oid?: string, message?: string) =>
     writeInvoke<string>("create_tag", { path, name, oid, message }),
@@ -210,7 +242,7 @@ export const api = {
   fileLog: (path: string, file: string, maxCount?: number) =>
     invoke<FileLogEntry[]>("file_log", { path, file, maxCount }),
   getCompareFiles: (path: string, base: string, target: string) => invoke<CompareResult>("get_compare_files", { path, base, target }),
-  getCompareFileDiff: (path: string, base: string, target: string, file: string, oldFile?: string | null) => invoke<FileDiff[]>("get_compare_file_diff", { path, base, target, file, oldFile }),
+  getCompareFileDiff: (path: string, base: string, target: string, file: string, oldFile?: string | null, fullContext = false) => invoke<FileDiff[]>("get_compare_file_diff", { path, base, target, file, oldFile, fullContext }),
   getCompareDiff: (path: string, base: string, target: string) =>
     invoke<CompareResult>("get_compare_diff", { path, base, target }),
   getOperationState: (path: string) => invoke<OperationState>("get_operation_state", { path }),
@@ -296,6 +328,11 @@ export function onLogBatch(handler: (batch: LogBatch) => void) {
 /** 订阅克隆进度；回调内按 operationId 过滤其它窗口的克隆。 */
 export function onCloneProgress(handler: (progress: CloneProgress) => void) {
   return listen<CloneProgress>("clone-progress", (event) => handler(event.payload));
+}
+
+/** 订阅 Fetch / Pull / Push 进度；调用方按 operationId 过滤其它窗口 / 仓库的操作。 */
+export function onRemoteProgress(handler: (progress: RemoteProgress) => void) {
+  return listen<RemoteProgress>("remote-progress", (event) => handler(event.payload));
 }
 
 export function formatDate(seconds: number): string {

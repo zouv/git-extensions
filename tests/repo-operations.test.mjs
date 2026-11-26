@@ -210,9 +210,30 @@ test("Reset、跳过、冲突与 Stash 写 API 完整传递预览快照", async 
 test("历史、工作区与对比单文件读取保留改名的两侧路径", async () => {
   const received = []; setInvoke((command, args) => { received.push([command, args]); return Promise.resolve([]); });
   await api.getCommitFileDiff("renames", "oid", "new.txt", "old.txt");
-  assert.deepEqual(received.at(-1), ["get_commit_file_diff", { path: "renames", oid: "oid", file: "new.txt", oldFile: "old.txt" }]);
+  assert.deepEqual(received.at(-1), ["get_commit_file_diff", { path: "renames", oid: "oid", file: "new.txt", oldFile: "old.txt", fullContext: false }]);
   await api.getWorktreeFileDiff("renames", true, "new.txt", "old.txt");
   assert.equal(received.at(-1)[1].oldFile, "old.txt");
   await api.getCompareFileDiff("renames", "base", "target", "new.txt", "old.txt");
   assert.equal(received.at(-1)[1].oldFile, "old.txt");
+  await api.getCommitFileDiff("renames", "oid", "full.txt", null, true);
+  assert.equal(received.at(-1)[1].fullContext, true);
+});
+
+test("Fetch / Pull / Push 进度命令完整传递选项与 operationId", async () => {
+  const received = []; setInvoke((command, args) => { received.push([command, args]); return Promise.resolve(""); });
+  await api.fetchWithProgress("progress", { remote: "origin", force: true, noTags: true }, "op-fetch");
+  assert.deepEqual(received.at(-1), ["fetch_with_progress", { path: "progress", remote: "origin", prune: false, force: true, noTags: true, operationId: "op-fetch" }]);
+  await api.pullWithProgress("progress", "rebase", false, "origin", "main", true, "all", "op-pull");
+  assert.deepEqual(received.at(-1), ["pull_with_progress", { path: "progress", mode: "rebase", autostash: false, remote: "origin", branch: "main", fetchOnly: false, prune: true, tagsMode: "all", operationId: "op-pull" }]);
+  const preview = { branch: "main", branchRef: "refs/heads/main", headOid: "head", hasUpstream: false, upstream: null, remotes: ["origin"] };
+  await api.pushWithProgress("progress", "origin", "main", preview, false, true, false, false, true, "op-push");
+  assert.deepEqual(received.at(-1), ["push_with_progress", { path: "progress", remote: "origin", branch: "main", expectedHead: "head", expectedBranch: "refs/heads/main", forceWithLease: false, pushTags: true, force: false, recurseSubmodules: false, noVerify: true, operationId: "op-push" }]);
+});
+
+test("统计命令按 ref / 作者筛选传递参数", async () => {
+  const received = []; setInvoke((command, args) => { received.push([command, args]); return Promise.resolve({}); });
+  await api.getStatistics("stats");
+  assert.deepEqual(received.at(-1), ["get_statistics", { path: "stats", revspec: null, author: null }]);
+  await api.getStatistics("stats", "origin/main", "author@example.com");
+  assert.deepEqual(received.at(-1), ["get_statistics", { path: "stats", revspec: "origin/main", author: "author@example.com" }]);
 });

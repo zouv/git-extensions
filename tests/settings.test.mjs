@@ -237,16 +237,16 @@ test("分组显示方式默认页签内图标，只接受 tab / pin", () => {
   });
 });
 
-test("检查器详情高度与底部 Diff 高度持久化", () => {
+test("检查器详情高度持久化，底部 Diff 高度改为共享状态", () => {
   withStorage((storage) => {
     storage.setItem("git-extensions.layout.v2:/panes", JSON.stringify({ inspectorInfoHeight: 340, historyDiffHeight: 280 }));
     const loaded = loadLayout("/panes", DEFAULT_SETTINGS);
     assert.equal(loaded.inspectorInfoHeight, 340);
-    assert.equal(loaded.historyDiffHeight, 280);
-    storage.setItem("git-extensions.layout.v2:/pane-bad", JSON.stringify({ inspectorInfoHeight: "tall", historyDiffHeight: "low" }));
+    // 旧字段被忽略：底部 Diff 高度不再按仓库保存。
+    assert.equal("historyDiffHeight" in loaded, false);
+    storage.setItem("git-extensions.layout.v2:/pane-bad", JSON.stringify({ inspectorInfoHeight: "tall" }));
     const fallback = loadLayout("/pane-bad", DEFAULT_SETTINGS);
     assert.equal(fallback.inspectorInfoHeight, DEFAULT_LAYOUT.inspectorInfoHeight);
-    assert.equal(fallback.historyDiffHeight, DEFAULT_LAYOUT.historyDiffHeight);
   });
 });
 

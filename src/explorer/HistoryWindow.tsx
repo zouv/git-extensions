@@ -279,9 +279,9 @@ export default function HistoryWindow({ target, onBusyChange, mode = "file-histo
             files={selectedFileDiff ? [selectedFileDiff] : []}
             loading={detailLoading}
             highlightEnabled={highlightEnabled}
-            prefKey={repoPath}
-            loadFile={(file) => selected
-              ? api.getCommitFileDiff(repoPath, selected, file.path, file.oldPath)
+
+            loadFile={(file, fullContext) => selected
+              ? api.getCommitFileDiff(repoPath, selected, file.path, file.oldPath, fullContext)
                 .then((diffs) => diffs.find((item) => item.path === file.path || item.oldPath === file.path) ?? null)
               : Promise.resolve(null)}
           />

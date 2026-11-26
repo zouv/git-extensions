@@ -4,12 +4,32 @@ use crate::error::GitResult;
 use tauri::Emitter;
 
 pub const CLONE_PROGRESS_EVENT: &str = "clone-progress";
+pub const REMOTE_PROGRESS_EVENT: &str = "remote-progress";
 
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloneProgress {
     pub operation_id: String,
     pub line: String,
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteProgress {
+    pub operation_id: String,
+    pub line: String,
+}
+
+fn emit_remote_progress(app: &tauri::AppHandle, operation_id: &str, line: &str) {
+    if let Err(error) = app.emit(
+        REMOTE_PROGRESS_EVENT,
+        RemoteProgress {
+            operation_id: operation_id.to_owned(),
+            line: line.to_owned(),
+        },
+    ) {
+        eprintln!("emit remote-progress failed: {error}");
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -376,6 +396,30 @@ pub async fn fetch(path: String, remote: Option<String>, prune: Option<bool>) ->
     run_blocking(move || cli::fetch_ex(path, remote, prune.unwrap_or(false))).await
 }
 
+/// 带进度的 Fetch：进度行经 `remote-progress` 事件按 operationId 推送。
+#[tauri::command]
+pub async fn fetch_with_progress(
+    app: tauri::AppHandle,
+    path: String,
+    remote: Option<String>,
+    prune: Option<bool>,
+    force: Option<bool>,
+    no_tags: Option<bool>,
+    operation_id: String,
+) -> GitResult<String> {
+    run_blocking(move || {
+        cli::fetch_ex_with_progress(
+            path,
+            remote,
+            prune.unwrap_or(false),
+            force.unwrap_or(false),
+            no_tags.unwrap_or(false),
+            |line| emit_remote_progress(&app, &operation_id, line),
+        )
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn pull(
     path: String,
@@ -405,6 +449,37 @@ pub async fn pull(
 #[tauri::command]
 pub async fn pull_with_output(path: String) -> GitResult<cli::CommandOutput> {
     run_blocking(move || cli::pull_with_output(path)).await
+}
+
+/// 带进度的 Pull：抓取阶段与合并输出经 `remote-progress` 事件推送；
+/// 合并冲突仍以错误返回，由前端打开冲突中心。
+#[tauri::command]
+pub async fn pull_with_progress(
+    app: tauri::AppHandle,
+    path: String,
+    mode: Option<String>,
+    autostash: Option<bool>,
+    remote: Option<String>,
+    branch: Option<String>,
+    fetch_only: Option<bool>,
+    prune: Option<bool>,
+    tags_mode: Option<String>,
+    operation_id: String,
+) -> GitResult<String> {
+    run_blocking(move || {
+        cli::pull_ex_advanced_with_progress(
+            path,
+            mode,
+            autostash.unwrap_or(false),
+            remote,
+            branch,
+            fetch_only.unwrap_or(false),
+            prune.unwrap_or(false),
+            tags_mode,
+            |line| emit_remote_progress(&app, &operation_id, line),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -448,6 +523,41 @@ pub async fn push(
             push_tags.unwrap_or(false),
             force.unwrap_or(false),
             recurse_submodules.unwrap_or(false),
+        )
+    })
+    .await
+}
+
+/// 带进度的 Push：支持 `--no-verify`（跳过 pre-push hook）与实时进度行；
+/// 预览过期、强制推送等安全校验与原 Push 一致。
+#[tauri::command]
+pub async fn push_with_progress(
+    app: tauri::AppHandle,
+    path: String,
+    remote: Option<String>,
+    branch: Option<String>,
+    expected_head: Option<String>,
+    expected_branch: Option<String>,
+    force_with_lease: Option<bool>,
+    push_tags: Option<bool>,
+    force: Option<bool>,
+    recurse_submodules: Option<bool>,
+    no_verify: Option<bool>,
+    operation_id: String,
+) -> GitResult<String> {
+    run_blocking(move || {
+        cli::push_ex_advanced_with_progress(
+            path,
+            remote,
+            branch,
+            expected_head,
+            expected_branch,
+            force_with_lease.unwrap_or(false),
+            push_tags.unwrap_or(false),
+            force.unwrap_or(false),
+            recurse_submodules.unwrap_or(false),
+            no_verify.unwrap_or(false),
+            |line| emit_remote_progress(&app, &operation_id, line),
         )
     })
     .await
@@ -661,9 +771,10 @@ pub async fn get_commit_file_diff(
     oid: String,
     file: String,
     old_file: Option<String>,
+    full_context: bool,
 ) -> GitResult<Vec<super::diff::FileDiff>> {
     super::operations::run_read(move || {
-        super::diff::get_commit_file_diff_with_old(path, oid, file, old_file)
+        super::diff::get_commit_file_diff_with_old(path, oid, file, old_file, full_context)
     })
     .await
 }
@@ -682,9 +793,10 @@ pub async fn get_worktree_file_diff(
     staged: bool,
     file: String,
     old_file: Option<String>,
+    full_context: bool,
 ) -> GitResult<Vec<super::diff::FileDiff>> {
     super::operations::run_read(move || {
-        super::diff::get_worktree_file_diff_with_old(path, staged, file, old_file)
+        super::diff::get_worktree_file_diff_with_old(path, staged, file, old_file, full_context)
     })
     .await
 }
@@ -714,9 +826,10 @@ pub async fn get_compare_file_diff(
     target: String,
     file: String,
     old_file: Option<String>,
+    full_context: bool,
 ) -> GitResult<Vec<super::diff::FileDiff>> {
     super::operations::run_read(move || {
-        super::diff::get_compare_file_diff(path, base, target, file, old_file)
+        super::diff::get_compare_file_diff(path, base, target, file, old_file, full_context)
     })
     .await
 }
@@ -762,6 +875,15 @@ pub async fn worktree_list(path: String) -> GitResult<Vec<super::repo::WorktreeI
 #[tauri::command]
 pub async fn get_contained_in(path: String, oid: String) -> GitResult<super::cli::ContainedInfo> {
     super::operations::run_read(move || super::cli::get_contained_in(path, oid)).await
+}
+
+#[tauri::command]
+pub async fn get_statistics(
+    path: String,
+    revspec: Option<String>,
+    author: Option<String>,
+) -> GitResult<super::stats::Statistics> {
+    super::operations::run_read(move || super::stats::get_statistics(path, revspec, author)).await
 }
 
 #[tauri::command]

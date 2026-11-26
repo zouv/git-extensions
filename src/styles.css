@@ -280,8 +280,12 @@ kbd { font: 11px Consolas, monospace; }
 .diff-file-filter input { flex: 1; min-width: 0; height: 24px; padding: 0; border: 0; outline: 0; background: transparent; }
 .diff-file-note { padding: 2px 8px 6px; color: var(--muted); font-size: 11px; }
 .diff-toolbar .icon-button { width: 24px; height: 24px; font-size: 13px; }
+.diff-toolbar .icon-button.active { color: var(--accent); background: var(--selected); }
 .diff-toolbar-separator { flex: 0 0 auto; width: 1px; height: 18px; margin: 0 4px; background: var(--border); }
-.diff-mode-group { display: flex; gap: 2px; }
+/* 行内 / 并排：药丸形分段按钮，选中段与未选中段有明显底色差。 */
+.diff-mode-group { display: flex; gap: 0; padding: 1px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); }
+.diff-mode-group .icon-button { width: 28px; height: 22px; border-radius: 999px; }
+.diff-mode-group .icon-button + .icon-button { margin-left: 1px; }
 .diff-prev .icon { transform: rotate(180deg); }
 .text-toggle { padding: 2px 6px; border: 0; background: transparent; color: var(--muted); font-size: 11px; }
 .text-toggle.active { color: var(--accent); background: var(--hover); }
@@ -481,6 +485,74 @@ kbd { font: 11px Consolas, monospace; }
 .group-assign-row .alias-input { width: 150px; flex: 0 0 150px; }
 .group-assign-row select { width: 140px; flex: 0 0 140px; }
 
+/* Fetch / Pull / Push 锚定面板（顶部对齐工具栏按钮，确认后在面板内显示进度） */
+.remote-panel { position: fixed; z-index: 300; width: min(460px, calc(100vw - 16px)); max-height: calc(100vh - 16px); display: flex; flex-direction: column; background: var(--elevated); border: 1px solid #3a4350; border-radius: 8px; box-shadow: 0 16px 44px rgba(0, 0, 0, .55); }
+.remote-panel-title { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--fg); }
+.remote-panel-title strong { font-size: 14px; font-weight: 600; }
+.remote-panel-body { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; overflow: auto; }
+.remote-panel-form { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 8px 10px; margin-bottom: 2px; }
+.remote-panel-label { color: var(--muted); text-align: right; font-size: 12px; }
+.remote-panel-form select, .remote-panel-form input { width: 100%; min-width: 0; }
+.remote-panel-form select:disabled { opacity: .8; }
+.remote-panel-static { display: inline-flex; align-items: center; gap: 5px; min-height: 27px; color: var(--fg); }
+.remote-panel .checkbox-row { font-size: 12px; }
+.remote-panel-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
+.remote-panel-running { display: flex; align-items: center; gap: 6px; color: var(--fg); font-size: 12px; }
+.remote-panel-command { display: block; padding: 5px 7px; background: #101318; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); font: 11px Consolas, monospace; overflow-wrap: anywhere; }
+.remote-panel-track { position: relative; height: 6px; overflow: hidden; background: #101318; border: 1px solid var(--border); border-radius: 4px; }
+.remote-panel-fill { height: 100%; background: var(--accent); transition: width .2s ease; }
+.remote-panel-track.indeterminate .remote-panel-fill { width: 35%; animation: remote-progress 1.1s ease-in-out infinite; }
+@keyframes remote-progress { 0% { transform: translateX(-100%); } 100% { transform: translateX(330%); } }
+.remote-panel-log { max-height: 150px; margin: 0; padding: 6px 7px; overflow: auto; background: #101318; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); font: 11px/1.5 Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.remote-panel-commits { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; border-top: 1px solid var(--border); font-size: 12px; }
+.remote-panel-commit-list { display: flex; flex-direction: column; max-height: 120px; overflow: auto; }
+.remote-panel-commit { display: flex; justify-content: flex-start; gap: 8px; padding: 3px 6px; border: 0; border-radius: 3px; background: transparent; color: var(--fg); text-align: left; font-size: 12px; }
+.remote-panel-commit:hover { background: var(--hover); }
+.remote-panel-commit code { flex: 0 0 auto; color: var(--accent); }
+.remote-panel-commit span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 提交统计 */
+.modal.statistics-dialog { width: min(860px, calc(100vw - 40px)); }
+.statistics { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.statistics-tabs { display: flex; align-self: center; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); }
+.statistics-tab { padding: 4px 18px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .4px; }
+.statistics-tab:hover:not(.active) { background: var(--hover); color: var(--fg); }
+.statistics-tab.active { background: var(--accent); color: #0b1220; }
+.statistics-main { display: flex; gap: 12px; min-height: 0; }
+.statistics-authors { flex: 0 0 230px; display: flex; flex-direction: column; gap: 6px; min-height: 0; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.statistics-ref { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.statistics-ref select { flex: 1; min-width: 0; }
+.statistics-author-list { flex: 1; min-height: 0; max-height: 320px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.statistics-author { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 7px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--fg); text-align: left; }
+.statistics-author:hover { background: var(--hover); }
+.statistics-author.selected { background: var(--selected); border-color: #29445f; }
+.statistics-avatar { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex: 0 0 20px; border-radius: 3px; font-size: 9px; font-weight: 700; letter-spacing: .02em; }
+.statistics-avatar.all { background: #29313c; color: var(--muted); }
+.statistics-author-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.statistics-author-count { flex: 0 0 auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.statistics-chart-area { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.statistics-chart { position: relative; flex: 1; width: 100%; min-width: 0; }
+.statistics-chart-plot { position: relative; }
+.statistics-chart-caption { padding: 2px 4px 0; color: var(--muted); font-size: 11px; }
+.statistics-chart svg { display: block; overflow: visible; }
+.statistics-grid { stroke: var(--border); stroke-width: 1; opacity: .55; }
+.statistics-axis { stroke: #3a4350; stroke-width: 1; }
+.statistics-tick { fill: var(--muted); font: 10px Consolas, "Microsoft YaHei", monospace; }
+.statistics-bar { fill: var(--accent); }
+.statistics-bar:hover { fill: #8cc2ff; }
+.statistics-empty { fill: var(--muted); font-size: 12px; }
+.statistics-tooltip { position: absolute; z-index: 2; transform: translate(-50%, -100%); display: flex; flex-direction: column; gap: 1px; padding: 5px 8px; border: 1px solid #3a4350; border-radius: 5px; background: var(--elevated); box-shadow: 0 6px 18px rgba(0, 0, 0, .45); pointer-events: none; white-space: nowrap; font-size: 11px; }
+.statistics-tooltip strong { color: var(--fg); font-weight: 600; }
+.statistics-tooltip span { color: var(--muted); }
+.statistics-loading { position: absolute; top: 2px; right: 6px; color: var(--muted); }
+.statistics-footer { display: flex; justify-content: space-between; padding: 8px 2px 0; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; letter-spacing: .3px; }
+.statistics-footer strong { color: var(--fg); font-variant-numeric: tabular-nums; }
+@media (max-width: 700px) {
+  .statistics-main { flex-direction: column; }
+  .statistics-authors { flex: 0 0 auto; }
+  .statistics-author-list { max-height: 150px; }
+}
+
 /* 弹窗与确认 */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .58); display: flex; align-items: center; justify-content: center; z-index: 400; }
 .modal.about-dialog { width: min(480px, calc(100vw - 40px)); }
@@ -653,6 +725,7 @@ body.dialog-resizing { user-select: none; }
 }
 @media (max-width: 1100px) {
   .toolbar-overflow { display: none; }
+  .toolbar-overflow-separator { display: none; }
   .toolbar-more { display: inline-flex; }
   .rev-author { width: 100px; }
   .diff-file-list { width: 210px; }

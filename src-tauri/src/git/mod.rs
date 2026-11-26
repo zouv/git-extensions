@@ -7,6 +7,7 @@ mod operations;
 pub mod rebase;
 pub mod repo;
 pub mod reset;
+pub mod stats;
 pub mod status;
 
 use std::path::{Component, Path, PathBuf};

@@ -5,7 +5,9 @@ export type IconName =
   | "conflict" | "copy" | "edit" | "external" | "fetch" | "file" | "folder"
   | "group" | "history" | "maximize" | "menu" | "minimize" | "more" | "navigate"
   | "panel" | "pin" | "plus" | "pull" | "push" | "refresh" | "repository" | "restore"
-  | "search" | "settings" | "stash" | "tag" | "trash" | "view" | "warning";
+  | "search" | "settings" | "stash" | "tag" | "trash" | "view" | "warning"
+  | "inline" | "split" | "full-context" | "collapse" | "wrap"
+  | "statistics" | "submodule";
 
 const paths: Record<IconName, ReactNode> = {
   branch: <><circle cx="6" cy="4" r="2"/><circle cx="6" cy="20" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 6v12M8 16c6 0 2-7 8-7h0M18 9v2"/></>,
@@ -45,6 +47,13 @@ const paths: Record<IconName, ReactNode> = {
   trash: <><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></>,
   view: <><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/></>,
   warning: <><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5m0 3v.01"/></>,
+  inline: <path d="M4 6h16M4 12h16M4 18h16"/>,
+  split: <path d="M3 6h7M3 12h7M3 18h7M14 6h7M14 12h7M14 18h7"/>,
+  "full-context": <><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M12 9v8m-2-2 2 2 2-2m-4-4 2-2 2 2"/></>,
+  collapse: <><path d="M4 12h16"/><path d="m8 4 4 4 4-4M8 20l4-4 4 4"/></>,
+  wrap: <><path d="M4 6h16M4 12h11a3 3 0 0 1 0 6h-3"/><path d="m14 15-2 3 2 3"/><path d="M4 18h6"/></>,
+  statistics: <path d="M5 20V11M12 20V4M19 20v-6M3 20h18"/>,
+  submodule: <><path d="M3 6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><rect x="12.5" y="12" width="6.5" height="6.5" rx="1.5"/></>,
 };
 
 export default function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
